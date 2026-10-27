@@ -18,7 +18,7 @@ from whisper_ditado.claude_cli import ClaudeError, NameSuggestion
 from whisper_ditado.events import EventBus
 from whisper_ditado.meeting.session import MeetingStateError
 from whisper_ditado.settings import Settings
-from whisper_ditado.store import Alert, Segment, Speaker, Store
+from whisper_ditado.store import Alert, Segment, Speaker, Store, Voice, VoiceEmbedding
 
 TOKEN = "segredo-de-teste"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -122,7 +122,8 @@ def make_meeting(ctx, *, status="ready", embedding=True):
     store.replace_transcript(
         m.id,
         [Speaker("sp-me", m.id, "Eu", None, True, 0, None),
-         Speaker("sp-a", m.id, "Falante 1", None, False, 1, emb),
+         Speaker("sp-a", m.id, "Falante 1", None, False, 1, emb,
+                 embedding_model="m" if embedding else None),
          Speaker("sp-b", m.id, "Falante 2", None, False, 2, None)],
         [Segment(None, m.id, "sp-me", "mic", 1.0, 3.0, "Bom dia, pessoal"),
          Segment(None, m.id, "sp-a", "pc", 3.5, 6.0, "Oi, me chamo Maria", dictated=True)],
@@ -317,12 +318,14 @@ def test_rename_merge_enroll(client, ctx):
     assert voice["name"] == "Maria" and voice["n_samples"] == 1
     sp = {s.id: s for s in ctx.store.get_speakers(mid)}["sp-a"]
     assert sp.voice_id == voice["id"] and sp.label == "Maria"
-    assert ctx.store.get_voice(voice["id"]).embedding is not None
+    assert set(ctx.store.get_voice(voice["id"]).embeddings) == {"m"}
+    assert ctx.store.get_voice(voice["id"]).embeddings["m"].n_samples == 1
     assert [v["id"] for v in client.get("/api/voices").json()] == [voice["id"]]
 
     # reforçar a voz existente com outro falante
     r = client.post("/api/speakers/sp-a/enroll", json={"voice_id": voice["id"]})
     assert r.status_code == 200 and r.json()["n_samples"] == 2
+    assert ctx.store.get_voice(voice["id"]).embeddings["m"].n_samples == 2
     assert client.post("/api/speakers/sp-a/enroll", json={"voice_id": "zzz"}).status_code == 404
 
     # sem embedding / sem corpo útil / falante desconhecido
@@ -330,6 +333,11 @@ def test_rename_merge_enroll(client, ctx):
     assert no_emb.status_code == 400 and isinstance(no_emb.json()["detail"], str)
     assert client.post("/api/speakers/sp-a/enroll", json={}).status_code == 400
     assert client.post("/api/speakers/zzz/enroll", json={"name": "x"}).status_code == 404
+    # embedding sem modelo conhecido não serve para cadastrar
+    ctx.store.update_speaker("sp-b", embedding=np.ones(4, np.float32))
+    no_model = client.post("/api/speakers/sp-b/enroll", json={"name": "Joao"})
+    assert no_model.status_code == 400
+    assert no_model.json()["detail"] == no_emb.json()["detail"]
 
     # mesclar
     r = client.post("/api/speakers/sp-b/merge", json={"into_speaker_id": "sp-a"})
@@ -348,11 +356,35 @@ def test_voices_rename_and_delete(client, ctx):
     voice = client.post("/api/speakers/sp-a/enroll", json={"name": "Maria"}).json()
     r = client.patch(f"/api/voices/{voice['id']}", json={"name": "Maria Silva"})
     assert r.status_code == 200 and r.json()["name"] == "Maria Silva"
+    assert r.json()["n_samples"] == 1
+    renamed = ctx.store.get_voice(voice["id"])
+    assert renamed.name == "Maria Silva" and renamed.embeddings["m"].n_samples == 1
     assert client.patch(f"/api/voices/{voice['id']}", json={"name": " "}).status_code == 400
     assert client.patch("/api/voices/zzz", json={"name": "x"}).status_code == 404
     assert client.delete(f"/api/voices/{voice['id']}").status_code == 200
     assert client.get("/api/voices").json() == []
     assert client.delete(f"/api/voices/{voice['id']}").status_code == 404
+
+
+def test_voices_report_samples_of_active_model(client, ctx):
+    ctx.store.upsert_voice(Voice(id="v1", name="Ana", embeddings={
+        "m1": VoiceEmbedding(np.ones(2, np.float32), 3),
+        "m2": VoiceEmbedding(np.ones(3, np.float32), 1),
+    }))
+    ctx.store.upsert_voice(Voice(id="v2", name="Bia"))
+    # sem diarizer: o maior número de amostras entre os modelos (0 sem nenhum)
+    got = {v["id"]: v["n_samples"] for v in client.get("/api/voices").json()}
+    assert got == {"v1": 3, "v2": 0}
+
+    ctx.diarizer = SimpleNamespace(chosen_model=lambda: "m2")
+    got = {v["id"]: v["n_samples"] for v in client.get("/api/voices").json()}
+    assert got == {"v1": 1, "v2": 0}
+
+    ctx.diarizer = SimpleNamespace(chosen_model=lambda: "m3")  # modelo sem amostras: o maior
+    assert client.get("/api/voices").json()[0]["n_samples"] == 3
+
+    ctx.diarizer = SimpleNamespace()  # sem `chosen_model`
+    assert client.get("/api/voices").json()[0]["n_samples"] == 3
 
 
 # -- Claude ---------------------------------------------------------------------------
@@ -398,7 +430,7 @@ def test_claude_error_is_502_with_message(client, ctx):
 
 
 def test_settings_validation_error_is_400_in_ptbr(client, ctx):
-    r = client.put("/api/settings", json={"voice_match_threshold": 5})
+    r = client.put("/api/settings", json={"voice_match_threshold_local": 5})
     assert r.status_code == 400
     assert r.json() == {"detail": "Limiar de reconhecimento de voz deve estar entre 0 e 1"}
     assert ctx.dictation.applied == 0

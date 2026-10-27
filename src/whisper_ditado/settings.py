@@ -32,6 +32,10 @@ DEFAULT_SUMMARY_PROMPT = (
     "e **Pendências**. Seja objetivo e não invente nada que não esteja na transcrição."
 )
 
+# Motores de separação de falantes. O local roda na CPU; o pyannote exige token do Hugging Face.
+DIARIZERS = ("local", "pyannote")
+DEFAULT_LOCAL_VOICE_THRESHOLD = 0.5  # provisório: calibrado com áudio real na Task 11
+
 DEFAULTS: dict[str, Any] = {
     "dictation_enabled": True,
     "dictation_evaluation_enabled": False,
@@ -49,7 +53,10 @@ DEFAULTS: dict[str, Any] = {
     "ydotool": "/usr/bin/ydotool",
     "auto_title": True,
     "summary_prompt": DEFAULT_SUMMARY_PROMPT,
-    "voice_match_threshold": 0.6,
+    "diarizer": "local",
+    # Cada motor tem o próprio modelo de embedding: o limiar de reconhecimento é por motor.
+    "voice_match_threshold_local": DEFAULT_LOCAL_VOICE_THRESHOLD,
+    "voice_match_threshold_pyannote": 0.6,
     "mic_device": None,
     "pc_device": None,
     "follow_call_app": True,
@@ -124,6 +131,16 @@ def _effort(value: Any) -> str | None:
     return value.strip()
 
 
+def threshold_key(engine: str) -> str:
+    """Chave do limiar de reconhecimento de voz do motor (`voice_match_threshold_<motor>`)."""
+    if engine not in DIARIZERS:
+        raise ValueError(f"Motor de separação inválido: {engine!r} (opções: {', '.join(DIARIZERS)})")
+    return f"voice_match_threshold_{engine}"
+
+
+_THRESHOLD_KEYS = {threshold_key(engine) for engine in DIARIZERS}
+
+
 def _validate(key: str, value: Any) -> Any:
     """Valida/normaliza um valor; levanta `ValueError` em pt-BR."""
     default = DEFAULTS[key]
@@ -149,7 +166,12 @@ def _validate(key: str, value: Any) -> Any:
         if value not in PASTE_KEYS:
             raise ValueError(f"Atalho de colar inválido: {value!r} (opções: {', '.join(PASTE_KEYS)})")
         return value
-    if key == "voice_match_threshold":
+    if key == "diarizer":
+        if value not in DIARIZERS:
+            raise ValueError(
+                f"Motor de separação inválido: {value!r} (opções: {', '.join(DIARIZERS)})")
+        return value
+    if key in _THRESHOLD_KEYS:
         number = _number(value, "Limiar de reconhecimento de voz")
         if not 0 <= number <= 1:
             raise ValueError("Limiar de reconhecimento de voz deve estar entre 0 e 1")
@@ -234,6 +256,8 @@ def _from_env(key: str, raw: str) -> Any:
         return [s.strip() for s in raw.split(",") if s.strip()]
     if key in MODEL_KEYS or key in EFFORT_KEYS or key == "issues_mcp_name":
         return _validate(key, raw)  # inválido levanta ValueError: `get` loga e usa o padrão
+    if key == "diarizer":
+        return _validate(key, raw.strip())
     if key == "prompt":
         return raw or None
     if key == "tasks_prompt":

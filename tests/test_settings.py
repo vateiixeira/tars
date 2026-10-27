@@ -16,7 +16,7 @@ _PREVIOUS_TASKS_PROMPTS = ("Padrão histórico sintético para testes de migraç
 def synthetic_legacy_prompt(monkeypatch):
     digest = hashlib.sha256(_PREVIOUS_TASKS_PROMPTS[0].encode()).hexdigest()
     monkeypatch.setattr(legacy, "LEGACY_PROMPT_HASHES", legacy.LEGACY_PROMPT_HASHES | {digest})
-from whisper_ditado.settings import DEFAULTS, DEFAULT_SUMMARY_PROMPT, Settings
+from whisper_ditado.settings import DEFAULTS, DEFAULT_SUMMARY_PROMPT, Settings, threshold_key
 from whisper_ditado.store import Store
 
 
@@ -107,9 +107,11 @@ def test_settings_validation_rejects_bad_key(settings, store):
     "changes, message",
     [
         ({"paste": "ctrl+x"}, "Atalho de colar inválido"),
-        ({"voice_match_threshold": 1.5}, "entre 0 e 1"),
-        ({"voice_match_threshold": -0.1}, "entre 0 e 1"),
-        ({"voice_match_threshold": "alto"}, "informe um número"),
+        ({"voice_match_threshold_local": 1.5}, "entre 0 e 1"),
+        ({"voice_match_threshold_pyannote": -0.1}, "entre 0 e 1"),
+        ({"voice_match_threshold_pyannote": "alto"}, "informe um número"),
+        ({"voice_match_threshold": 0.5}, "desconhecida"),
+        ({"diarizer": "gpu"}, "Motor de separação inválido"),
         ({"min_sec": -1}, "não pode ser negativa"),
         ({"max_sec": 0}, "maior que zero"),
         ({"min_sec": 10, "max_sec": 5}, "menor que a máxima"),
@@ -127,11 +129,37 @@ def test_validation_errors_are_ptbr_and_save_nothing(settings, store, changes, m
 
 
 def test_update_returns_dict_and_persists(settings, store):
-    out = settings.update({"paste": "ctrl+v", "voice_match_threshold": 1, "hf_token": "  "})
+    out = settings.update({"paste": "ctrl+v", "voice_match_threshold_pyannote": 1, "hf_token": "  "})
     assert out["paste"] == "ctrl+v"
-    assert store.get_setting("voice_match_threshold") == 1.0
+    assert store.get_setting("voice_match_threshold_pyannote") == 1.0
     assert store.get_setting("hf_token") is None  # texto vazio apaga
     assert settings.update({"prompt": ""})["prompt"] is None
+
+
+def test_diarizer_and_threshold_per_engine(settings, store, monkeypatch):
+    assert settings.get("diarizer") == "local"
+    assert settings.get("voice_match_threshold_local") == 0.5
+    assert settings.get("voice_match_threshold_pyannote") == 0.6
+    for engine in ("local", "pyannote"):
+        settings.update({"diarizer": engine})
+        assert store.get_setting("diarizer") == engine
+    with pytest.raises(ValueError, match=r"Motor de separação inválido: 'gpu' \(opções: local, pyannote\)"):
+        settings.update({"diarizer": "gpu"})
+    assert settings.get("diarizer") == "pyannote"
+    settings.update({"voice_match_threshold_local": 0.3})
+    assert settings.get("voice_match_threshold_local") == 0.3
+    assert threshold_key("local") == "voice_match_threshold_local"
+    assert threshold_key("pyannote") == "voice_match_threshold_pyannote"
+    with pytest.raises(ValueError):
+        threshold_key("x")
+
+
+def test_diarizer_from_env_is_validated(store, monkeypatch):
+    settings = Settings(store)
+    monkeypatch.setenv("DITADO_DIARIZER", " pyannote ")
+    assert settings.get("diarizer") == "pyannote"
+    monkeypatch.setenv("DITADO_DIARIZER", "gpu")
+    assert settings.get("diarizer") == "local"  # inválido no ambiente: loga e usa o padrão
 
 
 def test_min_max_validated_against_stored_values(settings):

@@ -17,7 +17,7 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -138,12 +138,36 @@ CREATE TABLE dictation_samples (
 CREATE INDEX dictation_samples_created ON dictation_samples(created_at);
 """
 
-# Índice = versão destino (`PRAGMA user_version` após aplicar).
 _SCHEMA_V5 = """
 ALTER TABLE dictation_samples ADD COLUMN raw_transcript TEXT;
 ALTER TABLE dictation_samples ADD COLUMN review_json TEXT;
 """
-_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5]
+
+# Embeddings de modelos diferentes nunca são comparados: cada voz guarda um por modelo.
+# Os existentes são do pyannote; as colunas `voices.embedding`/`voices.n_samples` ficam
+# como legado e não são mais lidas nem escritas. Quem já tinha token segue no pyannote.
+_SCHEMA_V6 = """
+CREATE TABLE voice_embeddings (
+    voice_id TEXT NOT NULL REFERENCES voices(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    n_samples INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT,
+    PRIMARY KEY (voice_id, model)
+);
+INSERT INTO voice_embeddings(voice_id, model, embedding, n_samples, updated_at)
+    SELECT id, 'pyannote-community-1', embedding, n_samples, updated_at FROM voices WHERE embedding IS NOT NULL;
+ALTER TABLE speakers ADD COLUMN embedding_model TEXT;
+UPDATE speakers SET embedding_model = 'pyannote-community-1' WHERE embedding IS NOT NULL;
+INSERT OR IGNORE INTO settings(key, value) SELECT 'diarizer', '"pyannote"'
+    WHERE EXISTS (SELECT 1 FROM settings WHERE key = 'hf_token' AND value NOT IN ('null', '""'));
+INSERT OR IGNORE INTO settings(key, value)
+    SELECT 'voice_match_threshold_pyannote', value FROM settings WHERE key = 'voice_match_threshold';
+DELETE FROM settings WHERE key = 'voice_match_threshold';
+"""
+
+# Índice = versão destino (`PRAGMA user_version` após aplicar).
+_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6]
 
 
 @dataclass
@@ -177,6 +201,7 @@ class Speaker:
     is_me: bool = False
     color_index: int = 0
     embedding: np.ndarray | None = None
+    embedding_model: str | None = None
 
 
 @dataclass
@@ -192,11 +217,17 @@ class Segment:
 
 
 @dataclass
+class VoiceEmbedding:
+    vector: np.ndarray
+    n_samples: int = 1
+    updated_at: datetime | None = None
+
+
+@dataclass
 class Voice:
     id: str
     name: str
-    embedding: np.ndarray | None = None
-    n_samples: int = 1
+    embeddings: dict[str, VoiceEmbedding] = field(default_factory=dict)  # modelo -> embedding
     source_meeting_id: str | None = None
     source_speaker_id: str | None = None
     created_at: datetime | None = None
@@ -305,6 +336,7 @@ _SPEAKER_FIELDS = {
     "is_me": int,
     "color_index": None,
     "embedding": _blob,
+    "embedding_model": None,
 }
 
 
@@ -472,6 +504,7 @@ class Store:
             id=row["id"], meeting_id=row["meeting_id"], label=row["label"],
             voice_id=row["voice_id"], is_me=bool(row["is_me"]),
             color_index=row["color_index"], embedding=_emb(row["embedding"]),
+            embedding_model=row["embedding_model"],
         )
 
     @staticmethod
@@ -495,10 +528,10 @@ class Store:
             c.execute("DELETE FROM speakers WHERE meeting_id=?", (meeting_id,))
             for sp in speakers:
                 c.execute(
-                    "INSERT INTO speakers(id, meeting_id, label, voice_id, is_me, color_index, embedding)"
-                    " VALUES (?,?,?,?,?,?,?)",
+                    "INSERT INTO speakers(id, meeting_id, label, voice_id, is_me, color_index,"
+                    " embedding, embedding_model) VALUES (?,?,?,?,?,?,?,?)",
                     (sp.id or uuid.uuid4().hex, meeting_id, sp.label, sp.voice_id,
-                     int(sp.is_me), sp.color_index, _blob(sp.embedding)),
+                     int(sp.is_me), sp.color_index, _blob(sp.embedding), sp.embedding_model),
                 )
             for sg in segments:
                 c.execute(
@@ -593,42 +626,87 @@ class Store:
     # -- vozes ----------------------------------------------------------
 
     @staticmethod
-    def _voice(row: sqlite3.Row) -> Voice:
+    def _voice(row: sqlite3.Row, embeddings: dict[str, VoiceEmbedding]) -> Voice:
         return Voice(
-            id=row["id"], name=row["name"], embedding=_emb(row["embedding"]),
-            n_samples=row["n_samples"], source_meeting_id=row["source_meeting_id"],
+            id=row["id"], name=row["name"], embeddings=embeddings,
+            source_meeting_id=row["source_meeting_id"],
             source_speaker_id=row["source_speaker_id"],
             created_at=_dt(row["created_at"]), updated_at=_dt(row["updated_at"]),
         )
 
+    def _voice_embeddings(self, voice_id: str | None = None) -> dict[str, dict[str, VoiceEmbedding]]:
+        """voice_id -> modelo -> embedding (de uma voz, ou de todas). Chamar sob o lock."""
+        sql = "SELECT * FROM voice_embeddings"
+        params: tuple = ()
+        if voice_id is not None:
+            sql += " WHERE voice_id=?"
+            params = (voice_id,)
+        out: dict[str, dict[str, VoiceEmbedding]] = {}
+        for r in self._conn.execute(sql + " ORDER BY model", params).fetchall():
+            out.setdefault(r["voice_id"], {})[r["model"]] = VoiceEmbedding(
+                _emb(r["embedding"]), r["n_samples"], _dt(r["updated_at"]))
+        return out
+
+    @staticmethod
+    def _put_voice_embedding(c: sqlite3.Connection, voice_id: str, model: str,
+                             emb: VoiceEmbedding) -> None:
+        c.execute(
+            "INSERT INTO voice_embeddings(voice_id, model, embedding, n_samples, updated_at)"
+            " VALUES (?,?,?,?,?) ON CONFLICT(voice_id, model) DO UPDATE SET"
+            " embedding=excluded.embedding, n_samples=excluded.n_samples,"
+            " updated_at=excluded.updated_at",
+            (voice_id, model, _blob(emb.vector), emb.n_samples, _iso(emb.updated_at)),
+        )
+
     def upsert_voice(self, voice: Voice) -> Voice:
-        """Insere ou atualiza a voz (id vazio gera um uuid4 hex). Retorna a voz gravada."""
+        """Insere ou atualiza a voz (id vazio gera um uuid4 hex). Retorna a voz gravada.
+
+        Grava cada item de `voice.embeddings`; modelos ausentes do dicionário não são apagados.
+        """
         vid = voice.id or uuid.uuid4().hex
         now = datetime.now()
         created = voice.created_at or now
         updated = voice.updated_at or now
         with self._tx() as c:
             c.execute(
-                "INSERT INTO voices(id, name, embedding, n_samples, source_meeting_id,"
-                " source_speaker_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)"
-                " ON CONFLICT(id) DO UPDATE SET name=excluded.name, embedding=excluded.embedding,"
-                " n_samples=excluded.n_samples, source_meeting_id=excluded.source_meeting_id,"
+                "INSERT INTO voices(id, name, source_meeting_id, source_speaker_id, created_at,"
+                " updated_at) VALUES (?,?,?,?,?,?)"
+                " ON CONFLICT(id) DO UPDATE SET name=excluded.name,"
+                " source_meeting_id=excluded.source_meeting_id,"
                 " source_speaker_id=excluded.source_speaker_id, updated_at=excluded.updated_at",
-                (vid, voice.name, _blob(voice.embedding), voice.n_samples,
-                 voice.source_meeting_id, voice.source_speaker_id,
+                (vid, voice.name, voice.source_meeting_id, voice.source_speaker_id,
                  created.isoformat(), updated.isoformat()),
             )
+            for model, emb in voice.embeddings.items():
+                self._put_voice_embedding(c, vid, model, emb)
         return self.get_voice(vid)
+
+    def set_voice_embedding(self, voice_id: str, model: str, emb: VoiceEmbedding) -> None:
+        """Grava (ou substitui) o embedding de um modelo da voz."""
+        with self._tx() as c:
+            self._put_voice_embedding(c, voice_id, model, emb)
 
     def list_voices(self) -> list[Voice]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM voices ORDER BY name, id").fetchall()
-        return [self._voice(r) for r in rows]
+            embeddings = self._voice_embeddings()
+        return [self._voice(r, embeddings.get(r["id"], {})) for r in rows]
 
     def get_voice(self, voice_id: str) -> Voice | None:
         with self._lock:
             row = self._conn.execute("SELECT * FROM voices WHERE id=?", (voice_id,)).fetchone()
-        return self._voice(row) if row else None
+            embeddings = self._voice_embeddings(voice_id) if row else {}
+        return self._voice(row, embeddings.get(voice_id, {})) if row else None
+
+    def linked_speakers(self, voice_id: str) -> list[Speaker]:
+        """Falantes (não "Você") ligados à voz, pela ordem das reuniões."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT sp.* FROM speakers sp JOIN meetings m ON m.id = sp.meeting_id"
+                " WHERE sp.voice_id=? AND sp.is_me=0 ORDER BY m.started_at, sp.rowid",
+                (voice_id,),
+            ).fetchall()
+        return [self._speaker(r) for r in rows]
 
     def delete_voice(self, voice_id: str) -> None:
         with self._tx() as c:

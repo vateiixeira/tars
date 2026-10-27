@@ -1,3 +1,5 @@
+import dataclasses
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -9,7 +11,7 @@ from whisper_ditado.meeting import finalize as fin
 from whisper_ditado.meeting.diarize import DiarizationResult, Diarizer
 from whisper_ditado.meeting.timeline import Turn
 from whisper_ditado.settings import Settings
-from whisper_ditado.store import Store, Voice
+from whisper_ditado.store import Store, Voice, VoiceEmbedding
 from whisper_ditado.transcriber import Word
 
 SR = 16000
@@ -55,9 +57,14 @@ class FakeTranscriber:
 
 
 class FakeDiarizer:
-    def __init__(self, result: DiarizationResult | None = None, available: bool = True):
+    """Devolve `result`, carimbando `model`/`engine` quando ele vier sem esses campos."""
+
+    def __init__(self, result: DiarizationResult | None = None, available: bool = True,
+                 model: str = "fake-model", engine: str = "local"):
         self.result = result or DiarizationResult()
         self._available = available
+        self.model = model
+        self.engine = engine
         self.calls = 0
 
     @property
@@ -66,7 +73,8 @@ class FakeDiarizer:
 
     def run(self, audio):
         self.calls += 1
-        return self.result
+        return dataclasses.replace(self.result, model=self.result.model or self.model,
+                                   engine=self.result.engine or self.engine)
 
 
 def w(start: float, text: str, dur: float = 0.4) -> Word:
@@ -117,8 +125,10 @@ def labels(store, mid):
 def test_finalize_builds_transcript_with_me_and_people(store, settings):
     mid, d = new_meeting(store, status="processing")
     e1, e2, e3 = (np.eye(4, dtype=np.float32)[i] for i in range(3))
-    joao = store.upsert_voice(Voice(id="v-joao", name="João", embedding=e3 * 0.9 + 0.01))
-    store.upsert_voice(Voice(id="v-ana", name="Ana", embedding=np.array([0, 0, 0, 1], np.float32)))
+    joao = store.upsert_voice(Voice(id="v-joao", name="João",
+                                    embeddings={"fake-model": VoiceEmbedding(e3 * 0.9 + 0.01)}))
+    store.upsert_voice(Voice(id="v-ana", name="Ana", embeddings={
+        "fake-model": VoiceEmbedding(np.array([0, 0, 0, 1], np.float32))}))
     words = {
         "mic": [w(0.5, "bom"), w(1.0, "dia")],
         "pc": [w(3.0, "oi"), w(3.5, "gente"), w(6.0, "tudo"), w(6.5, "certo"),
@@ -165,6 +175,75 @@ def test_finalize_builds_transcript_with_me_and_people(store, settings):
         assert (d / f"{name}.opus").stat().st_size > 0
         assert not (d / f"{name}.raw").exists()
     assert not list(d.glob("*.part"))
+
+
+def _two_speaker_case(store):
+    mid, _ = new_meeting(store)
+    e1, e2 = np.eye(3, dtype=np.float32)[0], np.eye(3, dtype=np.float32)[1]
+    store.upsert_voice(Voice(id="v-ana", name="Ana", embeddings={"fake-model": VoiceEmbedding(e1)}))
+    words = {"mic": [w(0.5, "oi")], "pc": [w(3.0, "bom"), w(6.0, "dia")]}
+    result = DiarizationResult([Turn(2.8, 3.6, "A"), Turn(5.8, 6.6, "B")], {"A": e1, "B": e2})
+    return mid, words, result
+
+
+def test_finalize_tags_speaker_embeddings_with_model(store, settings):
+    mid, words, result = _two_speaker_case(store)
+
+    fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(result), words, None)
+
+    speakers = {sp.label: sp for sp in store.get_speakers(mid)}
+    assert set(speakers) == {"Você", "Ana", "Pessoa 1"}
+    assert speakers["Ana"].voice_id == "v-ana"
+    for label in ("Ana", "Pessoa 1"):
+        assert speakers[label].embedding is not None
+        assert speakers[label].embedding_model == "fake-model"
+    assert speakers["Você"].embedding is None and speakers["Você"].embedding_model is None
+
+
+def test_finalize_skips_match_and_embedding_when_model_unknown(store, settings):
+    mid, words, result = _two_speaker_case(store)
+
+    fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(result, model=""), words, None)
+
+    assert store.get_meeting(mid).status == "ready"
+    speakers = store.get_speakers(mid)
+    assert sorted(sp.label for sp in speakers) == ["Pessoa 1", "Pessoa 2", "Você"]
+    assert all(sp.voice_id is None for sp in speakers)
+    assert all(sp.embedding is None and sp.embedding_model is None for sp in speakers)
+
+
+def test_finalize_unknown_engine_keeps_embedding_but_skips_match(store, settings, caplog):
+    mid, words, result = _two_speaker_case(store)
+
+    with caplog.at_level(logging.WARNING, logger="ditado"):
+        fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(result, engine="gpu"),
+                     words, None)
+
+    assert store.get_meeting(mid).status == "ready"
+    speakers = [sp for sp in store.get_speakers(mid) if not sp.is_me]
+    assert all(sp.voice_id is None for sp in speakers)
+    assert all(sp.embedding_model == "fake-model" for sp in speakers)
+    assert any("gpu" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("engine, local, pyannote, matched", [
+    ("local", 0.6, 0.9, True),
+    ("local", 0.8, 0.5, False),
+    ("pyannote", 0.8, 0.5, True),
+    ("pyannote", 0.5, 0.8, False),
+])
+def test_finalize_uses_threshold_of_the_engine(store, settings, engine, local, pyannote, matched):
+    mid, words, result = _two_speaker_case(store)
+    # A fica com cosseno ~0.707 em relação à Ana; B é ortogonal
+    result = dataclasses.replace(result, embeddings={"A": np.array([1, 0, 1], np.float32),
+                                                    "B": np.eye(3, dtype=np.float32)[1]})
+    settings.update({"voice_match_threshold_local": local, "voice_match_threshold_pyannote": pyannote})
+
+    fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(result, engine=engine),
+                 words, None)
+
+    voice_ids = {sp.voice_id for sp in store.get_speakers(mid)} - {None}
+    assert voice_ids == ({"v-ana"} if matched else set())
 
 
 def test_finalize_words_without_turn_go_to_nearest_speaker(store, settings):

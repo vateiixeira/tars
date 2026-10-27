@@ -1,9 +1,14 @@
 from datetime import datetime, timedelta
 
+import json
+import sqlite3
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
-from whisper_ditado.store import Alert, MeetingBusy, Segment, Speaker, Store, Voice
+from whisper_ditado import store as store_mod
+from whisper_ditado.store import Alert, MeetingBusy, Segment, Speaker, Store, Voice, VoiceEmbedding
 
 T0 = datetime(2026, 10, 19, 10, 0, 0)
 
@@ -30,14 +35,15 @@ def test_migrations_create_schema_and_file_is_private(tmp_path):
     path = tmp_path / "t.db"
     s = Store(path)
     assert path.stat().st_mode & 0o777 == 0o600
-    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 6
     names = {r[0] for r in s._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"meetings", "speakers", "segments", "summaries", "voices", "alerts",
-            "dictation_spans", "settings", "meeting_jobs", "task_suggestions", "dictation_samples"} <= names
+            "dictation_spans", "settings", "meeting_jobs", "task_suggestions", "dictation_samples",
+            "voice_embeddings"} <= names
     s.close()
     # reabrir é idempotente
     s2 = Store(path)
-    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 6
     s2.close()
 
 
@@ -165,17 +171,20 @@ def test_merge_speakers_moves_segments(store):
 
 def test_voice_embedding_roundtrip(store):
     emb = np.random.default_rng(0).normal(size=192).astype(np.float32)
-    v = Voice(id="v1", name="Ana", embedding=emb, n_samples=2,
+    v = Voice(id="v1", name="Ana", embeddings={"m1": VoiceEmbedding(emb, 2, T0)},
               source_meeting_id="m", source_speaker_id="s",
               created_at=T0, updated_at=T0)
     store.upsert_voice(v)
     got = store.get_voice("v1")
-    assert got.name == "Ana" and got.n_samples == 2 and got.created_at == T0
-    assert np.allclose(got.embedding, emb)
+    assert got.name == "Ana" and got.created_at == T0
+    assert set(got.embeddings) == {"m1"}
+    assert got.embeddings["m1"].n_samples == 2 and got.embeddings["m1"].updated_at == T0
+    assert got.embeddings["m1"].vector.dtype == np.float32
+    assert np.allclose(got.embeddings["m1"].vector, emb)
 
-    store.upsert_voice(Voice(id="v1", name="Ana B", embedding=None, n_samples=3,
-                             created_at=T0, updated_at=T0 + timedelta(hours=1)))
-    assert store.get_voice("v1").name == "Ana B" and store.get_voice("v1").embedding is None
+    store.upsert_voice(Voice(id="v1", name="Ana B", created_at=T0, updated_at=T0 + timedelta(hours=1)))
+    got = store.get_voice("v1")
+    assert got.name == "Ana B" and set(got.embeddings) == {"m1"}  # modelos ausentes ficam
     assert [x.id for x in store.list_voices()] == ["v1"]
 
     m = store.create_meeting(T0)
@@ -183,6 +192,109 @@ def test_voice_embedding_roundtrip(store):
     store.delete_voice("v1")
     assert store.get_voice("v1") is None
     assert store.get_speakers(m.id)[0].voice_id is None  # ON DELETE SET NULL
+
+
+def test_voice_embeddings_per_model_roundtrip_and_cascade(store):
+    store.upsert_voice(Voice(id="v1", name="Ana", created_at=T0, updated_at=T0))
+    store.upsert_voice(Voice(id="v2", name="Bia", created_at=T0, updated_at=T0))
+    store.set_voice_embedding("v1", "m1", VoiceEmbedding(np.array([1, 0], np.float32), 3, T0))
+    store.set_voice_embedding("v1", "m2", VoiceEmbedding(np.array([0, 1, 0], np.float32), 1, T0))
+    store.set_voice_embedding("v2", "m1", VoiceEmbedding(np.array([0, 1], np.float32)))
+    # upsert de uma linha: o mesmo modelo é substituído
+    store.set_voice_embedding("v1", "m2", VoiceEmbedding(np.array([0, 0, 1], np.float32), 2, T0))
+
+    v = store.list_voices()[0]
+    assert v.id == "v1" and set(v.embeddings) == {"m1", "m2"}
+    assert v.embeddings["m1"].n_samples == 3 and np.allclose(v.embeddings["m1"].vector, [1, 0])
+    assert v.embeddings["m2"].n_samples == 2 and np.allclose(v.embeddings["m2"].vector, [0, 0, 1])
+
+    store.upsert_voice(replace(v, name="X", embeddings={}))
+    got = store.get_voice("v1")
+    assert got.name == "X" and set(got.embeddings) == {"m1", "m2"}
+
+    m = store.create_meeting(T0)
+    store.replace_transcript(m.id, [
+        _spk(m.id, "s-me", is_me=True, voice_id="v1"),
+        _spk(m.id, "s-a", voice_id="v1", embedding=np.ones(2, np.float32), embedding_model="m1"),
+        _spk(m.id, "s-b", voice_id="v2"),
+        _spk(m.id, "s-c", voice_id="v1"),
+    ], [])
+    linked = store.linked_speakers("v1")
+    assert [s.id for s in linked] == ["s-a", "s-c"]
+    assert linked[0].embedding_model == "m1" and linked[1].embedding_model is None
+
+    store.delete_voice("v1")
+    rows = store._conn.execute("SELECT voice_id FROM voice_embeddings").fetchall()
+    assert [r[0] for r in rows] == ["v2"]
+
+
+def test_linked_speakers_orders_by_meeting_start(store):
+    store.upsert_voice(Voice(id="v1", name="Ana"))
+    late = store.create_meeting(T0 + timedelta(days=1))
+    early = store.create_meeting(T0)
+    store.replace_transcript(late.id, [_spk(late.id, "s-late", voice_id="v1")], [])
+    store.replace_transcript(early.id, [_spk(early.id, "s-early2", voice_id="v1"),
+                                        _spk(early.id, "s-early1", voice_id="v1")], [])
+    assert [s.id for s in store.linked_speakers("v1")] == ["s-early2", "s-early1", "s-late"]
+
+
+def _store_at_v5(path):
+    conn = sqlite3.connect(path)
+    for target, script in enumerate(store_mod._MIGRATIONS[:5], start=1):
+        script = script() if callable(script) else script
+        conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version={target};\nCOMMIT;")
+    return conn
+
+
+def test_migration_v6_tags_existing_embeddings_and_settings(tmp_path):
+    path = tmp_path / "v5.db"
+    conn = _store_at_v5(path)
+    vec = np.random.default_rng(1).normal(size=256).astype(np.float32)
+    conn.execute("INSERT INTO meetings(id, started_at) VALUES ('m1', ?)", (T0.isoformat(),))
+    conn.execute(
+        "INSERT INTO voices(id, name, embedding, n_samples, created_at, updated_at)"
+        " VALUES ('v1', 'Ana', ?, 4, ?, ?)", (vec.tobytes(), T0.isoformat(), T0.isoformat()))
+    conn.execute("INSERT INTO voices(id, name) VALUES ('v2', 'Bia')")
+    conn.execute("INSERT INTO speakers(id, meeting_id, embedding) VALUES ('s1', 'm1', ?)",
+                 (vec.tobytes(),))
+    conn.execute("INSERT INTO speakers(id, meeting_id) VALUES ('s2', 'm1')")
+    conn.executemany("INSERT INTO settings(key, value) VALUES (?, ?)",
+                     [("hf_token", json.dumps("hf_x")), ("voice_match_threshold", json.dumps(0.7))])
+    conn.commit()
+    conn.close()
+
+    s = Store(path)
+    try:
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        v1 = s.get_voice("v1")
+        assert set(v1.embeddings) == {"pyannote-community-1"}
+        emb = v1.embeddings["pyannote-community-1"]
+        assert emb.n_samples == 4 and emb.updated_at == T0
+        np.testing.assert_array_equal(emb.vector, vec)
+        assert s.get_voice("v2").embeddings == {}
+        speakers = {sp.id: sp for sp in s.get_speakers("m1")}
+        assert speakers["s1"].embedding_model == "pyannote-community-1"
+        assert speakers["s2"].embedding_model is None
+        assert s.get_setting("diarizer") == "pyannote"
+        assert s.get_setting("voice_match_threshold_pyannote") == 0.7
+        assert s.get_setting("voice_match_threshold") is None
+    finally:
+        s.close()
+
+
+def test_migration_v6_without_token_keeps_local_default(tmp_path):
+    path = tmp_path / "v5.db"
+    conn = _store_at_v5(path)
+    conn.execute("INSERT INTO settings(key, value) VALUES ('hf_token', 'null')")
+    conn.commit()
+    conn.close()
+
+    s = Store(path)
+    try:
+        assert s.get_setting("diarizer", "ausente") == "ausente"
+        assert s.get_setting("voice_match_threshold_pyannote", "ausente") == "ausente"
+    finally:
+        s.close()
 
 
 def test_meetings_with_status(store):

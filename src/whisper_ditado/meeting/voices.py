@@ -7,7 +7,7 @@ from datetime import datetime
 
 import numpy as np
 
-from whisper_ditado.store import Voice
+from whisper_ditado.store import Voice, VoiceEmbedding
 
 
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
@@ -29,17 +29,19 @@ def match_speakers(
     speaker_embs: dict[str, np.ndarray],
     voices: list[Voice],
     threshold: float,
+    model: str,
 ) -> dict[str, str]:
     """Casa falantes com vozes conhecidas (speaker -> voice_id).
 
-    Guloso pela maior similaridade; cada voz e cada falante são usados no
-    máximo uma vez, e só pares com similaridade >= threshold entram.
+    Só compara com o embedding da voz do mesmo `model` dos falantes. Guloso pela maior
+    similaridade; cada voz e cada falante são usados no máximo uma vez, e só pares com
+    similaridade >= threshold entram.
     """
     pairs = [
-        (cosine(emb, voice.embedding), speaker, voice.id)
+        (cosine(emb, voice.embeddings[model].vector), speaker, voice.id)
         for speaker, emb in speaker_embs.items()
         for voice in voices
-        if voice.embedding is not None
+        if model in voice.embeddings
     ]
     pairs.sort(key=lambda p: p[0], reverse=True)
     result: dict[str, str] = {}
@@ -58,35 +60,31 @@ def enroll(
     voice: Voice | None,
     name: str,
     emb: np.ndarray,
+    model: str,
     source_meeting_id: str,
     source_speaker_id: str,
 ) -> Voice:
-    """Cadastra uma voz nova ou atualiza a média corrente de uma existente."""
+    """Cadastra uma voz nova ou atualiza a média corrente do embedding `model` de uma existente.
+
+    Os embeddings dos outros modelos ficam intactos.
+    """
     now = datetime.now()
     if voice is None:
         return Voice(
             id=uuid.uuid4().hex,
             name=name,
-            embedding=_normalized(emb),
-            n_samples=1,
+            embeddings={model: VoiceEmbedding(_normalized(emb), 1, now)},
             source_meeting_id=source_meeting_id,
             source_speaker_id=source_speaker_id,
             created_at=now,
             updated_at=now,
         )
-    if voice.embedding is None:
-        return dataclasses.replace(
-            voice,
-            embedding=_normalized(emb),
-            n_samples=1,
-            updated_at=now,
-        )
-    n = voice.n_samples
-    # A voz salva é unitária; o `emb` novo (centróide cru) também precisa ser, senão domina a média.
-    mean = (voice.embedding.astype(np.float32) * n + _normalized(emb)) / (n + 1)
-    return dataclasses.replace(
-        voice,
-        embedding=_normalized(mean),
-        n_samples=n + 1,
-        updated_at=now,
-    )
+    current = voice.embeddings.get(model)
+    if current is None:
+        item = VoiceEmbedding(_normalized(emb), 1, now)
+    else:
+        n = current.n_samples
+        # A voz salva é unitária; o `emb` novo (centróide cru) também precisa ser, senão domina a média.
+        mean = (current.vector.astype(np.float32) * n + _normalized(emb)) / (n + 1)
+        item = VoiceEmbedding(_normalized(mean), n + 1, now)
+    return dataclasses.replace(voice, embeddings={**voice.embeddings, model: item}, updated_at=now)

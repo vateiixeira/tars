@@ -37,7 +37,7 @@ def test_migrations_on_existing_v1_db(tmp_path):
     conn.close()
     s = Store(path)
     try:
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert s.get_meeting("m1").title == "Antiga"
         assert s.list_tasks("m1") == [] and s.get_job("m1", "tasks") is None
     finally:

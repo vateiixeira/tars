@@ -142,9 +142,20 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-def _voice_json(v: Voice) -> dict:
-    return {"id": v.id, "name": v.name, "n_samples": v.n_samples,
+def _voice_json(v: Voice, model: str | None = None) -> dict:
+    """`n_samples` é o do modelo ativo; sem ele (ou sem amostras dele), o maior entre os modelos."""
+    if model in v.embeddings:
+        n_samples = v.embeddings[model].n_samples
+    else:
+        n_samples = max((e.n_samples for e in v.embeddings.values()), default=0)
+    return {"id": v.id, "name": v.name, "n_samples": n_samples,
             "created_at": _iso(v.created_at), "updated_at": _iso(v.updated_at)}
+
+
+def _active_model(ctx: AppContext) -> str | None:
+    """Modelo de embedding do motor de separação escolhido, se o diarizer souber dizer."""
+    chosen = getattr(ctx.diarizer, "chosen_model", None)
+    return chosen() if callable(chosen) else None
 
 
 def build_status(ctx: AppContext) -> dict:
@@ -489,17 +500,19 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         if not name and not body.voice_id:
             raise HTTPException(400, "Informe o nome da voz nova ou a voz existente")
         existing = get_voice(body.voice_id) if body.voice_id else None
-        if sp.embedding is None:
+        if sp.embedding is None or not sp.embedding_model:
             raise HTTPException(400, "Este falante não tem uma amostra de voz para cadastrar")
         voice = voice_matching.enroll(
-            existing, existing.name if existing else name, sp.embedding, sp.meeting_id, sp.id)
+            existing, existing.name if existing else name, sp.embedding, sp.embedding_model,
+            sp.meeting_id, sp.id)
         voice = store.upsert_voice(voice)
         store.update_speaker(sp.id, voice_id=voice.id, label=voice.name)
-        return _voice_json(voice)
+        return _voice_json(voice, _active_model(ctx))
 
     @router.get("/voices")
     def list_voices() -> list[dict]:
-        return [_voice_json(v) for v in store.list_voices()]
+        model = _active_model(ctx)
+        return [_voice_json(v, model) for v in store.list_voices()]
 
     @router.patch("/voices/{voice_id}")
     def rename_voice(voice_id: str, body: NameBody) -> dict:
@@ -507,8 +520,9 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         name = body.name.strip()
         if not name:
             raise HTTPException(400, "O nome da voz não pode ficar vazio")
-        voice = dataclasses.replace(voice, name=name, updated_at=datetime.now())
-        return _voice_json(store.upsert_voice(voice))
+        # `embeddings={}`: o upsert não reescreve os embeddings que já estão no banco
+        voice = dataclasses.replace(voice, name=name, embeddings={}, updated_at=datetime.now())
+        return _voice_json(store.upsert_voice(voice), _active_model(ctx))
 
     @router.delete("/voices/{voice_id}")
     def delete_voice(voice_id: str) -> dict:
