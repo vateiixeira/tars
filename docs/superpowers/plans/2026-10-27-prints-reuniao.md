@@ -860,7 +860,7 @@ git commit -m "[UI] Adicionar aba Prints, selo na transcrição e export com ima
   - `client.updateTask` aceita `print_ids`.
   - `TaskCard` ganha a prop `prints: MeetingPrint[]` (os da reunião), e o `TasksTab` repassa os da reunião.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```ts
 // TasksTab.test.ts
@@ -878,12 +878,12 @@ it("mostra pasta só no modo Flameshot e atalho só no modo Nativo", ...)
 it("salva print_mode, print_folder e print_key", ...)
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `cd app && pnpm test -- TasksTab TaskCard MeetingsSection`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - `TasksTab`:
   - O botão mostra `scan === null ? "Levantar tarefas" : "Refazer sugestões"`.
@@ -896,12 +896,12 @@ Expected: FAIL
   - No modo Flameshot, o campo "Pasta dos prints", com a dica "Vazio usa a pasta de Imagens. Os arquivos criados durante a reunião são copiados ao finalizar; os originais não são alterados."
   - No modo Nativo, o campo "Atalho do print", com a dica "Funciona só durante uma reunião. Captura todos os monitores e toca um som curto."
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `cd app && pnpm test && pnpm build`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src
