@@ -644,6 +644,20 @@ def test_reprocess_inherited_voice_is_not_matched_again(store, settings):
     assert speakers == {"Ana": "v-ana", "Bia": "v-bia"}
 
 
+def test_reprocess_inherited_voice_is_excluded_from_matching(store, settings):
+    mid = _linked_meeting(store)
+    e = np.eye(4, dtype=np.float32)
+    settings.update({"voice_match_threshold_local": 0.1})
+    # X herda a Ana pelo tempo; Y tem o mesmo embedding da Ana, mas a Ana já está tomada
+    result = DiarizationResult([Turn(2.0, 4.0, "X"), Turn(6.0, 7.0, "Y")], {"X": e[1], "Y": e[0]})
+    words = [w(2.2, "oi", dur=1.5), w(6.1, "tchau")]
+
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=words), FakeDiarizer(result), None)
+
+    speakers = sorted((sp.label, sp.voice_id) for sp in store.get_speakers(mid))
+    assert speakers == [("Ana", "v-ana"), ("Pessoa 1", None)]
+
+
 def test_reprocess_without_diarization_does_not_inherit(store, settings):
     mid = _linked_meeting(store)
     words = [w(2.2, "oi"), w(6.1, "tchau")]
