@@ -275,7 +275,7 @@ ao lado do serviço, use `--no-dictation` e outra porta.
   conferência no MCP de issues. Confira as tarefas incertas antes de excluir, para preservar o resultado
   de uma criação que pode já ter sido enviada.
 - **Reprocessar** recria a transcrição e os falantes. Os vínculos com vozes cadastradas são
-  mantidos; nomes editados sem voz e mesclagens são refeitos. O app pede confirmação quando já
+  mantidos pelo trecho de fala, um falante por voz; nomes editados sem voz e mesclagens são refeitos. O app pede confirmação quando já
   existem falantes. Vozes cadastradas, título editado, resumo e sugestões de tarefas são mantidos;
   resumo e levantamento só são refeitos pelos seus botões.
 - **Configurações** pela API (`GET/PUT /api/settings`); as variáveis `DITADO_*` acima continuam

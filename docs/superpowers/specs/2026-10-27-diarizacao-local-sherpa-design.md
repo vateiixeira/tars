@@ -39,8 +39,8 @@ para quem já tem o token ou prefere a qualidade dele.
 
 ## 4. Anti-objetivos (seria falha mesmo funcionando)
 
-- Pedir para o usuário recadastrar as 6 vozes atuais (Alessandro, Evaldo, Will, Lucas Vieira,
-  Miguel, Bia - Pegasus) ou perder o vínculo delas com falantes de reuniões antigas.
+- Pedir para o usuário recadastrar as 6 vozes atuais ou perder o vínculo delas com falantes de
+  reuniões antigas.
 - Comparar embedding de um modelo com embedding de outro (dá similaridade sem sentido e casa a voz
   errada, silenciosamente).
 - Reunião que sai com um falante só porque o pyannote falhou, quando o motor local poderia ter
@@ -106,8 +106,8 @@ para quem já tem o token ou prefere a qualidade dele.
   (`voice_match_threshold` entre 0 e 1).
 - Dados reais hoje: 10 reuniões, todas `ready`, todas com `pc.opus` em
   `~/.local/share/whisper-ditado/meetings/<id>/` (41 MB no total; o áudio não é apagado após a
-  finalização). 6 vozes, todas com embedding de 256 floats (`n_samples`: Alessandro 4, Will 2, as
-  outras 1). 20 falantes com embedding, 18 deles ligados a vozes, em 9 reuniões. `hf_token` está
+  finalização). 6 vozes, todas com embedding de 256 floats (`n_samples`: uma voz com 4, uma com 2,
+  as outras com 1). 20 falantes com embedding, 18 deles ligados a vozes, em 9 reuniões. `hf_token` está
   salvo no banco; `voice_match_threshold` não foi editado (vale o padrão 0.6).
 
 **Dependências, CI e release**
