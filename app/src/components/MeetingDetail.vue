@@ -92,6 +92,7 @@ const tasksActive = computed(() => tab.value === "tasks" && meeting.value?.statu
 const tasksBack = ref<HTMLButtonElement | null>(null);
 function openTasks(): void {
   if (tab.value !== "tasks") previousTab.value = tab.value;
+  printFocus.value = null; // ao voltar, a aba Prints não deve rolar de novo até o print antigo
   menuOpen.value = false;
   speakerMenu.value = null;
   tab.value = "tasks";
@@ -128,6 +129,11 @@ function openPrint(id: string): void {
   tab.value = "prints";
   void nextTick(() => document.getElementById("tab-prints")?.focus());
 }
+// Troca de aba feita pela pessoa (clique ou teclado): o destaque vindo do selo deixa de valer.
+function selectTab(id: MeetingTab): void {
+  printFocus.value = null;
+  tab.value = id;
+}
 function onTabKey(event: KeyboardEvent, index: number) {
   let next = index;
   const tabs = detailTabs.value;
@@ -138,7 +144,7 @@ function onTabKey(event: KeyboardEvent, index: number) {
   else if (event.key === "End") next = tabs.length - 1;
   else return;
   event.preventDefault();
-  tab.value = tabs[next]!.id;
+  selectTab(tabs[next]!.id);
   void nextTick(() => document.getElementById(`tab-${tab.value}`)?.focus());
 }
 // Reunião cuja aba Tarefas já foi aberta: a aba fica montada daí em diante (até trocar de reunião).
@@ -744,7 +750,7 @@ onBeforeUnmount(() => {
               :aria-selected="tab === item.id"
               :aria-controls="`panel-${item.id}`"
               :tabindex="tab === item.id ? 0 : -1"
-              @click="tab = item.id"
+              @click="selectTab(item.id)"
               @keydown="onTabKey($event, index)"
             >
               {{ item.label }}

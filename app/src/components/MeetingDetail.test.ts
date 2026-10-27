@@ -197,6 +197,50 @@ describe("MeetingDetail", () => {
     expect(w.get(".print.focused").text()).toContain("P9");
   });
 
+  it("trocar de aba à mão apaga o destaque do print vindo do selo", async () => {
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const { w } = await mountDetail(detail({ prints: [aPrint({ id: "p9", label: "P9", at_s: 33 })] }), { printBlob });
+    await w.get(".print-badge").trigger("click");
+    await flushPromises();
+    expect(w.find(".print.focused").exists()).toBe(true);
+    await w.get("#tab-transcript").trigger("click");
+    await w.get("#tab-prints").trigger("click");
+    await flushPromises();
+    expect(w.find(".print").exists()).toBe(true);
+    expect(w.find(".print.focused").exists()).toBe(false);
+
+    await w.get("#tab-transcript").trigger("click");
+    await flushPromises();
+    await w.get(".print-badge").trigger("click");
+    await flushPromises();
+    expect(w.find(".print.focused").exists()).toBe(true);
+    await w.get("#tab-prints").trigger("keydown", { key: "ArrowLeft" }); // para a Transcrição
+    await w.get("#tab-transcript").trigger("keydown", { key: "ArrowRight" }); // e de volta
+    await flushPromises();
+    expect(w.get("#tab-prints").attributes("aria-selected")).toBe("true");
+    expect(w.find(".print.focused").exists()).toBe(false);
+  });
+
+  it("ir às Tarefas e voltar também apaga o destaque do print", async () => {
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const listTasks = vi.fn(async () => ({ enabled: false, scan: null, items: [] }));
+    const issueOptions = vi.fn(async () => {
+      throw new Error("desligado");
+    });
+    const { w } = await mountDetail(detail({ prints: [aPrint({ id: "p9", label: "P9", at_s: 33 })] }),
+      { printBlob, listTasks, issueOptions });
+    await w.get(".print-badge").trigger("click");
+    await flushPromises();
+    expect(w.find(".print.focused").exists()).toBe(true);
+    await w.get("#open-tasks").trigger("click");
+    await flushPromises();
+    await w.get(".tasks-head button").trigger("click");
+    await flushPromises();
+    expect(w.get("#tab-prints").attributes("aria-selected")).toBe("true");
+    expect(w.find(".print").exists()).toBe(true);
+    expect(w.find(".print.focused").exists()).toBe(false);
+  });
+
   it("ouvir o momento de um print toca só a fala dele", async () => {
     const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
     const printBlob = vi.fn(async () => new Blob(["i"]));
