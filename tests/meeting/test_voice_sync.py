@@ -46,7 +46,13 @@ def test_ensure_builds_missing_model_from_linked_speakers(store):
     make_voice(store)
     m1, m2 = add_meeting(store, "v1"), add_meeting(store, "v1")
     outputs = iter([unit(1, 0), unit(0, 1)])
-    sync = VoiceSync(lambda mid: AUDIO)
+    loads = []
+
+    def load_pc(mid):
+        loads.append(mid)
+        return AUDIO
+
+    sync = VoiceSync(load_pc)
 
     updated = sync.ensure(store, NEW, lambda audio, spans: next(outputs))
 
@@ -55,7 +61,7 @@ def test_ensure_builds_missing_model_from_linked_speakers(store):
     np.testing.assert_allclose(voice.embeddings[NEW].vector, unit(1, 1), atol=1e-6)
     assert voice.embeddings[NEW].n_samples == 2
     np.testing.assert_allclose(voice.embeddings[OLD].vector, unit(0, 0, 1))
-    assert {m1, m2}
+    assert sorted(loads) == sorted([m1, m2])
 
 
 def test_ensure_uses_only_pc_segments_of_that_speaker(store):
@@ -120,12 +126,14 @@ def test_ensure_skips_missing_audio_and_short_samples(store):
     assert len(loads) == 3
 
 
-def test_ensure_skips_exceptions_and_keeps_going(store, caplog):
+def test_ensure_skips_exceptions_and_retries_them_next_time(store, caplog):
     make_voice(store)
     bad = add_meeting(store, "v1")
     good = add_meeting(store, "v1")
+    loads = []
 
     def load_pc(mid):
+        loads.append(mid)
         if mid == bad:
             raise OSError("ffmpeg quebrou")
         return AUDIO
@@ -135,11 +143,41 @@ def test_ensure_skips_exceptions_and_keeps_going(store, caplog):
 
     sync = VoiceSync(load_pc)
     assert sync.ensure(store, NEW, embed) == []
-
-    calls = []
-    assert sync.ensure(store, NEW, lambda a, s: calls.append(1) or unit(1, 0)) == []  # memoizado
-    assert not calls and good
+    assert NEW not in store.get_voice("v1").embeddings
     assert "ffmpeg quebrou" in caplog.text and "sem modelo" in caplog.text
+    assert sorted(loads) == sorted([bad, good])
+
+    # erro transitório não é memorizado: a próxima chamada tenta de novo e agora funciona
+    assert sync.ensure(store, NEW, lambda a, s: unit(1, 0)) == ["v1"]
+    assert store.get_voice("v1").embeddings[NEW].n_samples == 1  # só a reunião `good`
+
+
+def test_ensure_loads_one_meeting_at_a_time(store):
+    make_voice(store)
+    add_meeting(store, "v1")
+    add_meeting(store, "v1")
+    alive = []  # áudios ainda referenciados enquanto o seguinte é carregado
+    import weakref
+
+    def load_pc(mid):
+        alive[:] = [ref for ref in alive if ref() is not None]
+        assert not alive, "áudio da reunião anterior ainda está na memória"
+        audio = np.ones(1600, dtype=np.float32)
+        alive.append(weakref.ref(audio))
+        return audio
+
+    assert VoiceSync(load_pc).ensure(store, NEW, lambda a, s: unit(1, 0)) == ["v1"]
+
+
+def test_ensure_ignores_degenerate_vectors(store):
+    make_voice(store)
+    add_meeting(store, "v1")
+    add_meeting(store, "v1")
+    outputs = iter([np.array([np.nan, 1.0], np.float32), np.zeros(2, np.float32)])
+    sync = VoiceSync(lambda mid: AUDIO)
+
+    assert sync.ensure(store, NEW, lambda a, s: next(outputs)) == []
+    assert NEW not in store.get_voice("v1").embeddings
 
 
 def test_ensure_partial_failure_still_uses_good_samples(store):

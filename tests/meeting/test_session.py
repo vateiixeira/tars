@@ -615,16 +615,24 @@ def test_voice_embedding_recompute_waits_for_dictation(store, settings):
     def gate():
         log.append("gate")
 
-    diarizer = FakeDiarizer(DiarizationResult(embed=embed))
+    class LoggingDiarizer(FakeDiarizer):
+        def run(self, audio):
+            log.append("diarize")
+            return super().run(audio)
+
+    diarizer = LoggingDiarizer(DiarizationResult(embed=embed))
     rig = Rig(store, settings, diarizer=diarizer, gpu_gate=gate)
     rig.start()
     rig.advance(1.0)
     rig.manager.stop()
     assert rig.manager.wait_idle(10)
     assert "embed" in log
+    # o `gate` do `run` vem antes do "diarize"; cada `embed` tem o seu próprio `gate` depois dele
+    last_diarize = log.index("diarize")
     for i, entry in enumerate(log):
         if entry == "embed":
             assert log[i - 1] == "gate"
+            assert i - 1 > last_diarize
     assert "fake-model" in store.get_voice("v1").embeddings
 
 
