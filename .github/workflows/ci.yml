@@ -23,7 +23,9 @@ jobs:
           version: "0.11.29"
       - run: python3 scripts/release.py check
       - run: uv python install 3.12
-      - run: uv sync --frozen --group dev --python 3.12
+      - name: Instalação padrão sem torch
+        run: "! uv export --frozen --no-dev --no-hashes | grep -E '^(torch|torchaudio|pyannote-audio)=='"
+      - run: uv sync --frozen --group dev --extra pyannote --python 3.12
       - run: uv run --frozen pytest -q
   desktop:
     runs-on: ubuntu-24.04
