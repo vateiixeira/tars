@@ -158,7 +158,7 @@ Comportamento de `ensure_model`:
 5. `os.replace(part, final)`. Em qualquer falha, apaga os `.part` e levanta
    `ModelDownloadError(f"falha ao baixar {name}: {exc}")` encadeada.
 
-- [ ] **Step 1: Testes que falham.** Os testes usam URLs `file://`, que o `urlopen` aceita (`Path.as_uri()`):
+- [x] **Step 1: Testes que falham.** Os testes usam URLs `file://`, que o `urlopen` aceita (`Path.as_uri()`):
   - `test_models_dir_is_private` (em `tests/test_paths.py`, com a fixture `data_home`): o caminho termina em
     `models/sherpa-onnx` e `stat().st_mode & 0o777 == 0o700`.
   - `test_ensure_model_downloads_verifies_and_reuses_cache`: arquivo `src.onnx` com `b"abc"` e `ModelFile`
@@ -174,11 +174,11 @@ Comportamento de `ensure_model`:
     arquivo final.
   - `test_registry_urls_and_hashes_are_pinned`: todos os `url` começam com a base acima, todos os sha256 têm
     64 caracteres hexadecimais e `SEGMENTATION.member` termina em `/model.onnx`.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_sherpa_models.py tests/test_paths.py`.
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_sherpa_models.py tests/test_paths.py`.
   Expected: FAIL (`ModuleNotFoundError: whisper_ditado.meeting.sherpa_models`).
-- [ ] **Step 3:** Implementar `paths.models_dir` e `meeting/sherpa_models.py` conforme acima.
-- [ ] **Step 4:** Rodar o mesmo comando. Expected: PASS.
-- [ ] **Step 5: Commit** `[Feat] Baixar modelos do sherpa-onnx com verificação de hash`
+- [x] **Step 3:** Implementar `paths.models_dir` e `meeting/sherpa_models.py` conforme acima.
+- [x] **Step 4:** Rodar o mesmo comando. Expected: PASS.
+- [x] **Step 5: Commit** `[Feat] Baixar modelos do sherpa-onnx com verificação de hash`
 
 ---
 
@@ -216,7 +216,7 @@ Comportamento de `ensure_model`:
         embed: Embed | None = field(default=None, compare=False, repr=False)
     ```
 
-- [ ] **Step 1: Testes que falham** em `tests/meeting/test_speech.py`:
+- [x] **Step 1: Testes que falham** em `tests/meeting/test_speech.py`:
   - `test_speech_chunks_drops_short_and_clips_to_audio`: áudio de 5 s, trechos `[(0.0, 0.3), (1.0, 2.0), (4.5, 9.0)]`
     → pedaços com durações `[1.0, 0.5]` (o primeiro é curto demais e o último foi cortado em 5 s).
   - `test_speech_chunks_caps_total_and_splits_long_spans`: áudio de 600 s, trechos `[(0, 300), (300, 310)]`.
@@ -229,11 +229,11 @@ Comportamento de `ensure_model`:
   - Em `tests/meeting/test_diarize.py`: `test_result_defaults_and_embed_not_compared`:
     `DiarizationResult([], {}) == DiarizationResult([], {}, embed=lambda a, s: None)` e
     `DiarizationResult().model == ""`.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_speech.py tests/meeting/test_diarize.py`.
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_speech.py tests/meeting/test_diarize.py`.
   Expected: FAIL.
-- [ ] **Step 3:** Implementar conforme as interfaces.
-- [ ] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS (a suíte inteira continua verde).
-- [ ] **Step 5: Commit** `[Feat] Extrair trechos de fala e marcar o resultado com o modelo`
+- [x] **Step 3:** Implementar conforme as interfaces.
+- [x] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS (a suíte inteira continua verde).
+- [x] **Step 5: Commit** `[Feat] Extrair trechos de fala e marcar o resultado com o modelo`
 
 ---
 
