@@ -855,7 +855,7 @@ onBeforeUnmount(() => {
               :segments="meeting.segments"
               :speakers="meeting.speakers"
               :focus-id="printFocus"
-              @play="(start: number) => playAudio(start)"
+              @play="playAudio"
               @deleted="onPrintDeleted"
             />
           </div>

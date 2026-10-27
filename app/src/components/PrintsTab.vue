@@ -19,7 +19,7 @@ const props = defineProps<{
   speakers: Speaker[];
   focusId: string | null;
 }>();
-const emit = defineEmits<{ deleted: [id: string]; play: [start: number] }>();
+const emit = defineEmits<{ deleted: [id: string]; play: [start: number, end: number] }>();
 
 const { client } = useStatus();
 
@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
               class="icon play"
               title="Ouvir este momento"
               :aria-label="`Ouvir a fala do print ${it.print.label}`"
-              @click="emit('play', it.segment.start_s)"
+              @click="emit('play', it.segment.start_s, it.segment.end_s)"
             >
               <AppIcon name="play" :size="14" />
             </button>

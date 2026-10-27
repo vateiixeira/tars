@@ -54,11 +54,11 @@ describe("PrintsTab", () => {
     w.unmount();
   });
 
-  it("emite play com o início da fala", async () => {
+  it("emite play com o início e o fim da fala", async () => {
     const { w } = mountTab([print()]);
     await flushPromises();
     await w.get(".print .play").trigger("click");
-    expect(w.emitted("play")?.[0]).toEqual([720]);
+    expect(w.emitted("play")?.[0]).toEqual([720, 740]);
     w.unmount();
   });
 

@@ -197,6 +197,17 @@ describe("MeetingDetail", () => {
     expect(w.get(".print.focused").text()).toContain("P9");
   });
 
+  it("ouvir o momento de um print toca só a fala dele", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const { w } = await mountDetail(detail({ prints: [aPrint()] }), { audioBlob, printBlob });
+    await w.get("#tab-prints").trigger("click");
+    await flushPromises();
+    await w.get(".print .play").trigger("click");
+    await flushPromises();
+    expect(audioBlob).toHaveBeenCalledWith("m1", 31, 40);
+  });
+
   it("apagar um print recarrega a reunião e volta à transcrição quando acabam os prints", async () => {
     const printBlob = vi.fn(async () => new Blob(["i"]));
     const deletePrint = vi.fn(async () => ({ ok: true }));
