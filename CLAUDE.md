@@ -21,8 +21,10 @@ Para publicar uma versão, use um único comando na `main` atualizada:
 python3 scripts/release.py publish patch # ou minor / major
 ```
 
-Ele confere que a `main` está limpa e em dia com `origin/main` e roda localmente
-as verificações do CI (`pytest`, `pnpm test`, `pnpm build` e `cargo test`).
+Ele confere que a `main` está limpa e em dia com `origin/main` e que não há
+arquivos fora do git (que os testes enxergariam mas não seriam publicados; use
+`--allow-untracked` para seguir mesmo assim). Depois roda localmente as
+verificações do CI (`pytest`, `pnpm test`, `pnpm build` e `cargo test`).
 Depois sobe a versão nos seis arquivos abaixo sem atualizar dependências e confere
 `uv lock --check`. Por fim, cria o commit `[Release] Publicar versão X.Y.Z` e a
 tag anotada `vX.Y.Z` e envia as duas juntas. Se algo falhar antes do push, nada é
@@ -35,8 +37,9 @@ commitado e os arquivos de versão voltam ao estado anterior.
 - `app/src-tauri/Cargo.toml`
 - `app/src-tauri/Cargo.lock`
 
-Nunca edite esses números à mão; `python3 scripts/release.py bump` e `check`
-continuam disponíveis para usos avulsos.
+Nunca edite esses números à mão nem crie tags `v*` à mão: o workflow Release não
+roda testes e confia que o `publish` já os executou. `python3 scripts/release.py
+bump` e `check` continuam disponíveis para usos avulsos.
 
 A tag dispara o workflow **Release**. Ele valida a versão e exige que o commit
 pertença ao histórico de `main`. Os testes não rodam de novo, porque já rodaram
@@ -55,7 +58,7 @@ em `main`; o pacote fica nos artifacts por 14 dias. O CI também pode ser dispar
 Mudanças em captura, transcrição ou diarização também exigem os testes com modelos
 reais no ambiente NVIDIA antes da release (`uv run --frozen pytest -m gpu`), pois
 eles não fazem parte das verificações comuns. O `publish` avisa quando a versão
-inclui mudanças nesses caminhos. O pacote inclui o app compilado e o backend, mas a instalação ainda
+inclui mudanças nesses caminhos ou nas dependências (`pyproject.toml`, `uv.lock`). O pacote inclui o app compilado e o backend, mas a instalação ainda
 requer as dependências descritas em
 [docs/INSTALL_RELEASE.md](docs/INSTALL_RELEASE.md). Modelos, tokens e dados de
 reuniões não devem entrar no pacote.

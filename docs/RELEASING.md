@@ -11,7 +11,7 @@ O mantenedor trabalha e faz push direto na `main`. Contribuidores enviam pull re
 
 ## Publicar uma versão
 
-Na `main`, sem alterações pendentes e em dia com `origin/main`:
+Na `main`, sem alterações pendentes, sem arquivos fora do git e em dia com `origin/main`:
 
 ```bash
 python3 scripts/release.py publish patch   # ou minor / major
@@ -19,8 +19,10 @@ python3 scripts/release.py publish patch   # ou minor / major
 
 O comando:
 
-1. confere a branch, as alterações pendentes e se a `main` local está atrás de `origin/main`;
-2. avisa se há mudanças em captura, transcrição ou diarização desde a última tag (veja abaixo);
+1. confere a branch, as alterações pendentes, os arquivos fora do git e se a `main` local está
+   atrás de `origin/main`;
+2. avisa se há mudanças em captura, transcrição, diarização ou dependências desde a última tag
+   (veja abaixo);
 3. roda `uv run --frozen pytest -q`, `pnpm install --frozen-lockfile`, `pnpm test`, `pnpm build`
    e `cargo test --locked --lib`, como o CI;
 4. sobe a versão em Python, frontend, Tauri, Cargo e nos dois lockfiles, sem atualizar
@@ -28,8 +30,16 @@ O comando:
 5. cria o commit `[Release] Publicar versão X.Y.Z` e a tag anotada `vX.Y.Z`;
 6. envia `main` e a tag num único `git push --atomic`.
 
-Se uma verificação falhar, nada é commitado e os arquivos de versão voltam ao estado anterior.
-Se só o push falhar, o commit e a tag ficam locais e o comando mostra como reenviar.
+Os testes rodam na pasta de trabalho, mas só o commit é publicado. Por isso o comando recusa
+arquivos não rastreados fora do `.gitignore`: um arquivo esquecido passaria nos testes locais e
+faltaria na versão. Use `--allow-untracked` se tiver certeza de que eles não afetam o resultado.
+
+Se uma verificação falhar (ou você interromper com Ctrl-C), nada é commitado e os arquivos de
+versão voltam ao estado anterior. Se só o push falhar, o commit e a tag ficam locais e o comando
+mostra como reenviar ou desfazer.
+
+Não crie tags `v*` à mão: o workflow Release não roda testes e confia que o `publish` já os
+executou.
 
 Mudanças em captura, transcrição ou diarização exigem os testes com modelos reais na GPU antes
 da versão. Configure as bibliotecas CUDA como em `run-backend.sh` e rode
