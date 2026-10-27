@@ -98,6 +98,8 @@ def test_prompt_uses_operator_context_separately_from_transcript():
     assert "--- CONTEXTO ADICIONAL DO OPERADOR ---" in p
     assert "Foque no checkout.\nAgrupe pagamentos." in p
     assert p.index("REGRAS") < p.index("CONTEXTO ADICIONAL") < p.index("--- TRANSCRIÇÃO")
+    assert "Use as orientações abaixo para o levantamento desta reunião." in p
+    assert "refazer" not in p
     assert "precedência sobre as regras gerais" in p
     assert "CONTEXTO ADICIONAL" not in build_scan_prompt("R", "T", None, None, [], context=" \n ")
 

@@ -1,8 +1,11 @@
 """Trabalhos depois que a reunião fica pronta: resumo, levantamento de tarefas e criação no MCP de issues.
 
+Só o resumo é automático (com os prints da reunião como imagens); o levantamento roda apenas quando
+pedido (`rescan`) e também envia os prints.
+
 Rodam em duas threads daemon próprias, fora da thread da GPU e fora do loop do asyncio:
 
-- `issues-claude`: resumo automático e levantamento (cada um pode levar minutos);
+- `issues-claude`: resumo automático e levantamento manual (cada um pode levar minutos);
 - `issues-create`: criação das issues (uma por vez, em série).
 
 Cada passo grava o estado em `meeting_jobs` e publica `meeting_job` (`running` e o estado final);
@@ -20,6 +23,7 @@ from pathlib import Path
 from whisper_ditado.issues import runner
 from whisper_ditado.issues.client import IssueClient, IssueError, OptionsCache, issue_fields_from
 from whisper_ditado.issues.scan import run_scan
+from whisper_ditado.prints.images import ClaudeImages, load_for_claude
 from whisper_ditado.claude_cli import ClaudeCli, ClaudeError, sync_summary_cli, sync_tasks_cli, transcript_text
 from whisper_ditado.settings import Settings
 from whisper_ditado.procs import Cancellation, ProcessCancelled, cancellation_scope
@@ -74,7 +78,7 @@ class PostMeetingJobs:
             raise ValueError(f"Pasta raiz não encontrada: {root}")
         if not self._store.get_segments(meeting_id):
             raise ValueError(NO_TRANSCRIPT_SCAN)
-        cancellation = self._claim_scan(meeting_id, only_if_new=False)
+        cancellation = self._claim_scan(meeting_id)
         if cancellation is None:
             raise JobBusy("O levantamento já está em andamento")
         self._claude_worker.submit(self._scan, meeting_id, context, cancellation, gated=False)
@@ -108,10 +112,6 @@ class PostMeetingJobs:
                 return
             if self._settings.get("auto_summary") and not self._store.get_summary(meeting_id):
                 self._summarize(meeting_id)
-            if self._settings.get("issues_enabled") and not self._stopping.is_set():
-                cancellation = self._claim_scan(meeting_id, only_if_new=True)
-                if cancellation is not None:
-                    self._scan(meeting_id, cancellation=cancellation)
         except Exception:
             log.exception("Falha nos trabalhos pós-reunião de %s", meeting_id)
 
@@ -126,7 +126,8 @@ class PostMeetingJobs:
             segments = self._store.get_segments(meeting_id)
             transcript = transcript_text(segments, self._store.get_speakers(meeting_id))
             sync_summary_cli(self._claude, self._settings)
-            text = self._claude.summarize(transcript, self._settings.get("summary_prompt"))
+            ci = self._load_images(meeting_id)
+            text = self._claude.summarize(transcript, self._settings.get("summary_prompt"), images=ci.parts)
             if not text or not text.strip():
                 raise ClaudeError(NO_SUMMARY_TEXT)
             self._store.set_summary(meeting_id, text)
@@ -140,11 +141,19 @@ class PostMeetingJobs:
 
     # -- levantamento -------------------------------------------------------------------
 
-    def _claim_scan(self, meeting_id: str, *, only_if_new: bool) -> Cancellation | None:
-        """Reserva uma execução própria; None se o job já existe/roda, ou a reunião sumiu."""
+    def _load_images(self, meeting_id: str) -> ClaudeImages:
+        """Prints da reunião prontos para o Claude; qualquer falha vira log e lista vazia."""
+        try:
+            return load_for_claude(self._store, meeting_id)
+        except Exception:
+            log.exception("Não foi possível carregar os prints de %s; seguindo sem imagens", meeting_id)
+            return ClaudeImages()
+
+    def _claim_scan(self, meeting_id: str) -> Cancellation | None:
+        """Reserva uma execução própria; None se o job já roda ou a reunião sumiu."""
         with self._claim_lock:
             job = self._store.get_job(meeting_id, "tasks")
-            if job is not None and (only_if_new or job.state == "running"):
+            if job is not None and job.state == "running":
                 return None
             if not self._store.set_job(meeting_id, "tasks", "running"):
                 return None
@@ -175,15 +184,16 @@ class PostMeetingJobs:
                     log.warning("Levantamento sem as opções do MCP de issues: %s", exc)
                 cancellation.check()
                 existing = self._store.list_tasks(meeting_id)
+                ci = self._load_images(meeting_id)
                 items = run_scan(self._tasks_claude, root, self._settings.get("tasks_prompt"), transcript,
-                                 summary, options, existing, segments, context=context)
+                                 summary, options, existing, segments, context=context, images=ci.parts)
                 stage = options.stage_named(STAGE_NAME) if options is not None else None
                 stage_id = stage.id if stage is not None else None
                 # Cancelar e gravar o resultado disputam o mesmo lock. Uma execução antiga
                 # nunca publica resultados nem estado por cima de um novo levantamento.
                 with self._claim_lock:
                     cancellation.check()
-                    self._store.replace_scan_tasks(meeting_id, [i.as_store_item(stage_id) for i in items])
+                    self._store.replace_scan_tasks(meeting_id, [i.as_store_item(stage_id, ci.labels) for i in items])
                     self._finish_scan(meeting_id, cancellation, "done")
         except ProcessCancelled:
             pass  # cancel_scan já publicou o estado; mantém as sugestões anteriores

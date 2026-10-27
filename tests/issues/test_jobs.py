@@ -39,11 +39,13 @@ class FakeClaude:
         self.model = None
         self.effort = None
         self.summarize_calls = []
+        self.summarize_images = []
         self.summary = "RESUMO"
         self.error = None
 
-    def summarize(self, transcript, prompt):
+    def summarize(self, transcript, prompt, images=()):
         self.summarize_calls.append((transcript, prompt, self.bin_path, self.model, self.effort))
+        self.summarize_images.append(list(images))
         if self.error is not None:
             raise self.error
         return self.summary
@@ -120,9 +122,9 @@ class Rig:
         self.jobs = PostMeetingJobs(store, settings, self.bus, self.claude, self.issues_client, self.options,
                                 self.tasks_claude)
 
-    def _run_scan(self, cli, root, rules, transcript, summary, options, existing, segments, *, context=""):
+    def _run_scan(self, cli, root, rules, transcript, summary, options, existing, segments, *, context="", images=()):
         self.scans.append({"cli": cli, "root": root, "rules": rules, "transcript": transcript,
-                           "summary": summary, "options": options, "existing": existing, "context": context,
+                           "summary": summary, "options": options, "existing": existing, "context": context, "images": list(images),
                            "bin": cli.bin_path, "model": cli.model, "effort": cli.effort})
         if self.on_scan is not None:
             self.on_scan()
@@ -136,6 +138,11 @@ class Rig:
 
     def ready(self, mid):
         self.jobs.on_ready(mid)
+        self.wait_idle()
+
+    def scan(self, mid, **kw):
+        """Levantamento manual (a única forma de rodá-lo): pede e espera a fila esvaziar."""
+        self.jobs.rescan(mid, **kw)
         self.wait_idle()
 
     def events(self, kind=None):
@@ -168,7 +175,7 @@ def test_on_ready_summarizes_when_enabled_and_missing(rig, store, mid):
 
 def test_on_ready_only_enqueues(rig, store, mid):
     release = threading.Event()
-    rig.claude.summarize = lambda t, p: release.wait(10) and "R"
+    rig.claude.summarize = lambda t, p, images=(): release.wait(10) and "R"
     rig.jobs.on_ready(mid)  # volta já, mesmo com o Claude preso
     assert store.get_summary(mid) is None
     release.set()
@@ -205,9 +212,7 @@ def test_summary_failure_is_recorded_not_fatal(rig, store, settings, mid):
     assert store.get_summary(mid) is None
     assert store.get_meeting(mid).status == "ready"
     assert job_event(mid, "summary", "error") in rig.bus.events
-    # o levantamento ainda roda, sem resumo
-    assert len(rig.scans) == 1 and rig.scans[0]["summary"] is None
-    assert store.get_job(mid, "tasks").state == "done"
+    assert rig.scans == [] and store.get_job(mid, "tasks") is None  # o levantamento é manual
 
 
 def test_summary_unexpected_exception_is_recorded(rig, store, mid):
@@ -227,13 +232,14 @@ def test_empty_summary_is_an_error(rig, store, mid):
 # -- levantamento --------------------------------------------------------------
 
 
-def test_on_ready_scans_only_with_flow_enabled_and_valid_root(rig, store, settings, tmp_path, mid):
-    rig.ready(mid)  # desligado (padrão)
-    assert store.get_job(mid, "tasks") is None and rig.scans == []
-
+def test_scan_root_vanishing_after_validation_is_an_error(rig, store, settings, tmp_path, mid):
     settings.update({"issues_enabled": True})
+    release = threading.Event()
+    rig.jobs._claude_worker.submit(lambda: release.wait(10), gated=False)  # segura a fila até a pasta sumir
+    rig.jobs.rescan(mid)
     settings.store.set_setting("issues_root", str(tmp_path / "sumiu"))  # a pasta sumiu depois de validada
-    rig.ready(mid)
+    release.set()
+    rig.wait_idle()
     job = store.get_job(mid, "tasks")
     assert (job.state, job.error) == ("error", f"Pasta raiz não encontrada: {tmp_path / 'sumiu'}")
     assert rig.scans == [] and rig.options.calls == 0
@@ -244,6 +250,7 @@ def test_scan_saves_items_with_default_stage(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.scan_result = [scan_item("A"), scan_item("B")]
     rig.ready(mid)
+    rig.scan(mid)
     tasks = store.list_tasks(mid)
     assert [(t.title, t.stage_id, t.assignee_id) for t in tasks] == [("A", 2, 9), ("B", 2, 9)]
     assert store.get_job(mid, "tasks").state == "done"
@@ -261,7 +268,7 @@ def test_scan_runs_without_options_when_issues_client_fails(rig, store, settings
     settings.update({"issues_enabled": True})
     rig.options.error = IssueError("sem login")
     rig.scan_result = [scan_item("A", product_id=None, assignee_id=None, team_id=None)]
-    rig.ready(mid)
+    rig.scan(mid)
     assert rig.scans[0]["options"] is None
     [task] = store.list_tasks(mid)
     assert (task.stage_id, task.assignee_id, task.team_id, task.product_id) == (None,) * 4
@@ -271,14 +278,14 @@ def test_scan_runs_without_options_when_issues_client_fails(rig, store, settings
 def test_scan_without_to_do_stage_leaves_stage_empty(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.options.options = IssueOptions("vi", [], [], [], [Option(1, "Backlog")], T0)
-    rig.ready(mid)
+    rig.scan(mid)
     assert [t.stage_id for t in store.list_tasks(mid)] == [None]
 
 
 def test_scan_error_is_recorded(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.scan_error = ClaudeError("O levantamento demorou demais (10 min)")
-    rig.ready(mid)
+    rig.scan(mid)
     job = store.get_job(mid, "tasks")
     assert (job.state, job.error) == ("error", "O levantamento demorou demais (10 min)")
     assert rig.events("tasks_changed") == []
@@ -288,7 +295,7 @@ def test_scan_error_is_recorded(rig, store, settings, mid):
 def test_scan_unexpected_exception_is_recorded(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.scan_error = RuntimeError("bug")
-    rig.ready(mid)
+    rig.scan(mid)
     job = store.get_job(mid, "tasks")
     assert job.state == "error" and job.error and "bug" not in job.error
 
@@ -300,15 +307,16 @@ def test_scan_syncs_claude_settings_before_fetching_options(rig, store, settings
     seen = []
     rig.options.get = lambda refresh=False: seen.append(
         (rig.tasks_claude.bin_path, rig.tasks_claude.model, rig.tasks_claude.effort)) or OPTS
-    rig.ready(mid)
+    rig.scan(mid)
     assert seen == [("/x/claude", "opus", "high")]
 
 
 def test_store_error_inside_scan_except_still_finishes_the_job(rig, store, settings, mid, monkeypatch):
     settings.update({"issues_enabled": True})
     rig.scan_error = RuntimeError("bug")
-    monkeypatch.setattr(store, "get_meeting", lambda _id: (_ for _ in ()).throw(RuntimeError("banco")))
-    rig.ready(mid)
+    rig.on_scan = lambda: monkeypatch.setattr(
+        store, "get_meeting", lambda _id: (_ for _ in ()).throw(RuntimeError("banco")))
+    rig.scan(mid)
     job = store.get_job(mid, "tasks")
     assert job.state == "error" and job.error
     assert job_event(mid, "tasks", "error") in rig.bus.events
@@ -326,18 +334,18 @@ def test_store_error_inside_summary_except_still_finishes_the_job(rig, store, mi
 def test_scan_passes_existing_tasks(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     old = store.add_task(mid, {"title": "Antiga"}, origin="manual")
-    rig.ready(mid)
+    rig.scan(mid)
     assert [t.id for t in rig.scans[0]["existing"]] == [old.id]
 
 
-def test_on_ready_is_idempotent(rig, store, settings, mid):
+def test_on_ready_never_scans(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
+    rig.ready(mid)
+    assert rig.scans == [] and store.get_job(mid, "tasks") is None
     store.set_job(mid, "tasks", "error", "Interrompido: o serviço reiniciou")
     rig.ready(mid)
     assert rig.scans == []
     assert store.get_job(mid, "tasks").state == "error"
-    rig.ready(mid)
-    assert rig.scans == []
 
 
 def test_rescan_validation_order(rig, store, settings, tmp_path, mid):
@@ -468,7 +476,7 @@ def test_cancel_running_scan_preserves_tasks_and_allows_new_scan(rig, store, set
     ]
 
 
-def test_cancel_auto_scan_during_options_fetch_does_not_start_scan(rig, store, settings, mid):
+def test_cancel_scan_during_options_fetch_does_not_start_scan(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     entered, release = threading.Event(), threading.Event()
 
@@ -478,7 +486,7 @@ def test_cancel_auto_scan_during_options_fetch_does_not_start_scan(rig, store, s
         return OPTS
 
     rig.options.get = options
-    rig.jobs.on_ready(mid)
+    rig.jobs.rescan(mid)
     assert entered.wait(5)
     try:
         rig.jobs.cancel_scan(mid)
@@ -486,7 +494,6 @@ def test_cancel_auto_scan_during_options_fetch_does_not_start_scan(rig, store, s
         release.set()
         rig.wait_idle()
     assert store.get_job(mid, "tasks").state == "cancelled"
-    assert store.get_job(mid, "summary").state == "done"
     assert rig.scans == []
 
 
@@ -503,7 +510,7 @@ def test_cancel_finished_or_missing_scan_is_noop(rig, store, settings, mid):
 def test_scan_of_deleted_meeting_is_silent(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.on_scan = lambda: store.delete_meeting(mid)
-    rig.ready(mid)
+    rig.scan(mid)
     assert store.list_tasks(mid) == [] and store.get_job(mid, "tasks") is None
     assert rig.events("tasks_changed") == []
     assert job_event(mid, "tasks", "done") not in rig.bus.events
@@ -511,7 +518,7 @@ def test_scan_of_deleted_meeting_is_silent(rig, store, settings, mid):
 
 
 def test_summary_of_deleted_meeting_is_silent(rig, store, mid):
-    def gone(transcript, prompt):
+    def gone(transcript, prompt, images=()):
         store.delete_meeting(mid)
         return "R"
 
@@ -527,6 +534,7 @@ def test_jobs_sync_claude_settings(rig, store, settings, mid):
     settings.update({"issues_enabled": True, "claude_bin": "/x/claude", "claude_model": "sonnet",
                      "claude_effort": "low", "tasks_model": "opus", "tasks_effort": "max"})
     rig.ready(mid)
+    rig.scan(mid)
     # o resumo usa claude_*; o levantamento usa tasks_*
     assert rig.claude.summarize_calls[0][2:] == ("/x/claude", "sonnet", "low")
     assert rig.scans[0]["cli"] is rig.tasks_claude
@@ -538,6 +546,48 @@ def test_jobs_sync_claude_settings(rig, store, settings, mid):
     rig.wait_idle()
     assert (rig.scans[1]["bin"], rig.scans[1]["model"], rig.scans[1]["effort"]) == ("/y/claude", None, None)
     assert (rig.claude.model, rig.claude.effort) == ("sonnet", "low")  # o cli do resumo não é tocado pelo levantamento
+
+
+# -- prints --------------------------------------------------------------------
+
+
+def _png(path, color):
+    from PIL import Image
+
+    Image.new("RGB", (8, 8), color).save(path)
+    return path
+
+
+def test_summary_and_scan_receive_prints(rig, store, settings, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import store_print
+
+    settings.update({"issues_enabled": True})
+    prints = [
+        store_print(store, mid, _png(tmp_path / f"p{i}.png", c), at_s=float(i), source="native", move=False)
+        for i, c in enumerate(("red", "blue"), start=1)
+    ]
+    rig.ready(mid)
+    [images] = rig.claude.summarize_images
+    assert [i.label for i in images] == ["P1", "P2"]
+
+    rig.scan_result = [scan_item("Com print", prints=["P2", "P9"])]
+    rig.scan(mid)
+    assert [i.label for i in rig.scans[0]["images"]] == ["P1", "P2"]
+    [task] = store.list_tasks(mid)
+    assert task.print_ids == [prints[1].id]
+
+
+def test_unreadable_prints_do_not_stop_summary_and_scan(rig, store, settings, mid, monkeypatch):
+    settings.update({"issues_enabled": True})
+
+    def boom(_store, _mid):
+        raise RuntimeError("disco")
+
+    monkeypatch.setattr(jobs_mod, "load_for_claude", boom)
+    rig.ready(mid)
+    rig.scan(mid)
+    assert rig.claude.summarize_images == [[]] and rig.scans[0]["images"] == []
+    assert store.get_summary(mid) == "RESUMO" and store.get_job(mid, "tasks").state == "done"
 
 
 # -- criação -------------------------------------------------------------------
@@ -672,7 +722,7 @@ def test_summarize_after_shutdown_does_not_call_claude(rig, store, mid):
 def test_after_shutdown_queued_work_is_dropped(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     release = threading.Event()
-    rig.claude.summarize = lambda t, p: release.wait(10) and "R"
+    rig.claude.summarize = lambda t, p, images=(): release.wait(10) and "R"
     rig.jobs.on_ready(mid)
     ids = make_tasks(store, mid, 1)
     rig.jobs.shutdown()

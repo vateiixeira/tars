@@ -586,7 +586,7 @@ git commit -m "[Feat] Enviar prints como imagens ao Claude no resumo e no levant
 - Consumes: `images.load_for_claude` (Task 4); `summarize(..., images)` e `run_scan(..., images)` (Task 6).
 - Produces: `_after_ready` só faz o resumo. `_scan` grava `print_ids` vindos dos rótulos.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 Ajuste os testes de `test_jobs.py` que esperavam levantamento automático. Por exemplo, `test_summary_failure_is_recorded_not_fatal` passa a afirmar `rig.scans == []` e `get_job(mid, "tasks") is None`. Adicione:
 
@@ -602,23 +602,23 @@ def test_summary_and_scan_receive_prints(rig, store, settings, mid, data_home):
 
 Em `test_scan.py`, o bloco de contexto usa o novo texto, sem "refazer".
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/issues/test_jobs.py tests/issues/test_scan.py -q`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - `_after_ready` deixa de chamar `_claim_scan`/`_scan`. Ajuste a docstring do módulo.
 - `_summarize` e `_scan` chamam `load_for_claude(self._store, meeting_id)` (falhas viram log e lista vazia) e passam `images=ci.parts`. O `_scan` usa `as_store_item(stage_id, ci.labels)`.
 - O bloco de contexto de `build_scan_prompt` passa a dizer: `"Use as orientações abaixo para o levantamento desta reunião."` (o resto igual).
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/issues tests/test_api_tasks.py -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/whisper_ditado/issues/{jobs,scan}.py tests/issues/test_jobs.py tests/issues/test_scan.py

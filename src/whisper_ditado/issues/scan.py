@@ -124,7 +124,7 @@ def build_scan_prompt(
     if context.strip():
         instructions.append(
             "--- CONTEXTO ADICIONAL DO OPERADOR ---\n"
-            "Use as orientações abaixo para refazer as sugestões desta reunião. "
+            "Use as orientações abaixo para o levantamento desta reunião. "
             "Elas têm precedência sobre as regras gerais de seleção, agrupamento e redação. "
             "Use este contexto para esclarecer a transcrição, sem inventar falas ou trechos de evidência. "
             "Mantenha o formato de saída e use somente ids das opções disponíveis.\n"
