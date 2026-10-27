@@ -281,24 +281,28 @@ def cmd_clusters(args: argparse.Namespace) -> None:
         log(f"{m.name}: {len(audio) / SAMPLE_RATE / 60:.1f} min, {n_ref} falante(s) na referência")
         for t in thresholds:
             t0 = time.perf_counter()
-            backend = CachedBackend(load_backend(seg_path, emb_path, t, args.threads))
+            inner = load_backend(seg_path, emb_path, t, args.threads)
+            backend = CachedBackend(inner)
             raw = None
-            for ms in mins:
-                d = LocalDiarizer(
-                    embedding=args.embedding,
-                    cluster_threshold=t,
-                    min_speaker_s=ms,
-                    num_threads=args.threads,
-                    loader=lambda b=backend: b,
-                )
-                result = d.run(audio)
-                if raw is None:
-                    raw = len({c for _, _, c in backend.segments(audio)})
-                hyp = [(x.start_s, x.end_s, x.speaker) for x in result.turns]
-                n_hyp = len({label for _, _, label in hyp})
-                score = agreement(ref, hyp)
-                results.setdefault((t, ms), []).append((score, abs(n_hyp - n_ref), ref_s))
-                print(f"| {m.name} | {n_ref} | {t:g} | {ms:g} | {n_hyp} | {raw} | {score:.3f} |")
+            try:
+                for ms in mins:
+                    d = LocalDiarizer(
+                        embedding=args.embedding,
+                        cluster_threshold=t,
+                        min_speaker_s=ms,
+                        num_threads=args.threads,
+                        loader=lambda b=backend: b,
+                    )
+                    result = d.run(audio)
+                    if raw is None:
+                        raw = len({c for _, _, c in backend.segments(audio)})
+                    hyp = [(x.start_s, x.end_s, x.speaker) for x in result.turns]
+                    n_hyp = len({label for _, _, label in hyp})
+                    score = agreement(ref, hyp)
+                    results.setdefault((t, ms), []).append((score, abs(n_hyp - n_ref), ref_s))
+                    print(f"| {m.name} | {n_ref} | {t:g} | {ms:g} | {n_hyp} | {raw} | {score:.3f} |")
+            finally:
+                inner.close()  # encerra o processo filho da segmentação (~300 MB) deste limiar
             log(f"  limiar {t:g}: {time.perf_counter() - t0:.0f} s")
         del audio
 

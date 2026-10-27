@@ -1,3 +1,4 @@
+import gc
 import os
 import signal
 import subprocess
@@ -18,6 +19,7 @@ from whisper_ditado.meeting.local_diarize import (
     _ChildProcess,
     _Sherpa,
     default_threads,
+    terminate_children,
 )
 
 SR = 16000
@@ -217,16 +219,23 @@ def test_available_does_not_wait_for_a_running_run():
         worker.join(5)
 
 
+def _gone(pid: int) -> bool:
+    """O processo não existe mais ou já é zumbi (morreu e só falta o pai recolher)."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            stat = f.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    return stat.rsplit(")", 1)[1].split()[0] == "Z"  # o nome do processo pode ter espaços
+
+
 def _wait_gone(pid: int, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
-    while True:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return True
+    while not _gone(pid):
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.05)
+    return True
 
 
 def test_child_process_is_spawned_persistent_and_recreated_after_dying():
@@ -260,9 +269,54 @@ def test_unload_stops_the_child_process():
     assert child._pool is None
 
 
+def test_sigint_does_not_kill_the_child_process():
+    # Ctrl+C no terminal manda SIGINT ao grupo todo; o desligamento é decidido pelo pai
+    child = _ChildProcess()
+    try:
+        pid = child.run(os.getpid)  # depois do initializer
+        os.kill(pid, signal.SIGINT)
+        time.sleep(0.3)
+        assert child.run(os.getpid) == pid
+    finally:
+        child.close()
+
+
+def test_dropping_an_unclosed_backend_ends_its_child():
+    child = _ChildProcess()
+    backend = _Sherpa(child, extractor=None)
+    pid = child.run(os.getpid)
+
+    del backend, child
+    gc.collect()
+    assert _wait_gone(pid), "o filho de um backend largado sem close() continuou vivo"
+
+
+def test_terminate_children_kills_a_busy_child_at_once():
+    child = _ChildProcess()
+    pid = child.run(os.getpid)
+    errors: list[BaseException] = []
+
+    def busy():
+        try:
+            child.run(time.sleep, 60)
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=busy)
+    worker.start()
+    time.sleep(0.3)
+    terminate_children()
+    worker.join(10)
+    assert not worker.is_alive()
+    assert _wait_gone(pid)
+    assert len(errors) == 1 and isinstance(errors[0], RuntimeError)
+    assert child.run(os.getpid) != pid  # e o próximo uso cria outro filho
+    child.close()
+
+
 _EXIT_SCRIPT = """
 import os, sys, threading, time
-from whisper_ditado.meeting.local_diarize import _ChildProcess
+from whisper_ditado.meeting.local_diarize import _ChildProcess, terminate_children
 
 child = _ChildProcess()
 with open(sys.argv[2], "w") as f:
@@ -272,10 +326,15 @@ if sys.argv[1] == "busy":  # um trabalho longo em andamento no filho na hora da 
     time.sleep(0.5)
 elif sys.argv[1] == "hard":  # o backend sai por os._exit, sem finalizar o pool
     os._exit(0)
+elif sys.argv[1] == "hard-busy":  # como o `main._hard_exit`, com o filho preso no GIL dele
+    threading.Thread(target=child.run, args=(pow, 7, 10**8), daemon=True).start()
+    time.sleep(0.5)
+    terminate_children()
+    os._exit(0)
 """
 
 
-@pytest.mark.parametrize("mode", ["idle", "busy", "hard"])
+@pytest.mark.parametrize("mode", ["idle", "busy", "hard", "hard-busy"])
 def test_child_process_ends_with_the_parent(tmp_path, mode):
     pid_file, err_file = tmp_path / "child.pid", tmp_path / "stderr"
     # saídas em arquivo, não em pipe: um filho órfão herdaria o pipe e seguraria a leitura

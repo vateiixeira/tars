@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import os
+import signal
 import threading
 import time
+import weakref
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -69,12 +71,15 @@ _child_diarization = None
 
 
 def _child_start(init: Callable[..., None] | None, *args) -> None:
-    """Initializer do filho: sai junto com o pai e então roda `init(*args)`.
+    """Initializer do filho: ignora Ctrl+C, sai junto com o pai e então roda `init(*args)`.
 
-    O backend sai por `os._exit` (sem finalizar o pool) e pode morrer por `kill -9`; sem a vigia,
-    o filho ficaria órfão para sempre esperando trabalho. Ela só roda quando o GIL do filho está
-    livre, então um `process` em andamento termina antes.
+    O Ctrl+C no terminal manda SIGINT ao grupo de processos inteiro, filho incluído; quem decide o
+    desligamento é o pai, e um filho morto ali faria a reunião em finalização perder a separação.
+    O backend sai por `os._exit` e pode morrer por `kill -9`; sem a vigia, o filho ficaria órfão
+    para sempre esperando trabalho. Ela só roda quando o GIL do filho está livre, então um `process`
+    em andamento termina antes (o `terminate_children` do pai mata o filho na hora).
     """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     parent = multiprocessing.parent_process()
     if parent is not None:
 
@@ -105,31 +110,46 @@ def _child_segments(audio: np.ndarray) -> list[tuple[float, float, int]]:
 
 # --- processo pai ---------------------------------------------------------------------------------
 
-_live_pools: set[ProcessPoolExecutor] = set()
+# Referências fracas: um backend largado sem `close()` não segura o pool, e o pool coletado encerra
+# o próprio filho (o `concurrent.futures` acorda a thread gerente quando o executor some).
+_live_pools: weakref.WeakSet[ProcessPoolExecutor] = weakref.WeakSet()
 _live_lock = threading.Lock()
 
 
-def _terminate_children() -> None:
-    """Na saída do interpretador: mata os filhos antes que o `concurrent.futures` espere por eles.
+def terminate_children() -> None:
+    """Mata na hora os processos filhos da separação local, mesmo no meio de um `process`.
 
-    Sem isso, um `process` em andamento seguraria a saída até terminar (minutos). Registrado em
-    `threading._register_atexit` depois do `concurrent.futures.process`, então roda antes dele.
+    Para a saída do processo: o backend a chama logo antes do `os._exit`, e a saída normal do
+    interpretador também. Não pega o lock do `LocalDiarizer` (que um `run` segura durante a
+    separação) e espera no máximo 1 s pelo da lista de pools.
     """
-    with _live_lock:
+    locked = _live_lock.acquire(timeout=1.0)
+    try:
         pools = list(_live_pools)
         _live_pools.clear()
+    finally:
+        if locked:
+            _live_lock.release()
     for pool in pools:
         _shutdown(pool, terminate=True)
 
 
 def _shutdown(pool: ProcessPoolExecutor, *, terminate: bool) -> None:
-    processes = list((pool._processes or {}).values()) if terminate else []
+    processes = []
+    if terminate:
+        # Não há API pública para os processos do pool antes do 3.14 (`terminate_workers`); sem o
+        # atributo, sobra o encerramento normal abaixo e a vigia do pai no filho.
+        processes = list((getattr(pool, "_processes", None) or {}).values())
     pool.shutdown(wait=False, cancel_futures=True)
     for proc in processes:
         proc.terminate()
 
 
-threading._register_atexit(_terminate_children)
+# Roda antes do `_python_exit` do `concurrent.futures` (registrado depois dele, e a lista roda do
+# fim para o começo): sem isso, um `process` em andamento seguraria a saída até terminar.
+_register_atexit = getattr(threading, "_register_atexit", None)
+if _register_atexit is not None:
+    _register_atexit(terminate_children)
 
 
 class _ChildProcess:

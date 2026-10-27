@@ -72,9 +72,10 @@ def test_run_server_converts_system_exit(monkeypatch):
 def test_hard_exit_flushes_and_skips_interpreter_finalization(monkeypatch):
     calls = []
     monkeypatch.setattr(main.logging, "shutdown", lambda: calls.append("logging"))
+    monkeypatch.setattr(main, "terminate_children", lambda: calls.append("children"))
     monkeypatch.setattr(main.os, "_exit", lambda rc: calls.append(("exit", rc)))
     main._hard_exit(3)
-    assert calls == ["logging", ("exit", 3)]
+    assert calls == ["logging", "children", ("exit", 3)]
 
 
 def test_entrypoint_hard_exits_with_main_code_or_error(monkeypatch):

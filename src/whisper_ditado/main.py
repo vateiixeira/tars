@@ -42,7 +42,7 @@ from whisper_ditado.events import EventBus
 from whisper_ditado.dictation_samples import DictationSamples
 from whisper_ditado.meeting.diarize import Diarizer
 from whisper_ditado.meeting.engines import DiarizerRouter
-from whisper_ditado.meeting.local_diarize import LocalDiarizer
+from whisper_ditado.meeting.local_diarize import LocalDiarizer, terminate_children
 from whisper_ditado.meeting.session import MeetingManager
 from whisper_ditado.priority import DictationBusy
 from whisper_ditado.settings import Settings
@@ -296,6 +296,10 @@ def _hard_exit(rc: int) -> None:
     for stream in (sys.stdout, sys.stderr):
         with contextlib.suppress(Exception):
             stream.flush()
+    # O os._exit não encerra o filho da separação local: sem isso, ele terminaria o `process` em
+    # andamento (até minutos) antes de perceber que o pai saiu.
+    with contextlib.suppress(Exception):
+        terminate_children()
     os._exit(rc)
 
 
