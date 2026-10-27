@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Aba "Prints": miniaturas dos prints de tela tirados durante a reunião, cada um com o instante
 // (mm:ss desde o início), a fala daquele momento, e as ações Ampliar / Ouvir / Apagar. As imagens vêm
-// da API com o token (não dá para usar `<img src>` direto), então viram object URLs, revogadas ao
-// sumirem da lista, ao fechar o visualizador e ao desmontar.
+// da API com o token (não dá para usar `<img src>` direto): as miniaturas vêm de `usePrintThumbs` e a
+// imagem inteira do visualizador vira um object URL próprio, revogado ao fechar e ao desmontar.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { MeetingPrint, Segment, Speaker } from "../api/types";
+import { usePrintThumbs } from "../composables/usePrintThumbs";
 import { useStatus } from "../composables/useStatus";
 import { mmss } from "../lib/format";
 import { segmentAt, speakerName } from "../lib/meeting";
@@ -22,47 +23,16 @@ const emit = defineEmits<{ deleted: [id: string]; play: [start: number] }>();
 
 const { client } = useStatus();
 
-const thumbs = ref<Record<string, string>>({});
-const failed = ref<ReadonlySet<string>>(new Set());
-const pending = new Set<string>();
-let alive = true;
-
-function dropThumb(id: string): void {
-  const url = thumbs.value[id];
-  if (url) URL.revokeObjectURL(url);
-  const { [id]: _gone, ...rest } = thumbs.value;
-  thumbs.value = rest;
-}
-
-async function loadThumb(id: string): Promise<void> {
-  pending.add(id);
-  const meetingId = props.meetingId;
-  try {
-    const blob = await client.printBlob(meetingId, id, "thumb");
-    if (!alive || meetingId !== props.meetingId || !props.prints.some((p) => p.id === id)) return;
-    thumbs.value = { ...thumbs.value, [id]: URL.createObjectURL(blob) };
-  } catch {
-    if (alive) failed.value = new Set(failed.value).add(id);
-  } finally {
-    pending.delete(id);
-  }
-}
-
-function syncThumbs(): void {
-  const ids = new Set(props.prints.map((p) => p.id));
-  for (const id of Object.keys(thumbs.value)) if (!ids.has(id)) dropThumb(id);
-  for (const id of ids) if (!(id in thumbs.value) && !failed.value.has(id) && !pending.has(id)) void loadThumb(id);
-}
-watch(() => props.prints.map((p) => p.id).join("\u0000"), syncThumbs, { immediate: true });
-// Outra reunião: nada do que foi carregado vale mais.
+const { thumbs, failed } = usePrintThumbs(
+  () => props.meetingId,
+  () => props.prints.map((p) => p.id),
+);
+// Outra reunião: nada do que foi aberto vale mais (as miniaturas o composable já zera).
 watch(
   () => props.meetingId,
   () => {
-    for (const id of Object.keys(thumbs.value)) dropThumb(id);
-    failed.value = new Set();
     closeViewer();
     confirming.value = null;
-    syncThumbs();
   },
 );
 
@@ -153,9 +123,7 @@ async function confirmDelete(): Promise<void> {
 }
 
 onBeforeUnmount(() => {
-  alive = false;
   closeViewer();
-  for (const url of Object.values(thumbs.value)) URL.revokeObjectURL(url);
 });
 </script>
 

@@ -97,7 +97,9 @@ describe("TaskCard prints", () => {
     const { w } = mountCard(task(), { printBlob: vi.fn(async () => { throw new Error("x"); }) });
     await flushPromises();
     expect(w.findAll(".task-prints img")).toHaveLength(0);
-    expect(w.text()).toContain("P1");
+    const fallbacks = w.findAll(".task-prints .thumb-fallback");
+    expect(fallbacks).toHaveLength(2);
+    expect(fallbacks[0].text()).toBe("P1");
     w.unmount();
   });
 

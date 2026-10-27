@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { setStatusStore } from "../composables/useStatus";
-import type { IssueOptions, TasksPayload, TaskSuggestion } from "../api/types";
+import type { IssueOptions, MeetingPrint, TasksPayload, TaskSuggestion } from "../api/types";
 import { ApiError } from "../api/client";
 import { installStore, reconnect } from "../test/meetingFakes";
 
@@ -73,12 +73,12 @@ const payload = (items: TaskSuggestion[], extra: Partial<TasksPayload> = {}): Ta
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => setStatusStore(null));
 
-async function mountTab(initial: TasksPayload, overrides: Record<string, unknown> = {}) {
+async function mountTab(initial: TasksPayload, overrides: Record<string, unknown> = {}, prints: MeetingPrint[] = []) {
   const listTasks = vi.fn(async (_id: string) => initial);
   const issueOptions = vi.fn(async (_refresh?: boolean) => OPTIONS);
   const ctx = installStore({ listTasks, issueOptions, ...overrides });
   const w = mount(TasksTab, {
-    props: { meetingId: "m1", startedAt: "2026-10-19T14:00:00", prints: [] },
+    props: { meetingId: "m1", startedAt: "2026-10-19T14:00:00", prints },
     attachTo: document.body,
   });
   await flushPromises();
@@ -106,6 +106,32 @@ describe("TasksTab", () => {
     await btn(w, "Levantar tarefas").trigger("click");
     await flushPromises();
     expect(scanTasks).toHaveBeenCalledWith("m1", "Foque no checkout.");
+  });
+
+  it("deixa o botão de levantamento desabilitado até a primeira carga terminar", async () => {
+    let finish!: (p: TasksPayload) => void;
+    const listTasks = vi.fn(() => new Promise<TasksPayload>((resolve) => { finish = resolve; }));
+    installStore({ listTasks, issueOptions: vi.fn(async () => OPTIONS) });
+    const w = mount(TasksTab, {
+      props: { meetingId: "m1", startedAt: "2026-10-19T14:00:00", prints: [] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(w.findAll(".toolbar button")[0].attributes("disabled")).toBeDefined();
+    finish(payload([task()]));
+    await flushPromises();
+    expect(btn(w, "Refazer sugestões").attributes("disabled")).toBeUndefined();
+  });
+
+  it("repassa os prints da reunião ao cartão da tarefa", async () => {
+    const printBlob = vi.fn(async () => new Blob(["x"]));
+    Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() });
+    const { w } = await mountTab(payload([task({ print_ids: ["p1"] })]), { printBlob }, [
+      { id: "p1", label: "P1", at_s: 65, source: "native", created_at: "2026-10-19T14:01:05", sent_to_claude: true },
+    ]);
+    expect(w.get(".task-prints").text()).toContain("P1");
+    expect(w.find('[aria-label="Tirar P1 desta tarefa"]').exists()).toBe(true);
+    expect(printBlob).toHaveBeenCalledWith("m1", "p1", "thumb");
   });
 
   it("depois de um levantamento o botão vira Refazer sugestões", async () => {

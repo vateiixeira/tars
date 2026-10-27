@@ -395,7 +395,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       <button
         type="button"
         class="btn"
-        :disabled="!connected || !enabled || running || isBusy('scan') || isBusy('cancel-scan')"
+        :disabled="!connected || !loaded || !enabled || running || isBusy('scan') || isBusy('cancel-scan')"
         :title="enabled ? undefined : 'O criador de issues está desligado'"
         @click="rescan"
       >

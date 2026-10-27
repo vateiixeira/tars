@@ -2,10 +2,10 @@
 // Cartão de uma tarefa sugerida: tipo, título, descrição (Markdown cru num textarea), projeto,
 // seletores do MCP de issues, trecho que justifica, estado de criação. Só apresenta e emite: quem salva,
 // cria e descarta é o `TasksTab`. Texto do Claude é sempre interpolado como texto (nada de HTML bruto).
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import AppIcon from "./ui/AppIcon.vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useStatus } from "../composables/useStatus";
+import { usePrintThumbs } from "../composables/usePrintThumbs";
 import type {
   IssueOption,
   IssueOptions,
@@ -46,7 +46,6 @@ const emit = defineEmits<{
   ];
 }>();
 
-const { client } = useStatus();
 const locked = computed(() => isLocked(props.task));
 const noOptions = computed(() => props.options === null);
 
@@ -164,8 +163,7 @@ async function openIssue(): Promise<void> {
 }
 
 // -- prints que vão junto ---------------------------------------------------------------------
-// As imagens vêm da API com o token, então viram object URLs: criadas ao carregar, revogadas quando o
-// print sai da tarefa e ao desmontar. Se a miniatura falha, fica só o rótulo.
+// As miniaturas vêm do composable (object URLs com ciclo de vida próprio). Se uma falha, fica só o rótulo.
 
 const attached = computed(() =>
   props.task.print_ids.flatMap((id) => {
@@ -173,47 +171,10 @@ const attached = computed(() =>
     return print ? [print] : [];
   }),
 );
-const thumbs = ref<Record<string, string>>({});
-const thumbFailed = ref<ReadonlySet<string>>(new Set());
-const thumbPending = new Set<string>();
-let alive = true;
-
-function dropThumb(id: string): void {
-  const url = thumbs.value[id];
-  if (url) URL.revokeObjectURL(url);
-  const { [id]: _gone, ...rest } = thumbs.value;
-  thumbs.value = rest;
-}
-
-async function loadThumb(id: string): Promise<void> {
-  thumbPending.add(id);
-  const meetingId = props.task.meeting_id;
-  try {
-    const blob = await client.printBlob(meetingId, id, "thumb");
-    if (!alive || !attached.value.some((p) => p.id === id)) return;
-    thumbs.value = { ...thumbs.value, [id]: URL.createObjectURL(blob) };
-  } catch {
-    if (alive) thumbFailed.value = new Set(thumbFailed.value).add(id);
-  } finally {
-    thumbPending.delete(id);
-  }
-}
-
-watch(
-  () => attached.value.map((p) => p.id).join("\u0000"),
-  () => {
-    const ids = new Set(attached.value.map((p) => p.id));
-    for (const id of Object.keys(thumbs.value)) if (!ids.has(id)) dropThumb(id);
-    for (const id of ids)
-      if (!(id in thumbs.value) && !thumbFailed.value.has(id) && !thumbPending.has(id))
-        void loadThumb(id);
-  },
-  { immediate: true },
+const { thumbs } = usePrintThumbs(
+  () => props.task.meeting_id,
+  () => attached.value.map((p) => p.id),
 );
-onBeforeUnmount(() => {
-  alive = false;
-  for (const id of Object.keys(thumbs.value)) dropThumb(id);
-});
 
 function removePrint(id: string): void {
   if (locked.value) return;
@@ -587,8 +548,10 @@ function informNumber(): void {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
   padding: 0;
   line-height: 1;
   border: 1px solid var(--border);
