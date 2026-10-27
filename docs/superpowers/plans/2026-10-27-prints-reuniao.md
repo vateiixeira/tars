@@ -333,7 +333,7 @@ git commit -m "[Feat] Capturar a tela inteira pelo portal do GNOME"
   - `images.load_for_claude(store, meeting_id) -> ClaudeImages`
   - `images.jpeg_bytes(path: Path, max_edge: int) -> bytes`: levanta `OSError`/`PIL.UnidentifiedImageError` se a imagem for ilegível.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```python
 # test_timing.py
@@ -370,12 +370,12 @@ def test_claude_images_skips_unreadable(data_home, store):
     # um arquivo com bytes lixo: fica em omitted, os demais seguem
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv add pillow && uv run --frozen pytest tests/prints -q`
 Expected: FAIL (módulos inexistentes)
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - `ClockMarks` começa com a marca `(0.0, started_at)`. `to_rel` pega a última marca com `wall_k <= wall` (ou a primeira, se nenhuma servir) e devolve `max(0.0, rel_k + (wall - wall_k).total_seconds())`.
 - `find_candidates` usa `os.scandir`, só arquivos regulares, e `datetime.fromtimestamp(st.st_mtime)` (local, sem fuso, igual a `started_at`). Ordena por `mtime_ns`.
@@ -384,12 +384,12 @@ Expected: FAIL (módulos inexistentes)
 - `store_print` chama `files.prints_dir(...)` (que cria com `mkdir(mode=0o700)`) e dá `chmod 0o600` no destino. Se `add_print` devolver None, apaga o destino e devolve None.
 - `load_for_claude` ordena como `list_prints`, rotula todos e envia os primeiros `MAX_IMAGES` que conseguir ler. Os ilegíveis e os excedentes entram em `omitted`.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/prints -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pyproject.toml uv.lock src/whisper_ditado/prints tests/prints
