@@ -18,7 +18,7 @@ Em Ubuntu 24.04, as dependências de execução são:
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg pipewire-bin wl-clipboard ydotool libnotify-bin \
+sudo apt install ffmpeg pipewire-bin wl-clipboard xclip ydotool libnotify-bin \
   libwebkit2gtk-4.1-0 libayatana-appindicator3-1 librsvg2-2
 uv sync --frozen --no-dev
 python3 scripts/install_user.py --dry-run

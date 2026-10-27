@@ -29,7 +29,7 @@ from whisper_ditado.events import EventBus
 from whisper_ditado.dictation_samples import DictationSamples
 from whisper_ditado.feedback import play_start_sound
 from whisper_ditado.hotkey import Action, HotkeyState, parse_hotkey
-from whisper_ditado.paste import paste
+from whisper_ditado.paste import log_clipboard_session, paste
 from whisper_ditado.priority import DictationBusy
 from whisper_ditado.settings import DEFAULTS, Settings
 from whisper_ditado.transcriber import SAMPLE_RATE, Transcriber, TranscriberOptions
@@ -299,6 +299,7 @@ class DictationService:
         self.loop = asyncio.get_running_loop()
         scanner = asyncio.create_task(self._scan_forever())
         log.info("Pronto. Microfone: %s; áudio do PC: %s.", self.cfg.key, self.cfg.output_key)
+        log_clipboard_session(log)
         try:
             await self._stop.wait()
         finally:

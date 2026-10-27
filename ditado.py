@@ -4,7 +4,7 @@
 - Teclado lido direto via evdev (o GNOME Wayland não deixa apps registrarem atalhos globais).
 - Áudio capturado com pw-record (PCM s16 mono 16 kHz).
 - Transcrição com faster-whisper na GPU; o modelo fica carregado e aquecido.
-- Colagem via clipboard (wl-copy) + atalho de colar simulado pelo ydotool, o que
+- Colagem via clipboard (wl-copy no Wayland, xclip/xsel no X11) + atalho de colar simulado pelo ydotool, o que
   preserva acentos (o `ydotool type` não digita caracteres fora do layout US).
 
 Configuração por variáveis de ambiente (veja README.md). Vocabulário e substituições
@@ -28,19 +28,13 @@ import numpy as np
 from evdev import ecodes
 from faster_whisper import WhisperModel
 
+from whisper_ditado.paste import PASTE_KEYS, log_clipboard_session
+from whisper_ditado.paste import paste as paste_text
+
 log = logging.getLogger("ditado")
 
 SAMPLE_RATE = 16000
 SCAN_INTERVAL_SEC = 3
-
-# Sequências para `ydotool key` (código:1 = aperta, código:0 = solta).
-# 29 = LEFTCTRL, 42 = LEFTSHIFT, 47 = V, 110 = INSERT
-PASTE_KEYS = {
-    # Cola em GTK, Chrome/Electron e terminais VTE (que colam a seleção primária).
-    "shift+insert": ["42:1", "110:1", "110:0", "42:0"],
-    "ctrl+v": ["29:1", "47:1", "47:0", "29:0"],
-    "ctrl+shift+v": ["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"],
-}
 
 # Apelidos aceitos em DITADO_KEY; cada um vale tanto para o lado esquerdo quanto o direito.
 _CTRL = (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL)
@@ -360,12 +354,7 @@ class Transcriber:
 
 
 def paste(text: str, cfg: Config) -> None:
-    data = text.encode()
-    subprocess.run(["wl-copy"], input=data, check=True, timeout=5)
-    if cfg.paste == "shift+insert":
-        subprocess.run(["wl-copy", "--primary"], input=data, check=True, timeout=5)
-    time.sleep(0.05)  # dá tempo do compositor registrar o novo dono do clipboard
-    subprocess.run([cfg.ydotool, "key", *PASTE_KEYS[cfg.paste]], check=True, timeout=5)
+    paste_text(text, cfg.paste, cfg.ydotool)
 
 
 class Ditado:
@@ -394,6 +383,7 @@ class Ditado:
 
         scanner = asyncio.create_task(self._scan_forever())
         log.info("Pronto. Segure %s para ditar.", self.cfg.key_name)
+        log_clipboard_session(log)
         await stop.wait()
 
         self.stopping = True
