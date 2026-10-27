@@ -415,7 +415,7 @@ git commit -m "[Feat] Adicionar núcleo dos prints: horário, arquivos e Flamesh
   - Alerta gravado: `kind="print_failed"`, com `start_s = end_s = at_s`. `ALERT_MESSAGES["print_failed"] = "Não foi possível tirar um print"`.
   - `DictationService(..., on_print: Callable[[], object] | None = None)`.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 Em `tests/meeting/test_session.py`, use o `Rig` com `capture=`, `print_sound=` e `notify_fn=` falsos:
 
@@ -460,12 +460,12 @@ def test_print_hotkey_calls_on_print_once_per_press_even_paused(...):
 
 Em `tests/test_feedback.py`, `play_print_sound(True)`/`(False)` tocam os tons `"print"`/`"error"` (com `subprocess.run` mockado).
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/meeting/test_session.py tests/test_dictation.py tests/test_feedback.py -q`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - `_Session` ganha `clock: ClockMarks` e `last_clock_mark: float`. Em `tick()`, a cada `CLOCK_MARK_S = 10.0` do relógio monotônico, chame `s.clock.mark(now - s.t0, self._now())`.
 - `capture_print`:
@@ -481,12 +481,12 @@ Expected: FAIL
   - `apply_settings` recria `print_hotkey` quando os grupos mudam.
 - `main.py`: passe `on_print=meetings.capture_print` ao `DictationService`.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/meeting tests/test_dictation.py tests/test_feedback.py -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/whisper_ditado/{feedback,dictation,main}.py src/whisper_ditado/meeting/session.py tests/test_feedback.py tests/meeting/test_session.py tests/test_dictation.py
@@ -514,7 +514,7 @@ git commit -m "[Feat] Capturar prints na reunião por atalho e importar do Flame
   - `ScanItem.as_store_item(stage_id, labels: dict[str, str] | None = None)`: inclui `"print_ids"`.
   - `PRINTS_BLOCK` em `prompts.py`.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```python
 # test_claude_cli.py
@@ -543,12 +543,12 @@ def test_parse_scan_keeps_known_print_labels():
 def test_build_scan_prompt_lists_prints_block_only_when_present(): ...
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/test_claude_cli.py tests/issues/test_runner.py tests/issues/test_scan.py -q`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - Sem imagens, `_run` mantém exatamente o comando atual. Com imagens, troca `--output-format json` por `--input-format stream-json --output-format stream-json --verbose`, envia `stream_user_message(...) + "\n"` e interpreta o último evento `result` com as mesmas regras de `_parse` (login, `is_error`, resultado não string).
 - Em `summarize` com imagens, o prompt fica `f"{prompt}\n\n{PRINTS_BLOCK}\n\n--- TRANSCRIÇÃO ---\n{transcript}"`. O texto do bloco:
@@ -562,12 +562,12 @@ As imagens a seguir são prints tirados durante a reunião. Cada uma vem antes i
 - `SCAN_SYSTEM` ganha a chave `"prints"` (lista dos rótulos `"Pn"` dos prints que mostram o problema ou a tela da issue; `[]` se nenhum). Com `print_labels`, `build_scan_prompt` acrescenta `PRINTS_BLOCK` e a lista de rótulos antes da transcrição.
 - `_item` lê `raw.get("prints")`: só strings, sem repetição, no máximo 5.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/test_claude_cli.py tests/issues -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/whisper_ditado/claude_cli.py src/whisper_ditado/issues/{runner,scan,prompts}.py tests/test_claude_cli.py tests/issues/test_runner.py tests/issues/test_scan.py
