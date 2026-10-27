@@ -8,7 +8,7 @@ mantendo o pyannote (token) como opção, sem perder nem recadastrar vozes.
 **Architecture:** dois motores com o mesmo protocolo (`available`, `run`, `embed`, `unload`,
 `model_id`, `engine`) atrás de um `DiarizerRouter`, que lê a configuração `diarizer` a cada uso e cai
 para o local quando o pyannote não roda. Todo embedding (de falante e de voz) é gravado junto com o
-identificador do modelo que o gerou. Uma voz tem um embedding por modelo, em `voice_embeddings` (V6).
+identificador do modelo que o gerou. Uma voz tem um embedding por modelo, em `voice_embeddings` (V7; a V6 é a dos prints de tela, vinda da `main`).
 O que faltar para o modelo em uso é recalculado a partir do `pc.opus` das reuniões ligadas, antes do
 casamento.
 
@@ -359,7 +359,7 @@ Algoritmo de `run(audio)`:
 
 ---
 
-### Task 6: Embeddings por modelo no banco (V6) e configurações por motor  *(grupo B)*
+### Task 6: Embeddings por modelo no banco (V7) e configurações por motor  *(grupo B)*
 
 **Files:**
 - Modify: `src/whisper_ditado/store.py`, `src/whisper_ditado/settings.py`, `src/whisper_ditado/meeting/voices.py`,
@@ -381,7 +381,7 @@ Algoritmo de `run(audio)`:
   - `linked_speakers(voice_id: str) -> list[Speaker]`: falantes com esse `voice_id` e `is_me = 0`, por
     `meetings.started_at`, depois `speakers.rowid`.
   - `list_voices()`/`get_voice()` carregam os embeddings de `voice_embeddings`.
-  - Migração `_SCHEMA_V6`, acrescentada em `_MIGRATIONS` (o comentário "Índice = versão destino" volta para
+  - Migração `_SCHEMA_V7` (depois da `_SCHEMA_V6` dos prints), acrescentada em `_MIGRATIONS` (o comentário "Índice = versão destino" volta para
     cima de `_MIGRATIONS`):
     ```sql
     CREATE TABLE voice_embeddings (
@@ -436,8 +436,8 @@ Algoritmo de `run(audio)`:
   - `GET /voices`, `/enroll` e o renomear passam `_active_model(ctx)` para `_voice_json`.
 
 - [x] **Step 1: Testes que falham.**
-  - `tests/test_store.py`: `user_version` passa a 6 e `voice_embeddings` entra no conjunto de tabelas.
-    `test_migration_v6_tags_existing_embeddings_and_settings`: cria um banco em V5 aplicando
+  - `tests/test_store.py`: `user_version` passa a 7 e `voice_embeddings` entra no conjunto de tabelas.
+    `test_migration_v7_tags_existing_embeddings_and_settings`: cria um banco em V5 aplicando
     `store._MIGRATIONS[:5]` à mão (str ou callable, com `PRAGMA user_version`). Insere uma voz com
     embedding de 256 floats e `n_samples=4`, uma voz sem embedding, um falante com embedding, um sem, e as
     configurações `hf_token="hf_x"` e `voice_match_threshold=0.7` (JSON). Ao abrir com `Store`:
@@ -445,7 +445,7 @@ Algoritmo de `run(audio)`:
     tem `{}`, os falantes têm `embedding_model` `"pyannote-community-1"`/`None`,
     `get_setting("diarizer") == "pyannote"`, `get_setting("voice_match_threshold_pyannote") == 0.7` e
     `get_setting("voice_match_threshold") is None`.
-  - `test_migration_v6_without_token_keeps_local_default`: `hf_token` gravado como `null` → nenhuma linha
+  - `test_migration_v7_without_token_keeps_local_default`: `hf_token` gravado como `null` → nenhuma linha
     `diarizer`.
   - `test_voice_embeddings_per_model_roundtrip_and_cascade`: `set_voice_embedding` para dois modelos →
     `list_voices()[0].embeddings` tem os dois. `upsert_voice(replace(v, name="X", embeddings={}))` mantém os
@@ -785,7 +785,7 @@ dominante). Uma reunião de 31 min levou ~150 s com 4 threads. Por isso a busca 
   ```
   Em outro terminal, com o token de `$V/whisper-ditado/api.json`:
   - [ ] `sqlite3 "$V/whisper-ditado/ditado.db" "PRAGMA user_version; SELECT model, count(*) FROM voice_embeddings GROUP BY model; SELECT value FROM settings WHERE key='diarizer'"`
-    → `6`, `pyannote-community-1|6`, `"pyannote"`.
+    → `7`, `pyannote-community-1|6`, `"pyannote"`.
   - [ ] `PUT /api/settings {"diarizer": "local"}` e `POST /api/meetings/<id>/reprocess` em cada uma das 10
     reuniões, uma de cada vez, esperando `ready`. Depois, `voice_embeddings` tem `sherpa-…|6` (ou o número
     de vozes com áudio aproveitável, explicado se for menor). As 18 ligações falante→voz continuam

@@ -94,8 +94,9 @@ para quem já tem o token ou prefere a qualidade dele.
 
 - `store.py`: migrações por `PRAGMA user_version`, com
   `_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5]` (a V3 é a função
-  `issues.legacy.migration_sql`). A próxima é a **V6**. O banco real
-  (`~/.local/share/whisper-ditado/ditado.db`) está em `user_version = 5`.
+  `issues.legacy.migration_sql`). A V6 é a dos prints de tela (`meeting_prints`, vinda da `main`), e a desta
+  funcionalidade é a **V7**. O banco real (`~/.local/share/whisper-ditado/ditado.db`) já está em
+  `user_version = 6`.
 - Tabela `voices` (V1): `id`, `name`, um único `embedding BLOB` (`float32.tobytes()`, 256 floats,
   WeSpeaker ResNet34 do community-1), `n_samples`, `source_meeting_id`, `source_speaker_id`,
   `created_at`, `updated_at`. Tabela `speakers` (V1): `voice_id` (`ON DELETE SET NULL`), `is_me`,
@@ -240,7 +241,7 @@ para quem já tem o token ou prefere a qualidade dele.
   3.0 em ONNX + WeSpeaker/3D-Speaker/TitaNet), escolhido por qualidade em reuniões reais em
   português, usando as reuniões existentes como teste (comparar com o resultado do pyannote).
 - Parâmetros de clustering (limiar/número de falantes) e duração mínima de trecho para embedding.
-- Formato do armazenamento por modelo (nova tabela ou colunas); a próxima migração é a V6.
+- Formato do armazenamento por modelo (nova tabela ou colunas); a migração desta funcionalidade é a V7.
 - Onde e quando roda o recálculo das vozes (na subida do backend, ao trocar de motor, sob demanda na
   finalização), desde que nunca compare modelos diferentes e não bloqueie a API.
 - Pasta do cache dos modelos (sugestão: dentro de `~/.local/share/whisper-ditado/models/`).
