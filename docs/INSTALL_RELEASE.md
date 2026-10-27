@@ -33,6 +33,10 @@ A separação de falantes funciona sem token, com o motor local. Para usar o pya
 `uv sync --frozen --no-dev --extra pyannote` no lugar do `uv sync --frozen --no-dev` acima e
 configure o token do Hugging Face (veja o README).
 
+Os prints de tela nas reuniões são opcionais. As bibliotecas Python que eles usam (Pillow e
+jeepney) vêm do `uv sync`. O modo Nativo usa o `xdg-desktop-portal` da sessão, e o modo Flameshot
+lê uma pasta de imagens, sem exigir o Flameshot instalado; veja "Prints de tela" no README.
+
 Para atualizar, extraia a nova versão em outra pasta e prepare suas dependências com `uv sync --frozen --no-dev` (acrescente `--extra pyannote` se você usa o pyannote).
 Encerre o app e pare o backend quando não houver reunião ou ditado em andamento. Execute o
 instalador da nova pasta e inicie o app novamente. Reuniões, vozes e configurações ficam na

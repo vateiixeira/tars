@@ -30,11 +30,8 @@ jobs:
             version=$(python3 scripts/release.py check)
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-  checks:
-    needs: validate
-    uses: ./.github/workflows/ci.yml
   build:
-    needs: [validate, checks]
+    needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:

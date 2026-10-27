@@ -5,7 +5,7 @@ import pytest
 
 from whisper_ditado.issues import jobs as jobs_mod
 from whisper_ditado.issues.jobs import JobBusy, PostMeetingJobs
-from whisper_ditado.issues.client import CreateOutcome, IssueError, IssueOptions, Option
+from whisper_ditado.issues.client import AttachOutcome, CreateOutcome, IssueError, IssueOptions, Option
 from whisper_ditado.issues.scan import ScanItem
 from whisper_ditado.claude_cli import ClaudeError
 from whisper_ditado.settings import Settings
@@ -39,11 +39,13 @@ class FakeClaude:
         self.model = None
         self.effort = None
         self.summarize_calls = []
+        self.summarize_images = []
         self.summary = "RESUMO"
         self.error = None
 
-    def summarize(self, transcript, prompt):
+    def summarize(self, transcript, prompt, images=()):
         self.summarize_calls.append((transcript, prompt, self.bin_path, self.model, self.effort))
+        self.summarize_images.append(list(images))
         if self.error is not None:
             raise self.error
         return self.summary
@@ -67,6 +69,14 @@ class FakeIssue:
     def __init__(self):
         self.outcomes = []
         self.sent = []
+        self.attached = []
+        self.attach_outcome = AttachOutcome("sent", None)
+
+    def attach_prints(self, number, url, files):
+        self.attached.append((number, url, [(label, path.name, path.read_bytes()) for label, path in files]))
+        if isinstance(self.attach_outcome, Exception):
+            raise self.attach_outcome
+        return self.attach_outcome
 
     def create_issue(self, fields):
         self.sent.append(fields)
@@ -120,9 +130,9 @@ class Rig:
         self.jobs = PostMeetingJobs(store, settings, self.bus, self.claude, self.issues_client, self.options,
                                 self.tasks_claude)
 
-    def _run_scan(self, cli, root, rules, transcript, summary, options, existing, segments, *, context=""):
+    def _run_scan(self, cli, root, rules, transcript, summary, options, existing, segments, *, context="", images=()):
         self.scans.append({"cli": cli, "root": root, "rules": rules, "transcript": transcript,
-                           "summary": summary, "options": options, "existing": existing, "context": context,
+                           "summary": summary, "options": options, "existing": existing, "context": context, "images": list(images),
                            "bin": cli.bin_path, "model": cli.model, "effort": cli.effort})
         if self.on_scan is not None:
             self.on_scan()
@@ -136,6 +146,11 @@ class Rig:
 
     def ready(self, mid):
         self.jobs.on_ready(mid)
+        self.wait_idle()
+
+    def scan(self, mid, **kw):
+        """Levantamento manual (a única forma de rodá-lo): pede e espera a fila esvaziar."""
+        self.jobs.rescan(mid, **kw)
         self.wait_idle()
 
     def events(self, kind=None):
@@ -168,7 +183,7 @@ def test_on_ready_summarizes_when_enabled_and_missing(rig, store, mid):
 
 def test_on_ready_only_enqueues(rig, store, mid):
     release = threading.Event()
-    rig.claude.summarize = lambda t, p: release.wait(10) and "R"
+    rig.claude.summarize = lambda t, p, images=(): release.wait(10) and "R"
     rig.jobs.on_ready(mid)  # volta já, mesmo com o Claude preso
     assert store.get_summary(mid) is None
     release.set()
@@ -205,9 +220,7 @@ def test_summary_failure_is_recorded_not_fatal(rig, store, settings, mid):
     assert store.get_summary(mid) is None
     assert store.get_meeting(mid).status == "ready"
     assert job_event(mid, "summary", "error") in rig.bus.events
-    # o levantamento ainda roda, sem resumo
-    assert len(rig.scans) == 1 and rig.scans[0]["summary"] is None
-    assert store.get_job(mid, "tasks").state == "done"
+    assert rig.scans == [] and store.get_job(mid, "tasks") is None  # o levantamento é manual
 
 
 def test_summary_unexpected_exception_is_recorded(rig, store, mid):
@@ -227,13 +240,14 @@ def test_empty_summary_is_an_error(rig, store, mid):
 # -- levantamento --------------------------------------------------------------
 
 
-def test_on_ready_scans_only_with_flow_enabled_and_valid_root(rig, store, settings, tmp_path, mid):
-    rig.ready(mid)  # desligado (padrão)
-    assert store.get_job(mid, "tasks") is None and rig.scans == []
-
+def test_scan_root_vanishing_after_validation_is_an_error(rig, store, settings, tmp_path, mid):
     settings.update({"issues_enabled": True})
+    release = threading.Event()
+    rig.jobs._claude_worker.submit(lambda: release.wait(10), gated=False)  # segura a fila até a pasta sumir
+    rig.jobs.rescan(mid)
     settings.store.set_setting("issues_root", str(tmp_path / "sumiu"))  # a pasta sumiu depois de validada
-    rig.ready(mid)
+    release.set()
+    rig.wait_idle()
     job = store.get_job(mid, "tasks")
     assert (job.state, job.error) == ("error", f"Pasta raiz não encontrada: {tmp_path / 'sumiu'}")
     assert rig.scans == [] and rig.options.calls == 0
@@ -244,6 +258,7 @@ def test_scan_saves_items_with_default_stage(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.scan_result = [scan_item("A"), scan_item("B")]
     rig.ready(mid)
+    rig.scan(mid)
     tasks = store.list_tasks(mid)
     assert [(t.title, t.stage_id, t.assignee_id) for t in tasks] == [("A", 2, 9), ("B", 2, 9)]
     assert store.get_job(mid, "tasks").state == "done"
@@ -261,7 +276,7 @@ def test_scan_runs_without_options_when_issues_client_fails(rig, store, settings
     settings.update({"issues_enabled": True})
     rig.options.error = IssueError("sem login")
     rig.scan_result = [scan_item("A", product_id=None, assignee_id=None, team_id=None)]
-    rig.ready(mid)
+    rig.scan(mid)
     assert rig.scans[0]["options"] is None
     [task] = store.list_tasks(mid)
     assert (task.stage_id, task.assignee_id, task.team_id, task.product_id) == (None,) * 4
@@ -271,14 +286,14 @@ def test_scan_runs_without_options_when_issues_client_fails(rig, store, settings
 def test_scan_without_to_do_stage_leaves_stage_empty(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.options.options = IssueOptions("vi", [], [], [], [Option(1, "Backlog")], T0)
-    rig.ready(mid)
+    rig.scan(mid)
     assert [t.stage_id for t in store.list_tasks(mid)] == [None]
 
 
 def test_scan_error_is_recorded(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.scan_error = ClaudeError("O levantamento demorou demais (10 min)")
-    rig.ready(mid)
+    rig.scan(mid)
     job = store.get_job(mid, "tasks")
     assert (job.state, job.error) == ("error", "O levantamento demorou demais (10 min)")
     assert rig.events("tasks_changed") == []
@@ -288,7 +303,7 @@ def test_scan_error_is_recorded(rig, store, settings, mid):
 def test_scan_unexpected_exception_is_recorded(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.scan_error = RuntimeError("bug")
-    rig.ready(mid)
+    rig.scan(mid)
     job = store.get_job(mid, "tasks")
     assert job.state == "error" and job.error and "bug" not in job.error
 
@@ -300,15 +315,16 @@ def test_scan_syncs_claude_settings_before_fetching_options(rig, store, settings
     seen = []
     rig.options.get = lambda refresh=False: seen.append(
         (rig.tasks_claude.bin_path, rig.tasks_claude.model, rig.tasks_claude.effort)) or OPTS
-    rig.ready(mid)
+    rig.scan(mid)
     assert seen == [("/x/claude", "opus", "high")]
 
 
 def test_store_error_inside_scan_except_still_finishes_the_job(rig, store, settings, mid, monkeypatch):
     settings.update({"issues_enabled": True})
     rig.scan_error = RuntimeError("bug")
-    monkeypatch.setattr(store, "get_meeting", lambda _id: (_ for _ in ()).throw(RuntimeError("banco")))
-    rig.ready(mid)
+    rig.on_scan = lambda: monkeypatch.setattr(
+        store, "get_meeting", lambda _id: (_ for _ in ()).throw(RuntimeError("banco")))
+    rig.scan(mid)
     job = store.get_job(mid, "tasks")
     assert job.state == "error" and job.error
     assert job_event(mid, "tasks", "error") in rig.bus.events
@@ -326,18 +342,18 @@ def test_store_error_inside_summary_except_still_finishes_the_job(rig, store, mi
 def test_scan_passes_existing_tasks(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     old = store.add_task(mid, {"title": "Antiga"}, origin="manual")
-    rig.ready(mid)
+    rig.scan(mid)
     assert [t.id for t in rig.scans[0]["existing"]] == [old.id]
 
 
-def test_on_ready_is_idempotent(rig, store, settings, mid):
+def test_on_ready_never_scans(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
+    rig.ready(mid)
+    assert rig.scans == [] and store.get_job(mid, "tasks") is None
     store.set_job(mid, "tasks", "error", "Interrompido: o serviço reiniciou")
     rig.ready(mid)
     assert rig.scans == []
     assert store.get_job(mid, "tasks").state == "error"
-    rig.ready(mid)
-    assert rig.scans == []
 
 
 def test_rescan_validation_order(rig, store, settings, tmp_path, mid):
@@ -468,7 +484,7 @@ def test_cancel_running_scan_preserves_tasks_and_allows_new_scan(rig, store, set
     ]
 
 
-def test_cancel_auto_scan_during_options_fetch_does_not_start_scan(rig, store, settings, mid):
+def test_cancel_scan_during_options_fetch_does_not_start_scan(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     entered, release = threading.Event(), threading.Event()
 
@@ -478,7 +494,7 @@ def test_cancel_auto_scan_during_options_fetch_does_not_start_scan(rig, store, s
         return OPTS
 
     rig.options.get = options
-    rig.jobs.on_ready(mid)
+    rig.jobs.rescan(mid)
     assert entered.wait(5)
     try:
         rig.jobs.cancel_scan(mid)
@@ -486,7 +502,6 @@ def test_cancel_auto_scan_during_options_fetch_does_not_start_scan(rig, store, s
         release.set()
         rig.wait_idle()
     assert store.get_job(mid, "tasks").state == "cancelled"
-    assert store.get_job(mid, "summary").state == "done"
     assert rig.scans == []
 
 
@@ -503,7 +518,7 @@ def test_cancel_finished_or_missing_scan_is_noop(rig, store, settings, mid):
 def test_scan_of_deleted_meeting_is_silent(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     rig.on_scan = lambda: store.delete_meeting(mid)
-    rig.ready(mid)
+    rig.scan(mid)
     assert store.list_tasks(mid) == [] and store.get_job(mid, "tasks") is None
     assert rig.events("tasks_changed") == []
     assert job_event(mid, "tasks", "done") not in rig.bus.events
@@ -511,7 +526,7 @@ def test_scan_of_deleted_meeting_is_silent(rig, store, settings, mid):
 
 
 def test_summary_of_deleted_meeting_is_silent(rig, store, mid):
-    def gone(transcript, prompt):
+    def gone(transcript, prompt, images=()):
         store.delete_meeting(mid)
         return "R"
 
@@ -527,6 +542,7 @@ def test_jobs_sync_claude_settings(rig, store, settings, mid):
     settings.update({"issues_enabled": True, "claude_bin": "/x/claude", "claude_model": "sonnet",
                      "claude_effort": "low", "tasks_model": "opus", "tasks_effort": "max"})
     rig.ready(mid)
+    rig.scan(mid)
     # o resumo usa claude_*; o levantamento usa tasks_*
     assert rig.claude.summarize_calls[0][2:] == ("/x/claude", "sonnet", "low")
     assert rig.scans[0]["cli"] is rig.tasks_claude
@@ -538,6 +554,48 @@ def test_jobs_sync_claude_settings(rig, store, settings, mid):
     rig.wait_idle()
     assert (rig.scans[1]["bin"], rig.scans[1]["model"], rig.scans[1]["effort"]) == ("/y/claude", None, None)
     assert (rig.claude.model, rig.claude.effort) == ("sonnet", "low")  # o cli do resumo não é tocado pelo levantamento
+
+
+# -- prints --------------------------------------------------------------------
+
+
+def _png(path, color):
+    from PIL import Image
+
+    Image.new("RGB", (8, 8), color).save(path)
+    return path
+
+
+def test_summary_and_scan_receive_prints(rig, store, settings, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import store_print
+
+    settings.update({"issues_enabled": True})
+    prints = [
+        store_print(store, mid, _png(tmp_path / f"p{i}.png", c), at_s=float(i), source="native", move=False)
+        for i, c in enumerate(("red", "blue"), start=1)
+    ]
+    rig.ready(mid)
+    [images] = rig.claude.summarize_images
+    assert [i.label for i in images] == ["P1", "P2"]
+
+    rig.scan_result = [scan_item("Com print", prints=["P2", "P9"])]
+    rig.scan(mid)
+    assert [i.label for i in rig.scans[0]["images"]] == ["P1", "P2"]
+    [task] = store.list_tasks(mid)
+    assert task.print_ids == [prints[1].id]
+
+
+def test_unreadable_prints_do_not_stop_summary_and_scan(rig, store, settings, mid, monkeypatch):
+    settings.update({"issues_enabled": True})
+
+    def boom(_store, _mid):
+        raise RuntimeError("disco")
+
+    monkeypatch.setattr(jobs_mod, "load_for_claude", boom)
+    rig.ready(mid)
+    rig.scan(mid)
+    assert rig.claude.summarize_images == [[]] and rig.scans[0]["images"] == []
+    assert store.get_summary(mid) == "RESUMO" and store.get_job(mid, "tasks").state == "done"
 
 
 # -- criação -------------------------------------------------------------------
@@ -646,6 +704,178 @@ def test_create_does_not_wait_for_the_claude_worker(rig, store, mid):
     rig.wait_idle()
 
 
+# -- anexo dos prints --------------------------------------------------------------
+
+
+def _task_with_prints(store, mid, tmp_path, n_prints=2, attach=(1,)):
+    """Cria prints na reunião e uma sugestão (reservada) que anexa os de índice em `attach` (0-based)."""
+    from whisper_ditado.prints.files import store_print
+
+    prints = [store_print(store, mid, _png(tmp_path / f"a{i}.png", "red"), at_s=float(i), source="native",
+                          move=False) for i in range(n_prints)]
+    t = store.add_task(mid, {"kind": "tarefa", "title": "T", "product_id": 4, "assignee_id": 9, "team_id": 3,
+                             "stage_id": 2}, origin="claude", print_ids=[prints[i].id for i in attach])
+    store.claim_tasks_for_create([t.id])
+    return t.id, prints
+
+
+def test_create_then_attach_records_state(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints import images
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, attach=(1,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "https://k/7", None)]
+    seen = []
+    rig.issues_client.attach_outcome = AttachOutcome("sent", None)
+    real_attach = rig.issues_client.attach_prints
+
+    def attach(number, url, files):
+        seen.append((store.get_task(task_id).create_state, store.get_task(task_id).attach_state))
+        return real_attach(number, url, files)
+
+    rig.issues_client.attach_prints = attach
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(number, url, files)] = rig.issues_client.attached
+    from whisper_ditado.prints.files import print_path
+    assert (number, url) == (7, "https://k/7")
+    assert files == [("P2", "print-P2.jpg", images.jpeg_bytes(print_path(prints[1]), images.MAX_EDGE))]
+    assert seen == [("created", "sending")]
+    t = store.get_task(task_id)
+    assert (t.create_state, t.issue_number, t.attach_state, t.attach_error) == ("created", 7, "sent", None)
+    assert {"type": "tasks_changed", "meeting_id": mid} in rig.events("tasks_changed")
+
+
+def test_attach_keeps_label_after_deleting_an_earlier_print(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import delete_print
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, n_prints=3, attach=(2,))
+    delete_print(store, prints[1].id)
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(_, _, files)] = rig.issues_client.attached
+    assert [(label, name) for label, name, _ in files] == [("P3", "print-P3.jpg")]
+
+
+def test_attach_records_unsupported(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.issues_client.attach_outcome = AttachOutcome("unsupported", "O MCP de issues não aceita imagens")
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert (t.attach_state, t.attach_error) == ("unsupported", "O MCP de issues não aceita imagens")
+
+
+def test_attach_skips_missing_files(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import print_path
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, n_prints=2, attach=(0, 1))
+    print_path(prints[0]).unlink()
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(_, _, files)] = rig.issues_client.attached
+    assert [(label, name) for label, name, _ in files] == [("P2", "print-P2.jpg")]
+
+    other_id, others = _task_with_prints(store, mid, tmp_path, n_prints=1, attach=(0,))
+    print_path(others[0]).unlink()
+    rig.issues_client.outcomes = [CreateOutcome("created", 8, "u", None)]
+    rig.jobs.create([other_id])
+    rig.wait_idle()
+    assert len(rig.issues_client.attached) == 1  # sem arquivos: o anexo nem é tentado
+    t = store.get_task(other_id)
+    assert (t.create_state, t.attach_state) == ("created", "none")
+
+
+def test_attach_skips_unreadable_files(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import print_path
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, n_prints=2, attach=(0, 1))
+    print_path(prints[0]).write_bytes(b"nao e imagem")
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(_, _, files)] = rig.issues_client.attached
+    assert [(label, name) for label, name, _ in files] == [("P2", "print-P2.jpg")]
+    assert store.get_task(task_id).attach_state == "sent"
+
+    other_id, others = _task_with_prints(store, mid, tmp_path, n_prints=1, attach=(0,))
+    print_path(others[0]).write_bytes(b"nao e imagem")
+    rig.issues_client.outcomes = [CreateOutcome("created", 8, "u", None)]
+    rig.jobs.create([other_id])
+    rig.wait_idle()
+    assert len(rig.issues_client.attached) == 1  # nenhum legível: o anexo nem é tentado
+    t = store.get_task(other_id)
+    assert (t.create_state, t.attach_state, t.attach_error) == ("created", "none", None)
+
+
+def test_attach_not_called_when_not_created_or_without_prints(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    plain = make_tasks(store, mid, 1)
+    rig.issues_client.outcomes = [CreateOutcome("failed", None, None, "recusado"),
+                                  CreateOutcome("created", 9, "u", None)]
+    rig.jobs.create([task_id, *plain])
+    rig.wait_idle()
+    assert rig.issues_client.attached == []
+    assert store.get_task(task_id).attach_state == "none" and store.get_task(plain[0]).attach_state == "none"
+
+
+def test_attach_failure_keeps_issue_created(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.issues_client.attach_outcome = RuntimeError("bug")
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert (t.create_state, t.issue_number, t.attach_state) == ("created", 7, "failed")
+    assert t.attach_error
+
+
+def test_attach_invalid_outcome_state_is_failed_not_stuck_sending(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.issues_client.attach_outcome = AttachOutcome("nope", None)
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    assert store.get_task(task_id).attach_state == "failed"
+
+
+def test_attach_publish_error_never_touches_create_state(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    real_publish, raised = rig.bus.publish, []
+
+    def publish(event):
+        if not raised and event.get("type") == "tasks_changed":
+            raised.append(event)
+            raise RuntimeError("bus")
+        real_publish(event)
+
+    rig.bus.publish = publish
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert raised and (t.create_state, t.issue_number, t.attach_state) == ("created", 7, "sent")
+
+
+def test_attach_raising_never_touches_create_state(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+
+    def boom(tid, number, url):
+        store.set_attach_state(tid, "sending")
+        raise RuntimeError("bug no anexo")
+
+    rig.jobs._attach = boom
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert (t.create_state, t.issue_number, t.create_error) == ("created", 7, None)
+    assert t.attach_state == "failed"
+    assert rig.events("tasks_changed") == [{"type": "tasks_changed", "meeting_id": mid}]
+
+
 # -- encerramento ----------------------------------------------------------------
 
 
@@ -672,7 +902,7 @@ def test_summarize_after_shutdown_does_not_call_claude(rig, store, mid):
 def test_after_shutdown_queued_work_is_dropped(rig, store, settings, mid):
     settings.update({"issues_enabled": True})
     release = threading.Event()
-    rig.claude.summarize = lambda t, p: release.wait(10) and "R"
+    rig.claude.summarize = lambda t, p, images=(): release.wait(10) and "R"
     rig.jobs.on_ready(mid)
     ids = make_tasks(store, mid, 1)
     rig.jobs.shutdown()

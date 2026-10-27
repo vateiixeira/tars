@@ -11,6 +11,7 @@ import { ApiError } from "../api/client";
 import type {
   JobState,
   IssueOptions,
+  MeetingPrint,
   TaskFields,
   TaskSuggestion,
 } from "../api/types";
@@ -26,12 +27,12 @@ import {
 import AppIcon from "./ui/AppIcon.vue";
 import TaskCard from "./TaskCard.vue";
 
-const props = defineProps<{ meetingId: string; startedAt: string }>();
+const props = defineProps<{ meetingId: string; startedAt: string; prints: MeetingPrint[] }>();
 const emit = defineEmits<{ play: [start: number, end: number] }>();
 
 const { client, events, connected } = useStatus();
 
-type Changes = Partial<TaskFields> & { discarded?: boolean };
+type Changes = Partial<TaskFields> & { discarded?: boolean; print_ids?: string[] };
 
 const loaded = ref(false);
 const loadError = ref<string | null>(null);
@@ -394,11 +395,12 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       <button
         type="button"
         class="btn"
-        :disabled="!connected || !enabled || running || isBusy('scan') || isBusy('cancel-scan')"
+        :disabled="!connected || !loaded || !enabled || running || isBusy('scan') || isBusy('cancel-scan')"
         :title="enabled ? undefined : 'O criador de issues está desligado'"
         @click="rescan"
       >
-        <AppIcon name="refresh" :size="16" /> Refazer sugestões
+        <AppIcon name="refresh" :size="16" />
+        {{ scan === null ? "Levantar tarefas" : "Refazer sugestões" }}
       </button>
       <button
         type="button"
@@ -417,7 +419,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
     </div>
 
     <details v-if="enabled || items.length" class="scan-context">
-      <summary>Contexto para refazer sugestões{{ scanContext.trim() ? " (preenchido)" : " (opcional)" }}</summary>
+      <summary>Contexto para o levantamento{{ scanContext.trim() ? " (preenchido)" : " (opcional)" }}</summary>
       <label :for="contextId">Como você quer orientar as sugestões?</label>
       <textarea
         :id="contextId"
@@ -429,7 +431,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
         placeholder="Ex.: Foque nas pendências do checkout e agrupe os ajustes de pagamento em uma tarefa."
       ></textarea>
       <p :id="`${contextId}-hint`">
-        O texto será usado junto com a transcrição ao clicar em Refazer sugestões.
+        O texto será usado junto com a transcrição e os prints ao levantar as tarefas.
         Tarefas editadas, descartadas ou já enviadas são preservadas.
       </p>
     </details>
@@ -480,7 +482,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
         Nenhuma tarefa identificada nesta reunião
       </p>
       <p v-else-if="scan === null" class="muted">
-        Ainda não há levantamento de tarefas para esta reunião.
+        Revise os prints e clique em Levantar tarefas.
       </p>
     </template>
 
@@ -563,6 +565,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
           :options="options"
           :missing="openMissing"
           :error="cardErrors[open.id] ?? null"
+          :prints="prints"
           @update="onUpdate"
           @draft="(id, title) => (liveTitles = { ...liveTitles, [id]: title })"
           @play="(s, e) => emit('play', s, e)"

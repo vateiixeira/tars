@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MeetingDetail, Segment } from "../api/types";
-import { alertLines, exportFileName, formatDuration, speakerSamples, transcriptText } from "./meeting";
+import { alertLines, exportFileName, formatDuration, segmentAt, speakerSamples, transcriptText } from "./meeting";
 
 const speakers = [
   { id: "s1", label: "Você", voice_id: null, is_me: true, color_index: 0 },
@@ -33,6 +33,19 @@ describe("meeting helpers", () => {
       speakers,
     );
     expect(text).toBe("[00:12] Você: Bom dia\n[1:02:05] João: Oi (ditado)\n[00:05] Desconhecido: Hã");
+  });
+
+  it("exportFileName accepts the zip extension", () => {
+    expect(exportFileName("2026-10-19T14:00:00", "zip")).toBe("reuniao-20261019-1400.zip");
+  });
+
+  it("segmentAt returns the last segment starting at or before the instant, else the first", () => {
+    const segs = [10, 20, 30].map((start_s, id) => ({ id, start_s, end_s: start_s + 5 })) as unknown as Segment[];
+    expect(segmentAt(segs, 25)?.id).toBe(1);
+    expect(segmentAt(segs, 20)?.id).toBe(1);
+    expect(segmentAt(segs, 99)?.id).toBe(2);
+    expect(segmentAt(segs, 2)?.id).toBe(0);
+    expect(segmentAt([], 5)).toBeUndefined();
   });
 
   it("exportFileName uses the local start time", () => {

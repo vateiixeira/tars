@@ -27,6 +27,9 @@ Modelo de threads (nada disto bloqueia o loop do asyncio):
   trecho decodificado pelo Whisper das reuniões (`Transcriber.pause`) e antes da
   diarização.
 - `meeting-levels`: medição de níveis fora de reunião (tela de configurações).
+- `meeting-print`: uma captura de tela pelo portal (modo `native`), disparada pelo atalho
+  global; `capture_print` só agenda e volta na hora (é chamado do loop do evdev). Um
+  segundo aperto durante a captura é ignorado (`_print_lock`).
 """
 
 from __future__ import annotations
@@ -48,10 +51,15 @@ from whisper_ditado.audio.aec import SOURCE_NAME as AEC_PREFIX
 from whisper_ditado.audio.aec import EchoCanceller
 from whisper_ditado.audio.capture import BYTES_PER_SAMPLE, SAMPLE_RATE, TrackRecorder
 from whisper_ditado.audio.levels import KINDS, HealthMonitor
+from whisper_ditado.feedback import notify_error, play_print_sound
 from whisper_ditado.meeting import finalize as fin
 from whisper_ditado.meeting.incremental import IncrementalTranscriber, Vad, default_vad
 from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.memory import release_unused_memory
+from whisper_ditado.prints.files import store_print
+from whisper_ditado.prints.flameshot import import_folder, resolve_folder
+from whisper_ditado.prints.portal import capture_screen
+from whisper_ditado.prints.timing import ClockMarks
 from whisper_ditado.settings import Settings
 from whisper_ditado.store import Store
 from whisper_ditado.worker import SerialWorker
@@ -63,6 +71,8 @@ State = Literal["idle", "recording", "processing"]
 TICK_S = 0.1
 GRAPH_EVERY_S = 2.0
 FEED_EVERY_S = 10.0
+CLOCK_MARK_S = 10.0  # par (relógio da reunião, relógio de parede) para datar prints do Flameshot
+CLOCK_JUMP_S = 1.0  # salto do relógio de parede (suspensão) que antecipa a próxima marca
 DEAD_AFTER_S = 1.0  # sem processo de captura por mais que isso = trilha parou
 MONITOR_MAX_S = 60.0
 LEVEL_FLOOR_DB = -100.0  # -inf não é JSON válido
@@ -74,6 +84,7 @@ ALERT_MESSAGES = {
     "pc_wrong_output": "Áudio da chamada não está sendo captado",
     "mic_dead": "Microfone desconectado",
     "pc_dead": "Captura do áudio do PC parou",
+    "print_failed": "Não foi possível tirar um print",
 }
 
 
@@ -92,6 +103,9 @@ class _Session:
     follow: bool
     aec_enabled: bool
     health: HealthMonitor
+    clock: ClockMarks
+    last_clock_mark: float  # relógio monotônico da última marca
+    last_clock_wall: datetime  # relógio de parede da última marca
     mic_device: str | None = None  # microfone em uso (sem o AEC)
     mic_target: str | None = None  # alvo atual da trilha do microfone (dispositivo ou AEC)
     pc_sink: str | None = None
@@ -178,6 +192,9 @@ class MeetingManager:
         own_pids: set[int] | None = None,
         gpu_gate: Callable[[], None] | None = None,
         on_ready: Callable[[str], None] | None = None,
+        capture: Callable[[], Path] = capture_screen,
+        print_sound: Callable[[bool], object] = play_print_sound,
+        notify_fn: Callable[[str], None] = notify_error,
     ) -> None:
         self._store = store
         self._settings = settings
@@ -199,6 +216,10 @@ class MeetingManager:
         self._tick_s = tick_s
         self._vad = vad
         self._own_pids = own_pids if own_pids is not None else {os.getpid()}
+        self._capture = capture
+        self._print_sound = print_sound
+        self._notify_fn = notify_fn
+        self._print_lock = threading.Lock()  # uma captura por vez
 
         self._lock = threading.Lock()
         self._session: _Session | None = None
@@ -264,6 +285,7 @@ class MeetingManager:
                 follow=bool(self._settings.get("follow_call_app")),
                 aec_enabled=bool(self._settings.get("aec_enabled")),
                 health=HealthMonitor(lambda: self._clock() - t0),
+                clock=ClockMarks(started_at), last_clock_mark=t0, last_clock_wall=started_at,
             )
             self._session = s
             monitor, self._monitor = self._monitor, None
@@ -311,7 +333,58 @@ class MeetingManager:
         if now - s.last_feed >= FEED_EVERY_S and (s.feed is None or s.feed.done()):
             s.last_feed = now
             s.feed = self._gpu.submit(self._feed, s)
+        wall = self._now()
+        mono_delta = now - s.last_clock_mark
+        # parede andou mais que o monotônico: o sistema retomou da suspensão, marca já
+        if mono_delta >= CLOCK_MARK_S or (
+                (wall - s.last_clock_wall).total_seconds() - mono_delta > CLOCK_JUMP_S):
+            s.last_clock_mark, s.last_clock_wall = now, wall
+            s.clock.mark(now - s.t0, wall)
         self._update_health(s, now)
+
+    # -- prints de tela ----------------------------------------------------------
+
+    def capture_print(self) -> bool:
+        """Agenda um print da tela (modo `native`); True se uma captura começou."""
+        with self._lock:
+            s = self._session
+        if s is None or self._settings.get("print_mode") != "native":
+            return False
+        if not self._print_lock.acquire(blocking=False):
+            return False  # já há uma captura em andamento
+        at_s = max(self._clock() - s.t0, 0.0)
+        try:
+            self._thread(self._capture_job, s, at_s, name="meeting-print", track=False)
+        except RuntimeError:
+            self._print_lock.release()
+            log.exception("Não foi possível iniciar a captura do print")
+            return False
+        return True
+
+    def _capture_job(self, s: _Session, at_s: float) -> None:
+        mid = s.meeting_id
+        try:
+            try:
+                shot = self._capture()
+                p = store_print(self._store, mid, shot, at_s=at_s, source="native", move=True)
+            except Exception as exc:
+                log.warning("Falha ao tirar o print da reunião %s: %s", mid, exc)
+                self._safely(self._print_sound, False)
+                self._safely(self._notify_fn, f"Não foi possível tirar o print: {exc}")
+                self._safely(self._store.add_alert, mid, "print_failed", at_s, at_s)
+                return
+            self._safely(self._print_sound, True)
+            if p is not None:
+                self._bus.publish({"type": "print_captured", "meeting_id": mid, "print_id": p.id})
+        finally:
+            self._print_lock.release()
+
+    @staticmethod
+    def _safely(fn: Callable, *args) -> None:
+        try:
+            fn(*args)
+        except Exception:
+            log.exception("Falha ao avisar sobre o print")
 
     # -- níveis fora de reunião --------------------------------------------------
 
@@ -741,9 +814,22 @@ class MeetingManager:
             return None
         return {track: list(inc.words.get(track, [])) for track in TRACKS}
 
+    def _import_flameshot(self, s: _Session) -> None:
+        if self._settings.get("print_mode") != "flameshot":
+            return
+        try:
+            meeting = self._store.get_meeting(s.meeting_id)
+            end = (meeting.ended_at if meeting is not None else None) or self._now()
+            import_folder(self._store, s.meeting_id, resolve_folder(self._settings.get("print_folder")),
+                          s.clock, s.started_at, end)
+        except Exception:
+            log.exception("Falha ao importar os prints do Flameshot da reunião %s", s.meeting_id)
+
     def _finalize_session(self, s: _Session) -> None:
         mid = s.meeting_id
         try:
+            # Antes da transcrição: os prints ficam salvos mesmo se o modelo falhar.
+            self._import_flameshot(s)
             self._progress(mid, fin.STAGE_TRANSCRIBING)
             try:
                 transcriber = self._get_transcriber()

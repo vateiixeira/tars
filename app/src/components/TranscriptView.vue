@@ -4,12 +4,12 @@
 // larguras diferentes); `padding` em cima/embaixo mantém a barra de rolagem do tamanho certo.
 import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref } from "vue";
 import AppIcon from "./ui/AppIcon.vue";
-import type { Segment, Speaker } from "../api/types";
+import type { MeetingPrint, Segment, Speaker } from "../api/types";
 import { mmss, speakerColor } from "../lib/format";
-import { speakerName } from "../lib/meeting";
+import { segmentAt, speakerName } from "../lib/meeting";
 
-const props = defineProps<{ segments: Segment[]; speakers: Speaker[] }>();
-const emit = defineEmits<{ play: [segment: Segment] }>();
+const props = defineProps<{ segments: Segment[]; speakers: Speaker[]; prints: MeetingPrint[] }>();
+const emit = defineEmits<{ play: [segment: Segment]; openPrint: [id: string] }>();
 
 const ESTIMATED_ROW = 44; // px, antes de medir
 const OVERSCAN = 8; // linhas extras acima e abaixo
@@ -24,6 +24,16 @@ let observer: ResizeObserver | null = null;
 let lastWidth = 0;
 
 const speakerById = computed(() => new Map(props.speakers.map((s) => [s.id, s])));
+
+/** Prints por fala: o selo vai na fala que estava rolando no instante do print. */
+const printsBySegment = computed(() => {
+  const map = new Map<number, MeetingPrint[]>();
+  for (const p of props.prints) {
+    const seg = segmentAt(props.segments, p.at_s);
+    if (seg) map.set(seg.id, [...(map.get(seg.id) ?? []), p]);
+  }
+  return map;
+});
 
 /** `offsets[i]` = topo da linha i; o último item é a altura total. */
 const offsets = computed(() => {
@@ -64,6 +74,7 @@ const rows = computed(() =>
       time: mmss(seg.start_s),
       name: speakerName(sp),
       color: sp ? speakerColor(sp.color_index) : "var(--muted)",
+      prints: printsBySegment.value.get(seg.id) ?? [],
     };
   }),
 );
@@ -134,6 +145,7 @@ onBeforeUnmount(() => observer?.disconnect());
         <span class="who" :style="{ color: r.color }">{{ r.name }}</span>
         <span class="text">
           {{ r.seg.text }}<em v-if="r.seg.dictated" class="dictated">(ditado)</em>
+          <button v-for="p in r.prints" :key="p.id" type="button" class="print-badge" :title="`Ver print ${p.label}`" :aria-label="`Ver print ${p.label}`" @click="emit('openPrint', p.id)">📷 {{ p.label }}</button>
           <button type="button" class="play" title="Ouvir este trecho" :aria-label="`Ouvir ${r.name} a partir de ${r.time}`" @click="emit('play', r.seg)"><AppIcon name="play" :size="14" /></button>
         </span>
       </div>
@@ -151,5 +163,7 @@ onBeforeUnmount(() => observer?.disconnect());
 .dictated { margin-left:6px; color:var(--muted); font-size:var(--font-meta); }
 .play { display:inline-flex; align-items:center; justify-content:center; vertical-align:middle; border:0; background:transparent; color:var(--muted); min-width:32px; min-height:32px; padding:4px; border-radius:var(--radius-sm); cursor:pointer; }
 .play:hover { color:var(--accent); background:var(--hover); }
+.print-badge { display:inline-flex; align-items:center; gap:4px; vertical-align:middle; margin-left:6px; border:1px solid var(--border); background:var(--surface-raised); color:var(--muted); font:inherit; font-size:var(--font-meta); min-height:28px; padding:2px 8px; border-radius:var(--radius-sm); cursor:pointer; }
+.print-badge:hover { color:var(--accent); background:var(--hover); }
 @media(max-width:640px) { .row { grid-template-columns:42px minmax(0,1fr); gap:6px 10px; } }
 </style>

@@ -3,7 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { ApiError } from "../api/client";
 import { meetingsRevision } from "../composables/useMeetingsRevision";
 import { setStatusStore } from "../composables/useStatus";
-import type { MeetingDetail as Detail } from "../api/types";
+import type { MeetingDetail as Detail, MeetingPrint } from "../api/types";
 import { installStore, reconnect } from "../test/meetingFakes";
 
 const writeText = vi.fn(async (_t: string) => {});
@@ -11,7 +11,11 @@ const save = vi.fn(async (_o?: unknown): Promise<string | null> => "/tmp/x.md");
 const writeTextFile = vi.fn(async (_p: string, _t: string) => {});
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: (t: string) => writeText(t) }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: (o?: unknown) => save(o) }));
-vi.mock("@tauri-apps/plugin-fs", () => ({ writeTextFile: (p: string, t: string) => writeTextFile(p, t) }));
+const writeFile = vi.fn(async (_p: string, _d: Uint8Array) => {});
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  writeTextFile: (p: string, t: string) => writeTextFile(p, t),
+  writeFile: (p: string, d: Uint8Array) => writeFile(p, d),
+}));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(async () => {}) }));
 
@@ -35,12 +39,18 @@ const detail = (extra: Partial<Detail> = {}): Detail => ({
   ],
   summary: null,
   alerts: [],
+  prints: [],
   summary_job: null,
   ...extra,
 });
 
+const aPrint = (extra: Partial<MeetingPrint> = {}): MeetingPrint => ({
+  id: "p1", label: "P1", at_s: 33, source: "flameshot", created_at: "2026-10-19T14:00:33", sent_to_claude: true, ...extra,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() });
   // jsdom não toca áudio
   HTMLMediaElement.prototype.play = vi.fn(async () => {});
   HTMLMediaElement.prototype.pause = vi.fn();
@@ -163,6 +173,127 @@ describe("MeetingDetail", () => {
     await flushPromises();
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: "reuniao-20261019-1400.md" }));
     expect(writeTextFile).toHaveBeenCalledWith("/tmp/x.md", "# Reunião");
+  });
+
+  it("mostra a aba Prints (N) entre Transcrição e Tarefas só quando há prints", async () => {
+    const { w } = await mountDetail(detail());
+    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição"]);
+
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const { w: w2 } = await mountDetail(detail({ prints: [aPrint(), aPrint({ id: "p2", label: "P2", at_s: 40 })] }), { printBlob });
+    expect(w2.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição", "Prints (2)"]);
+    await w2.get("#tab-prints").trigger("click");
+    await flushPromises();
+    expect(w2.findAll(".print")).toHaveLength(2);
+    expect(printBlob).toHaveBeenCalledWith("m1", "p1", "thumb");
+  });
+
+  it("o selo da transcrição abre a aba Prints no print certo", async () => {
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const { w } = await mountDetail(detail({ prints: [aPrint({ id: "p9", label: "P9", at_s: 33 })] }), { printBlob });
+    await w.get(".print-badge").trigger("click");
+    await flushPromises();
+    expect(w.get("#tab-prints").attributes("aria-selected")).toBe("true");
+    expect(w.get(".print.focused").text()).toContain("P9");
+  });
+
+  it("trocar de aba à mão apaga o destaque do print vindo do selo", async () => {
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const { w } = await mountDetail(detail({ prints: [aPrint({ id: "p9", label: "P9", at_s: 33 })] }), { printBlob });
+    await w.get(".print-badge").trigger("click");
+    await flushPromises();
+    expect(w.find(".print.focused").exists()).toBe(true);
+    await w.get("#tab-transcript").trigger("click");
+    await w.get("#tab-prints").trigger("click");
+    await flushPromises();
+    expect(w.find(".print").exists()).toBe(true);
+    expect(w.find(".print.focused").exists()).toBe(false);
+
+    await w.get("#tab-transcript").trigger("click");
+    await flushPromises();
+    await w.get(".print-badge").trigger("click");
+    await flushPromises();
+    expect(w.find(".print.focused").exists()).toBe(true);
+    await w.get("#tab-prints").trigger("keydown", { key: "ArrowLeft" }); // para a Transcrição
+    await w.get("#tab-transcript").trigger("keydown", { key: "ArrowRight" }); // e de volta
+    await flushPromises();
+    expect(w.get("#tab-prints").attributes("aria-selected")).toBe("true");
+    expect(w.find(".print.focused").exists()).toBe(false);
+  });
+
+  it("ir às Tarefas e voltar também apaga o destaque do print", async () => {
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const listTasks = vi.fn(async () => ({ enabled: false, scan: null, items: [] }));
+    const issueOptions = vi.fn(async () => {
+      throw new Error("desligado");
+    });
+    const { w } = await mountDetail(detail({ prints: [aPrint({ id: "p9", label: "P9", at_s: 33 })] }),
+      { printBlob, listTasks, issueOptions });
+    await w.get(".print-badge").trigger("click");
+    await flushPromises();
+    expect(w.find(".print.focused").exists()).toBe(true);
+    await w.get("#open-tasks").trigger("click");
+    await flushPromises();
+    await w.get(".tasks-head button").trigger("click");
+    await flushPromises();
+    expect(w.get("#tab-prints").attributes("aria-selected")).toBe("true");
+    expect(w.find(".print").exists()).toBe(true);
+    expect(w.find(".print.focused").exists()).toBe(false);
+  });
+
+  it("ouvir o momento de um print toca só a fala dele", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const { w } = await mountDetail(detail({ prints: [aPrint()] }), { audioBlob, printBlob });
+    await w.get("#tab-prints").trigger("click");
+    await flushPromises();
+    await w.get(".print .play").trigger("click");
+    await flushPromises();
+    expect(audioBlob).toHaveBeenCalledWith("m1", 31, 40);
+  });
+
+  it("apagar um print recarrega a reunião e volta à transcrição quando acabam os prints", async () => {
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const deletePrint = vi.fn(async () => ({ ok: true }));
+    const { w, getMeeting } = await mountDetail(detail({ prints: [aPrint()] }), { printBlob, deletePrint });
+    await w.get("#tab-prints").trigger("click");
+    await flushPromises();
+    getMeeting.mockResolvedValue(detail());
+    const before = getMeeting.mock.calls.length;
+    await w.findAll("button").find((b) => b.text() === "Apagar")!.trigger("click");
+    await w.get(".btn-danger").trigger("click");
+    await flushPromises();
+    expect(deletePrint).toHaveBeenCalledWith("m1", "p1");
+    expect(getMeeting.mock.calls.length).toBeGreaterThan(before);
+    expect(w.find("#tab-prints").exists()).toBe(false);
+    expect(w.get("#tab-transcript").attributes("aria-selected")).toBe("true");
+  });
+
+  it("exporta .zip quando há prints e .md quando não há", async () => {
+    const bytes = new Uint8Array([80, 75]);
+    const exportZip = vi.fn(async () => bytes);
+    const exportMarkdown = vi.fn(async () => "# Reunião");
+    const printBlob = vi.fn(async () => new Blob(["i"]));
+    const { w } = await mountDetail(detail({ prints: [aPrint()] }), { exportZip, exportMarkdown, printBlob });
+    save.mockResolvedValueOnce("/tmp/x.zip");
+    await w.findAll("button").find((b) => b.text().includes("Exportar .zip"))!.trigger("click");
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      defaultPath: "reuniao-20261019-1400.zip",
+      filters: [{ name: "Zip", extensions: ["zip"] }],
+    }));
+    expect(exportZip).toHaveBeenCalledWith("m1");
+    expect(writeFile).toHaveBeenCalledWith("/tmp/x.zip", bytes);
+    expect(exportMarkdown).not.toHaveBeenCalled();
+    expect(writeTextFile).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    const { w: w2 } = await mountDetail(detail(), { exportZip, exportMarkdown });
+    await w2.findAll("button").find((b) => b.text().includes("Exportar .md"))!.trigger("click");
+    await flushPromises();
+    expect(writeTextFile).toHaveBeenCalledWith("/tmp/x.md", "# Reunião");
+    expect(exportZip).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
   });
 
   it("lists recording alerts with time of day", async () => {
@@ -415,6 +546,7 @@ describe("MeetingDetail", () => {
       team_id: null, stage_id: null, priority: "medium" as const, suggested: null, evidence: [],
       edited: false, discarded: false, create_state: "none" as const, create_error: null,
       issue_number: null, issue_url: null, repeats_number: null,
+      print_ids: [], attach_state: "none", attach_error: null,
     };
     const listTasks = vi.fn(async () => ({
       enabled: true,
@@ -491,6 +623,7 @@ describe("MeetingDetail", () => {
       suggested: null, evidence: [{ start_s: 31, end_s: 40, speaker: "Pessoa 2", text: "Oi" }],
       edited: false, discarded: false, create_state: "none", create_error: null,
       issue_number: null, issue_url: null, repeats_number: null,
+      print_ids: [], attach_state: "none", attach_error: null,
     };
     const listTasks = vi.fn(async () => ({ enabled: true, scan: null, items: [item] }));
     const issueOptions = vi.fn(async () => ({

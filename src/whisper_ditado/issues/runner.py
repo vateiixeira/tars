@@ -10,9 +10,11 @@ import json
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 
-from whisper_ditado.claude_cli import ClaudeCli, ClaudeError
+from whisper_ditado.claude_cli import ClaudeCli, ClaudeError, stream_user_message
+from whisper_ditado.prints.parts import ImagePart
 from whisper_ditado.procs import current_cancellation, kill_all, kill_group, register, unregister
 
 __all__ = ["MCP_SERVER", "StreamRun", "ToolCall", "kill_all", "run_stream"]
@@ -40,12 +42,20 @@ class StreamRun:
 
     def tool_calls(self, name: str) -> list[ToolCall]:
         """Chamadas da ferramenta `name`, na ordem, já pareadas com o `tool_result` (se chegou)."""
+        return self._calls(lambda n: n == name)
+
+    def calls_with_prefix(self, prefix: str) -> list[ToolCall]:
+        """Chamadas de qualquer ferramenta cujo nome começa com `prefix`, na ordem."""
+        return self._calls(lambda n: n.startswith(prefix))
+
+    def _calls(self, wanted) -> list[ToolCall]:
         results: dict[str, dict] = {}
         for block in self._blocks("user", "tool_result"):
             results[str(block.get("tool_use_id"))] = block
         calls = []
         for block in self._blocks("assistant", "tool_use"):
-            if block.get("name") != name:
+            name = block.get("name")
+            if not isinstance(name, str) or not wanted(name):
                 continue
             got = results.get(str(block.get("id")))
             calls.append(ToolCall(
@@ -129,9 +139,11 @@ def run_stream(
     mcp_server: str = MCP_SERVER,
     settings: dict | None = None,
     system_append: str | None = None,
+    images: Sequence[ImagePart] = (),
     timeout_s: float,
 ) -> StreamRun:
-    cmd = [cli._resolve_bin(), "-p", "--output-format", "stream-json", "--verbose",
+    input_flags = ["--input-format", "stream-json"] if images else []
+    cmd = [cli._resolve_bin(), "-p", *input_flags, "--output-format", "stream-json", "--verbose",
            "--no-session-persistence", "--restricted", "--tools", tools,
            "--allowedTools", ",".join(allowed), "--permission-mode", "dontAsk", "--strict-mcp-config"]
     if mcp_url:
@@ -145,6 +157,8 @@ def run_stream(
         cmd += ["--model", cli.model]
     if cli.effort:
         cmd += ["--effort", cli.effort]
+
+    stdin = stream_user_message(prompt, images) + "\n" if images else prompt
 
     def execute(workdir: str) -> StreamRun:
         cancellation = current_cancellation()
@@ -163,7 +177,7 @@ def run_stream(
         timed_out = False
         try:
             try:
-                out, err = proc.communicate(prompt, timeout=timeout_s)
+                out, err = proc.communicate(stdin, timeout=timeout_s)
             except subprocess.TimeoutExpired as e:
                 timed_out = True
                 partial_out, partial_err = _text(e.output), _text(e.stderr)

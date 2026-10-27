@@ -12,4 +12,9 @@ describe("capabilities", () => {
     // nenhuma permissão ampla do opener (ex.: `opener:default`, que abre qualquer URL)
     expect(perms.filter((p) => typeof p === "string" && p.startsWith("opener:"))).toEqual([]);
   });
+
+  it("a janela principal pode gravar arquivos binários (export .zip)", () => {
+    const main = capabilities.capabilities.find((c) => c.identifier === "default");
+    expect(main?.permissions).toContain("fs:allow-write-file");
+  });
 });

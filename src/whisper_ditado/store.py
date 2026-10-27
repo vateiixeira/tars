@@ -142,11 +142,30 @@ _SCHEMA_V5 = """
 ALTER TABLE dictation_samples ADD COLUMN raw_transcript TEXT;
 ALTER TABLE dictation_samples ADD COLUMN review_json TEXT;
 """
+_SCHEMA_V6 = """
+CREATE TABLE meeting_prints (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    at_s REAL NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('flameshot','native')),
+    file_name TEXT NOT NULL,
+    origin_name TEXT,
+    origin_mtime_ns INTEGER,
+    created_at TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    UNIQUE (meeting_id, origin_name, origin_mtime_ns),
+    UNIQUE (meeting_id, seq)
+);
+CREATE INDEX idx_prints_meeting ON meeting_prints(meeting_id, at_s);
+ALTER TABLE task_suggestions ADD COLUMN print_ids_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE task_suggestions ADD COLUMN attach_state TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE task_suggestions ADD COLUMN attach_error TEXT;
+"""
 
 # Embeddings de modelos diferentes nunca são comparados: cada voz guarda um por modelo.
 # Os existentes são do pyannote; as colunas `voices.embedding`/`voices.n_samples` ficam
 # como legado e não são mais lidas nem escritas. Quem já tinha token segue no pyannote.
-_SCHEMA_V6 = """
+_SCHEMA_V7 = """
 CREATE TABLE voice_embeddings (
     voice_id TEXT NOT NULL REFERENCES voices(id) ON DELETE CASCADE,
     model TEXT NOT NULL,
@@ -167,7 +186,7 @@ DELETE FROM settings WHERE key = 'voice_match_threshold';
 """
 
 # Índice = versão destino (`PRAGMA user_version` após aplicar).
-_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6]
+_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7]
 
 
 @dataclass
@@ -253,6 +272,23 @@ class Job:
 
 
 @dataclass
+class MeetingPrint:
+    id: str
+    meeting_id: str
+    at_s: float
+    source: str
+    file_name: str
+    origin_name: str | None
+    origin_mtime_ns: int | None
+    created_at: str
+    seq: int  # número do print na reunião (P1, P2...); não muda quando outro print é apagado
+
+    @property
+    def label(self) -> str:
+        return f"P{self.seq}"
+
+
+@dataclass
 class TaskSuggestion:
     id: str
     meeting_id: str
@@ -278,6 +314,9 @@ class TaskSuggestion:
     repeats_number: int | None
     created_at: str
     updated_at: str
+    print_ids: list[str] = field(default_factory=list)
+    attach_state: str = "none"  # none | sending | sent | unsupported | failed
+    attach_error: str | None = None
 
 
 class TaskLocked(Exception):
@@ -289,6 +328,7 @@ CONTENT_FIELDS = ("kind", "title", "description", "project", "product_id", "assi
                   "team_id", "stage_id", "priority")
 _LOCKED_STATES = ("creating", "created", "uncertain")
 _FINISH_STATES = ("created", "failed", "uncertain")
+_ATTACH_STATES = ("none", "sending", "sent", "unsupported", "failed")
 _RESTART_TASK_ERROR = "O serviço reiniciou durante a criação — confira no MCP de issues"
 _RESTART_JOB_ERROR = "Interrompido: o serviço reiniciou"
 
@@ -734,6 +774,8 @@ class Store:
             issue_number=row["issue_number"], issue_url=row["issue_url"],
             repeats_number=row["repeats_number"],
             created_at=row["created_at"], updated_at=row["updated_at"],
+            print_ids=json.loads(row["print_ids_json"]),
+            attach_state=row["attach_state"], attach_error=row["attach_error"],
         )
 
     @staticmethod
@@ -791,6 +833,7 @@ class Store:
     def _insert_task(
         self, c: sqlite3.Connection, meeting_id: str, fields: dict, origin: str,
         suggested: dict | None, evidence: list | None, repeats_number: int | None,
+        print_ids: list[str] | None = None,
     ) -> str:
         """Insere ao fim da lista da reunião (dentro de uma transação aberta)."""
         self._check_content(fields)
@@ -806,23 +849,25 @@ class Store:
         c.execute(
             "INSERT INTO task_suggestions(id, meeting_id, position, origin, kind, title,"
             " description, project, product_id, assignee_id, team_id, stage_id, priority,"
-            " suggested_json, evidence_json, repeats_number, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " suggested_json, evidence_json, repeats_number, print_ids_json,"
+            " created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (tid, meeting_id, position, origin, *(row[name] for name in CONTENT_FIELDS),
              json.dumps(suggested) if suggested is not None else None,
-             json.dumps(evidence or []), repeats_number, now, now),
+             json.dumps(evidence or []), repeats_number, json.dumps(print_ids or []), now, now),
         )
         return tid
 
     def add_task(
         self, meeting_id: str, fields: dict, *, origin: str, suggested: dict | None = None,
         evidence: list | None = None, repeats_number: int | None = None,
+        print_ids: list[str] | None = None,
     ) -> TaskSuggestion | None:
         """Acrescenta uma sugestão (campos ausentes ficam no padrão); None se a reunião sumiu."""
         try:
             with self._tx() as c:
                 tid = self._insert_task(c, meeting_id, fields, origin, suggested, evidence,
-                                        repeats_number)
+                                        repeats_number, print_ids)
         except sqlite3.IntegrityError as exc:
             if not self._is_missing_meeting(exc):
                 raise
@@ -846,7 +891,7 @@ class Store:
                 for item in items:
                     self._insert_task(
                         c, meeting_id, item["fields"], "claude", item.get("suggested"),
-                        item.get("evidence"), item.get("repeats_number"),
+                        item.get("evidence"), item.get("repeats_number"), item.get("print_ids"),
                     )
         except sqlite3.IntegrityError as exc:
             if not self._is_missing_meeting(exc):
@@ -971,8 +1016,52 @@ class Store:
             )
         return self.get_task(task_id)
 
+    def set_task_print_ids(self, task_id: str, print_ids: list[str]) -> TaskSuggestion:
+        """Troca os prints anexados à sugestão (todos devem ser prints da reunião dela).
+
+        Mudar a lista marca `edited` (um novo levantamento preserva a escolha do operador);
+        a mesma lista não grava nada. Levanta `TaskLocked` se a sugestão já está sendo
+        criada/foi criada/está incerta, `KeyError` se não existe e `ValueError` se algum id
+        não é print da reunião.
+        """
+        ids = list(dict.fromkeys(print_ids))
+        with self._tx() as c:
+            row = c.execute(
+                "SELECT meeting_id, create_state, print_ids_json FROM task_suggestions WHERE id=?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(task_id)
+            if row["create_state"] in _LOCKED_STATES:
+                raise TaskLocked(task_id)
+            if ids:
+                marks = ",".join("?" for _ in ids)
+                found = c.execute(
+                    f"SELECT COUNT(*) FROM meeting_prints WHERE meeting_id=? AND id IN ({marks})",
+                    [row["meeting_id"], *ids],
+                ).fetchone()[0]
+                if found != len(ids):
+                    raise ValueError("print inexistente nesta reunião")
+            if json.loads(row["print_ids_json"]) != ids:
+                c.execute(
+                    "UPDATE task_suggestions SET print_ids_json=?, edited=1, updated_at=? WHERE id=?",
+                    (json.dumps(ids), datetime.now().isoformat(), task_id),
+                )
+        return self.get_task(task_id)
+
+    def set_attach_state(self, task_id: str, state: str, error: str | None = None) -> None:
+        """Grava o estado do anexo dos prints (sem efeito se o item sumiu)."""
+        if state not in _ATTACH_STATES:
+            raise ValueError(f"estado de anexo inválido: {state!r}")
+        with self._tx() as c:
+            c.execute(
+                "UPDATE task_suggestions SET attach_state=?, attach_error=?, updated_at=?"
+                " WHERE id=?",
+                (state, error, datetime.now().isoformat(), task_id),
+            )
+
     def recover_interrupted(self) -> None:
-        """Na subida: criações e trabalhos que ficaram no meio viram incerto/erro."""
+        """Na subida: criações, anexos e trabalhos que ficaram no meio viram incerto/erro."""
         now = datetime.now().isoformat()
         with self._tx() as c:
             c.execute(
@@ -981,10 +1070,83 @@ class Store:
                 (_RESTART_TASK_ERROR, now),
             )
             c.execute(
+                "UPDATE task_suggestions SET attach_state='failed', attach_error=?,"
+                " updated_at=? WHERE attach_state='sending'",
+                (_RESTART_JOB_ERROR, now),
+            )
+            c.execute(
                 "UPDATE meeting_jobs SET state='error', error=?, updated_at=?"
                 " WHERE state='running'",
                 (_RESTART_JOB_ERROR, now),
             )
+
+    # -- prints de tela das reuniões --------------------------------------
+
+    @staticmethod
+    def _print(row: sqlite3.Row) -> MeetingPrint:
+        return MeetingPrint(
+            id=row["id"], meeting_id=row["meeting_id"], at_s=row["at_s"], source=row["source"],
+            file_name=row["file_name"], origin_name=row["origin_name"],
+            origin_mtime_ns=row["origin_mtime_ns"], created_at=row["created_at"], seq=row["seq"],
+        )
+
+    def add_print(
+        self, meeting_id: str, *, print_id: str, at_s: float, source: str, file_name: str,
+        origin_name: str | None = None, origin_mtime_ns: int | None = None,
+    ) -> MeetingPrint | None:
+        """Registra um print; None se já existe (mesma origem) ou se a reunião sumiu.
+
+        O número (`seq`) é o maior da reunião + 1, na ordem de inserção: quem insere vários
+        de uma vez (importação do Flameshot) o faz na ordem de `at_s`.
+        """
+        try:
+            with self._tx() as c:
+                c.execute(
+                    "INSERT INTO meeting_prints(id, meeting_id, at_s, source, file_name,"
+                    " origin_name, origin_mtime_ns, created_at, seq) VALUES (?,?,?,?,?,?,?,?,"
+                    " (SELECT COALESCE(MAX(seq), 0) + 1 FROM meeting_prints WHERE meeting_id=?))",
+                    (print_id, meeting_id, at_s, source, file_name, origin_name,
+                     origin_mtime_ns, datetime.now().isoformat(), meeting_id),
+                )
+        except sqlite3.IntegrityError as exc:
+            if not (self._is_missing_meeting(exc) or "UNIQUE" in str(exc).upper()):
+                raise
+            return None
+        return self.get_print(print_id)
+
+    def list_prints(self, meeting_id: str) -> list[MeetingPrint]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM meeting_prints WHERE meeting_id=? ORDER BY at_s, created_at",
+                (meeting_id,),
+            ).fetchall()
+        return [self._print(r) for r in rows]
+
+    def get_print(self, print_id: str) -> MeetingPrint | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM meeting_prints WHERE id=?", (print_id,)
+            ).fetchone()
+        return self._print(row) if row else None
+
+    def delete_print(self, print_id: str) -> MeetingPrint | None:
+        """Apaga o print e o tira das sugestões da reunião, na mesma transação."""
+        with self._tx() as c:
+            row = c.execute("SELECT * FROM meeting_prints WHERE id=?", (print_id,)).fetchone()
+            if row is None:
+                return None
+            c.execute("DELETE FROM meeting_prints WHERE id=?", (print_id,))
+            for task in c.execute(
+                "SELECT id, print_ids_json FROM task_suggestions WHERE meeting_id=?",
+                (row["meeting_id"],),
+            ).fetchall():
+                ids = json.loads(task["print_ids_json"])
+                if print_id in ids:
+                    c.execute(
+                        "UPDATE task_suggestions SET print_ids_json=? WHERE id=?",
+                        (json.dumps([i for i in ids if i != print_id]), task["id"]),
+                    )
+        return self._print(row)
 
     # -- exemplos de ditado para avaliação -------------------------------
 

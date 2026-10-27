@@ -1,13 +1,16 @@
 import copy
+import io
 import json
 import math
+import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from tests.meeting.test_finalize import (
     MIC_AMP,
@@ -19,6 +22,7 @@ from tests.meeting.test_finalize import (
 from whisper_ditado import paths
 from whisper_ditado.audio import pwgraph
 from whisper_ditado.meeting.session import MeetingManager, MeetingStateError
+from whisper_ditado.prints.portal import PortalError
 from whisper_ditado.settings import Settings
 from whisper_ditado.store import Store
 
@@ -29,6 +33,15 @@ HDMI = "alsa_output.pci-0000_07_00.1.hdmi-stereo"
 MIC = "alsa_input.pci-0000_09_00.4.analog-stereo"
 WEBCAM_MIC = "alsa_input.usb-046d_C270_HD_WEBCAM_200901010001-02.mono-fallback"
 AEC_PREFIX = "whisper_ditado_aec_"
+
+
+def _png() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(buf, "PNG")
+    return buf.getvalue()
+
+
+PNG_BYTES = _png()
 
 
 # -- fakes -----------------------------------------------------------------------
@@ -832,3 +845,153 @@ def test_reprocess_keeps_task_suggestions(store, settings):
     assert [(t.id, t.create_state) for t in store.list_tasks(mid)] == [
         (kept.id, "created"), (free.id, "none")]
     assert store.get_job(mid, "tasks").state == "done"
+
+
+# -- prints de tela ----------------------------------------------------------------
+
+
+def _never_capture():
+    raise AssertionError("não deveria capturar")
+
+
+def test_capture_print_native_stores_moves_and_beeps(store, settings, tmp_path):
+    settings.update({"print_mode": "native"})
+    shot = tmp_path / "Screenshot.png"
+    shot.write_bytes(PNG_BYTES)
+    sounds = []
+    rig = Rig(store, settings, capture=lambda: shot, print_sound=sounds.append,
+              notify_fn=lambda msg: pytest.fail(msg))
+    mid = rig.start()
+    rig.advance(3.0)
+    assert rig.manager.capture_print() is True
+    wait_for(lambda: sounds == [True] and rig.bus.of("print_captured"))
+    [p] = store.list_prints(mid)
+    assert p.source == "native" and p.at_s == pytest.approx(3.0) and not shot.exists()
+    assert {"type": "print_captured", "meeting_id": mid, "print_id": p.id} in rig.bus.events
+    wait_for(lambda: not rig.manager._print_lock.locked())
+
+
+def test_capture_print_failure_beeps_error_alerts_and_notifies(store, settings):
+    settings.update({"print_mode": "native"})
+    sounds, notes = [], []
+
+    def refuse():
+        raise PortalError("O GNOME recusou o print (cancelado ou sem permissão)")
+
+    rig = Rig(store, settings, capture=refuse, print_sound=sounds.append, notify_fn=notes.append)
+    mid = rig.start()
+    rig.advance(2.0)
+    assert rig.manager.capture_print() is True
+    wait_for(lambda: [a.kind for a in store.get_alerts(mid)] == ["print_failed"])
+    wait_for(lambda: not rig.manager._print_lock.locked())
+    assert sounds == [False]
+    assert notes == [("Não foi possível tirar o print: "
+                      "O GNOME recusou o print (cancelado ou sem permissão)")]
+    [alert] = store.get_alerts(mid)
+    assert alert.start_s == alert.end_s == pytest.approx(2.0)
+    assert store.list_prints(mid) == []
+    assert not rig.bus.of("print_captured")
+    # a falha libera o atalho para tentar de novo
+    assert rig.manager.capture_print() is True
+    wait_for(lambda: sounds == [False, False])
+
+
+def test_capture_print_does_nothing_outside_native_recording(store, settings):
+    sounds = []
+    rig = Rig(store, settings, capture=_never_capture, print_sound=sounds.append)
+    settings.update({"print_mode": "native"})
+    assert rig.manager.capture_print() is False  # sem reunião
+    settings.update({"print_mode": "flameshot"})
+    rig.start()
+    assert rig.manager.capture_print() is False
+    settings.update({"print_mode": "off"})
+    assert rig.manager.capture_print() is False
+    time.sleep(0.05)
+    assert sounds == []
+
+
+def test_capture_print_ignores_concurrent_press(store, settings, tmp_path):
+    settings.update({"print_mode": "native"})
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def slow_capture():
+        calls.append(1)
+        entered.set()
+        assert release.wait(5)
+        shot = tmp_path / f"shot{len(calls)}.png"
+        shot.write_bytes(PNG_BYTES)
+        return shot
+
+    sounds = []
+    rig = Rig(store, settings, capture=slow_capture, print_sound=sounds.append)
+    mid = rig.start()
+    assert rig.manager.capture_print() is True
+    assert entered.wait(2)
+    assert rig.manager.capture_print() is False
+    release.set()
+    wait_for(lambda: sounds == [True])
+    wait_for(lambda: not rig.manager._print_lock.locked())
+    assert len(calls) == 1 and len(store.list_prints(mid)) == 1
+
+
+def test_finalize_imports_flameshot_prints(store, settings, tmp_path):
+    folder = tmp_path / "Imagens"
+    folder.mkdir()
+    settings.update({"print_mode": "flameshot", "print_folder": str(folder)})
+    seen = []
+    rig = Rig(store, settings, capture=_never_capture,
+              on_ready=lambda mid: seen.append(len(store.list_prints(mid))))
+    mid = rig.start()
+    started = rig.manager.started_at
+    shot = folder / "flameshot.png"
+    shot.write_bytes(PNG_BYTES)
+    ts = (started + timedelta(seconds=0.5)).timestamp()
+    os.utime(shot, (ts, ts))
+    rig.advance(1.0)
+    rig.manager.stop()
+    assert rig.manager.wait_idle(10)
+    [p] = store.list_prints(mid)
+    assert p.source == "flameshot" and p.origin_name == "flameshot.png"
+    assert p.at_s == pytest.approx(0.5, abs=0.01)
+    assert shot.exists()  # o original do Flameshot fica intacto
+    assert seen == [1]  # importado antes de avisar on_ready
+    assert store.get_meeting(mid).status == "ready"
+
+
+def test_finalize_ignores_missing_print_folder(store, settings, tmp_path):
+    folder = tmp_path / "Imagens"
+    folder.mkdir()
+    settings.update({"print_mode": "flameshot", "print_folder": str(folder)})
+    folder.rmdir()
+    rig = Rig(store, settings, capture=_never_capture)
+    mid = _finish_meeting(rig)
+    assert store.get_meeting(mid).status == "ready"
+    assert store.list_prints(mid) == []
+
+
+def test_tick_records_clock_marks(store, settings):
+    clock = FakeClock()
+    t0_wall = datetime(2026, 10, 27, 9, 0, 0)
+    rig = Rig(store, settings, clock=clock,
+              now=lambda: t0_wall + timedelta(seconds=clock.t - 1000.0))
+    rig.start()
+    rig.advance(25.0)
+    marks = rig.manager._session.clock._marks
+    assert [rel for rel, _ in marks] == [0.0, 10.0, 20.0]
+    assert [wall for _, wall in marks] == [
+        t0_wall, t0_wall + timedelta(seconds=10), t0_wall + timedelta(seconds=20)]
+
+
+def test_tick_marks_clock_right_after_resume(store, settings):
+    clock, suspended = FakeClock(), [0.0]
+    t0_wall = datetime(2026, 10, 27, 9, 0, 0)
+    rig = Rig(store, settings, clock=clock,
+              now=lambda: t0_wall + timedelta(seconds=clock.t - 1000.0 + suspended[0]))
+    rig.start()
+    rig.advance(25.0)  # marcas em 10 e 20 s
+    suspended[0] = 3600.0  # 1 h suspenso: o relógio monotônico parou, o de parede não
+    rig.advance(0.5)  # primeira rodada após retomar
+    marks = rig.manager._session.clock
+    # print do Flameshot 2 s após retomar (rel. 27 s), antes da próxima marca regular
+    assert marks.to_rel(t0_wall + timedelta(seconds=25.0 + 3600.0 + 2.0)) == 27.0

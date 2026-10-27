@@ -19,7 +19,7 @@ import {
 } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import type {
   MeetingDetail,
   ProgressStage,
@@ -35,6 +35,7 @@ import AppDialog from "./ui/AppDialog.vue";
 import NameSuggestionsDialog from "./NameSuggestionsDialog.vue";
 import SpeakerChips from "./SpeakerChips.vue";
 import SpeakerMenu from "./SpeakerMenu.vue";
+import PrintsTab from "./PrintsTab.vue";
 import SummaryTab from "./SummaryTab.vue";
 import TasksTab from "./TasksTab.vue";
 import TranscriptView from "./TranscriptView.vue";
@@ -84,13 +85,14 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 const stage = ref<ProgressStage | null>(null);
-type MeetingTab = "transcript" | "summary" | "tasks";
+type MeetingTab = "transcript" | "summary" | "prints" | "tasks";
 const tab = ref<MeetingTab>("transcript");
-const previousTab = ref<"transcript" | "summary">("transcript");
+const previousTab = ref<"transcript" | "summary" | "prints">("transcript");
 const tasksActive = computed(() => tab.value === "tasks" && meeting.value?.status === "ready");
 const tasksBack = ref<HTMLButtonElement | null>(null);
 function openTasks(): void {
   if (tab.value !== "tasks") previousTab.value = tab.value;
+  printFocus.value = null; // ao voltar, a aba Prints não deve rolar de novo até o print antigo
   menuOpen.value = false;
   speakerMenu.value = null;
   tab.value = "tasks";
@@ -107,20 +109,42 @@ watch(tasksActive, (active, previous) => {
 });
 const tabMemory = inject<Map<string, string>>("meeting-tabs", new Map());
 let didChooseTab = false;
-const detailTabs: { id: MeetingTab; label: string }[] = [
-  { id: "summary", label: "Resumo" },
-  { id: "transcript", label: "Transcrição" },
-];
+const detailTabs = computed<{ id: MeetingTab; label: string }[]>(() => {
+  const tabs: { id: MeetingTab; label: string }[] = [
+    { id: "summary", label: "Resumo" },
+    { id: "transcript", label: "Transcrição" },
+  ];
+  const count = meeting.value?.prints.length ?? 0;
+  if (count) tabs.push({ id: "prints", label: `Prints (${count})` });
+  return tabs;
+});
+// Sem prints (ex.: o último foi apagado) a aba some: volta para a transcrição.
+watch(detailTabs, (tabs) => {
+  if (!tabs.some((t) => t.id === tab.value) && tab.value !== "tasks") tab.value = "transcript";
+  if (previousTab.value === "prints" && !tabs.some((t) => t.id === "prints")) previousTab.value = "transcript";
+});
+const printFocus = ref<string | null>(null);
+function openPrint(id: string): void {
+  printFocus.value = id;
+  tab.value = "prints";
+  void nextTick(() => document.getElementById("tab-prints")?.focus());
+}
+// Troca de aba feita pela pessoa (clique ou teclado): o destaque vindo do selo deixa de valer.
+function selectTab(id: MeetingTab): void {
+  printFocus.value = null;
+  tab.value = id;
+}
 function onTabKey(event: KeyboardEvent, index: number) {
   let next = index;
-  if (event.key === "ArrowRight") next = (index + 1) % detailTabs.length;
+  const tabs = detailTabs.value;
+  if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
   else if (event.key === "ArrowLeft")
-    next = (index + detailTabs.length - 1) % detailTabs.length;
+    next = (index + tabs.length - 1) % tabs.length;
   else if (event.key === "Home") next = 0;
-  else if (event.key === "End") next = detailTabs.length - 1;
+  else if (event.key === "End") next = tabs.length - 1;
   else return;
   event.preventDefault();
-  tab.value = detailTabs[next]!.id;
+  selectTab(tabs[next]!.id);
   void nextTick(() => document.getElementById(`tab-${tab.value}`)?.focus());
 }
 // Reunião cuja aba Tarefas já foi aberta: a aba fica montada daí em diante (até trocar de reunião).
@@ -141,9 +165,11 @@ async function load(): Promise<void> {
     if (!didChooseTab) {
       didChooseTab = true;
       previousTab.value = result.summary ? "summary" : "transcript";
+      const remembered = tabMemory.get(props.meetingId) as MeetingTab | undefined;
       tab.value =
-        (tabMemory.get(props.meetingId) as MeetingTab) ??
-        (result.summary ? "summary" : "transcript");
+        remembered && (remembered !== "prints" || result.prints.length)
+          ? remembered
+          : result.summary ? "summary" : "transcript";
       if (tab.value === "tasks") tasksOpenedFor.value = props.meetingId;
     }
     loadError.value = null;
@@ -302,10 +328,20 @@ function copyTranscript(): Promise<void> {
   });
 }
 
-function exportMarkdown(): Promise<void> {
+/** Com prints, exporta o .zip (markdown + imagens); sem prints, só o .md. */
+function exportMeeting(): Promise<void> {
   return run("export", async () => {
     const m = meeting.value;
     if (!m) return;
+    if (m.prints.length) {
+      const path = await save({
+        defaultPath: exportFileName(m.started_at, "zip"),
+        filters: [{ name: "Zip", extensions: ["zip"] }],
+      });
+      if (!path) return; // diálogo cancelado
+      await writeFile(path, await client.exportZip(m.id));
+      return;
+    }
     const path = await save({
       defaultPath: exportFileName(m.started_at),
       filters: [{ name: "Markdown", extensions: ["md"] }],
@@ -314,6 +350,7 @@ function exportMarkdown(): Promise<void> {
     await writeTextFile(path, await client.exportMarkdown(m.id));
   });
 }
+const exportExtension = computed(() => (meeting.value?.prints.length ? ".zip" : ".md"));
 
 // Resumir/Refazer: chama o Claude só no clique. Abre a aba Resumo já no clique (mostra "resumindo…");
 // se o usuário trocar de reunião no meio, o resultado não mexe na reunião nova.
@@ -345,6 +382,7 @@ function onSpeakerSelect(speaker: Speaker, ev: MouseEvent): void {
   };
 }
 
+const onPrintDeleted = () => refreshAfterChange(props.meetingId);
 const onPeopleChanged = () => refreshAfterChange(props.meetingId);
 
 const confirmingReprocess = ref(false);
@@ -432,6 +470,7 @@ watch(
     speakerMenu.value = null;
     suggesting.value = false;
     tab.value = "transcript";
+    printFocus.value = null;
     tasksOpenedFor.value = null;
     previousTab.value = "transcript";
     stopAudio();
@@ -526,11 +565,11 @@ onBeforeUnmount(() => {
                 type="button"
                 :disabled="isBusy('export') || !connected"
                 @click="
-                  exportMarkdown();
+                  exportMeeting();
                   menuOpen = false;
                 "
               >
-                Exportar reunião em Markdown
+                {{ meeting.prints.length ? "Exportar reunião com prints (.zip)" : "Exportar reunião em Markdown" }}
               </button>
               <button
                 type="button"
@@ -577,9 +616,9 @@ onBeforeUnmount(() => {
             type="button"
             class="btn export"
             :disabled="isBusy('export') || !connected"
-            @click="exportMarkdown"
+            @click="exportMeeting"
           >
-            <AppIcon name="export" :size="16" />Exportar .md
+            <AppIcon name="export" :size="16" />Exportar {{ exportExtension }}
           </button>
         </div>
       </header>
@@ -711,7 +750,7 @@ onBeforeUnmount(() => {
               :aria-selected="tab === item.id"
               :aria-controls="`panel-${item.id}`"
               :tabindex="tab === item.id ? 0 : -1"
-              @click="tab = item.id"
+              @click="selectTab(item.id)"
               @keydown="onTabKey($event, index)"
             >
               {{ item.label }}
@@ -752,6 +791,8 @@ onBeforeUnmount(() => {
           >
           <span v-else-if="tab === 'summary'" class="section-caption"
             >Resumo da reunião</span
+          ><span v-else-if="tab === 'prints'" class="section-caption"
+            >Prints de tela tirados durante a reunião.</span
           ><span v-else class="section-caption"
             >Revise antes de criar no MCP de issues.</span
           >
@@ -781,7 +822,9 @@ onBeforeUnmount(() => {
               :key="meeting.id"
               :segments="meeting.segments"
               :speakers="meeting.speakers"
+              :prints="meeting.prints"
               @play="playSegment"
+              @open-print="openPrint"
             />
           </div>
           <div
@@ -803,6 +846,26 @@ onBeforeUnmount(() => {
             />
           </div>
           <div
+            v-show="tab === 'prints'"
+            id="panel-prints"
+            role="tabpanel"
+            aria-labelledby="tab-prints"
+            class="tab-panel"
+            tabindex="0"
+          >
+            <PrintsTab
+              v-if="tab === 'prints'"
+              :key="meeting.id"
+              :meeting-id="meeting.id"
+              :prints="meeting.prints"
+              :segments="meeting.segments"
+              :speakers="meeting.speakers"
+              :focus-id="printFocus"
+              @play="playAudio"
+              @deleted="onPrintDeleted"
+            />
+          </div>
+          <div
             v-show="tab === 'tasks'"
             id="panel-tasks"
             role="region"
@@ -815,6 +878,7 @@ onBeforeUnmount(() => {
               :key="meeting.id"
               :meeting-id="meeting.id"
               :started-at="meeting.started_at"
+              :prints="meeting.prints"
               @play="playAudio"
             />
           </div>

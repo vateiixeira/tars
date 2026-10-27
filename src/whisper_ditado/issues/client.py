@@ -1,8 +1,10 @@
-"""Cliente do MCP de issues: opções (`listar_opcoes`) e criação de issues (`criar_issue`).
+"""Cliente do MCP de issues: opções (`listar_opcoes`), criação de issues (`criar_issue`) e anexo de prints.
 
 As chamadas passam pelo Claude Code CLI do usuário, que gerencia a autenticação, com o
 MCP de issues como único MCP e só a ferramenta daquela operação liberada. A criação ainda passa por um
-hook PreToolUse (`create_guard.py`) que só deixa sair os argumentos aprovados, uma vez.
+hook PreToolUse (`create_guard.py`) que só deixa sair os argumentos aprovados, uma vez. O anexo dos
+prints libera as ferramentas do MCP e usa outro hook (`attach_guard.py`), que bloqueia a criação e troca
+os marcadores dos prints pelo conteúdo real dos arquivos.
 """
 
 from __future__ import annotations
@@ -19,8 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+from whisper_ditado.issues.attach_guard import MARKER
 from whisper_ditado.issues.create_guard import canon
-from whisper_ditado.issues.prompts import CREATE_PROMPT, KIND_LABELS, OPTIONS_PROMPT, PRIORITIES
+from whisper_ditado.issues.prompts import ATTACH_PROMPT, CREATE_PROMPT, KIND_LABELS, OPTIONS_PROMPT, PRIORITIES
 from whisper_ditado.issues.runner import StreamRun, run_stream
 from whisper_ditado.claude_cli import _AUTH_RE, ClaudeCli, ClaudeError
 from whisper_ditado.store import TaskSuggestion
@@ -37,6 +40,10 @@ UNCERTAIN_MESSAGE = "Pode ter sido criada — confira no MCP de issues"
 LOGIN_MESSAGE = ("Sem login no MCP de issues. Abra o Claude Code na pasta raiz, digite /mcp, escolha "
                  "issues e faça o login.")
 CLAUDE_LOGIN_MESSAGE = "Claude Code não está logado — rode `claude` no terminal"
+ATTACH_UNSUPPORTED = "O MCP de issues não aceita imagens"
+ATTACH_PARTIAL = "Alguns prints não foram enviados ao MCP de issues"
+ATTACH_NOT_DONE = "O Claude não anexou os prints; nenhum print foi enviado"
+ATTACH_INTERRUPTED = "O Claude não concluiu o anexo dos prints; nenhum print foi enviado"
 _KINDS = ("people", "teams", "products", "stages")
 
 
@@ -98,6 +105,12 @@ class CreateOutcome:
     state: Literal["created", "uncertain", "failed"]
     number: int | None
     url: str | None
+    error: str | None
+
+
+@dataclass
+class AttachOutcome:
+    state: Literal["sent", "unsupported", "failed"]
     error: str | None
 
 
@@ -285,6 +298,71 @@ class IssueClient:
             if outcome is not None:  # falha só na limpeza da pasta temporária
                 return outcome
             return CreateOutcome("failed", None, None, "Erro inesperado ao criar a issue; nada foi enviado")
+
+    def attach_prints(self, number: int, url: str | None, files: list[tuple[str, Path]]) -> AttachOutcome:
+        """Tenta anexar os prints (pares rótulo, JPEG pronto) à issue `number`. Nunca levanta.
+
+        O Claude escolhe a ferramenta de anexo do MCP e passa marcadores; o hook `attach_guard.py`
+        troca os marcadores pelo conteúdo dos arquivos e bloqueia `criar_issue`.
+        """
+        mcp_url, server = self.url_fn(), self.server_fn()
+        if not mcp_url:
+            return AttachOutcome("failed", "Configure o endereço do MCP de issues; nenhum print foi enviado")
+        guard = Path(__file__).with_name("attach_guard.py")
+        prefix = f"mcp__{server}__"
+        try:
+            with tempfile.TemporaryDirectory(prefix="whisper-ditado-attach-", ignore_cleanup_errors=True) as tmp:
+                if not guard.is_file():
+                    return AttachOutcome("failed", "Verificação de segurança ausente; nenhum print foi enviado")
+                mapping = Path(tmp) / "prints.json"
+                mapping.write_text(json.dumps({label: str(path) for label, path in files}), encoding="utf-8")
+                # Mesmo isolamento e falha fechada do hook da criação (ver `create_issue`).
+                command = shlex.join([sys.executable, "-I", str(guard), str(mapping),
+                                      f"{prefix}criar_issue"]) + " || exit 2"
+                settings = {"hooks": {"PreToolUse": [{"matcher": f"{prefix}.*", "hooks": [
+                    {"type": "command", "command": command, "timeout": HOOK_TIMEOUT_S}]}]}}
+                prompt = ATTACH_PROMPT.format(
+                    number=number, url=url or "sem link", server=server,
+                    prints="\n".join(f"- {label}: {path.name}" for label, path in files))
+                run = run_stream(self.cli, prompt, cwd=None, tools="", allowed=[f"mcp__{server}"],
+                                 mcp_url=mcp_url, mcp_server=server, settings=settings,
+                                 timeout_s=CREATE_TIMEOUT_S)
+            return self._attach_outcome(run, server, [label for label, _ in files])
+        except ClaudeError as e:
+            return AttachOutcome("failed", str(e))
+        except Exception as e:
+            return AttachOutcome("failed", f"Erro inesperado ao anexar os prints ({type(e).__name__}: {e})")
+
+    @staticmethod
+    def _attach_outcome(run: StreamRun, server: str, labels: list[str]) -> AttachOutcome:
+        """Classifica o anexo só pelas chamadas que levaram prints (marcadores na entrada original).
+
+        `sent` só quando todo rótulo saiu numa chamada bem-sucedida; qualquer print que não chegou
+        vira `failed`, para o operador ver o aviso. `unsupported` exige SEM_SUPORTE numa execução limpa.
+        """
+        covered: set[str] = set()
+        marker_calls = 0
+        for call in run.calls_with_prefix(f"mcp__{server}__"):
+            used = set(MARKER.findall(json.dumps(call.input, ensure_ascii=False)))
+            if not used:
+                continue
+            marker_calls += 1
+            if not call.is_error and call.result is not None:
+                covered |= {label for _, label in used}
+        if marker_calls:
+            if set(labels) <= covered:
+                return AttachOutcome("sent", None)
+            return AttachOutcome("failed", ATTACH_PARTIAL)
+        problem = _connection_error(run, server) or _auth_text_error(run, [], server)
+        if problem:
+            return AttachOutcome("failed", problem)
+        if run.timed_out:
+            return AttachOutcome("failed", "O MCP de issues demorou demais para responder; nenhum print foi enviado")
+        if run.is_error or run.returncode != 0:
+            return AttachOutcome("failed", ATTACH_INTERRUPTED)
+        if "SEM_SUPORTE" in (run.result or ""):
+            return AttachOutcome("unsupported", ATTACH_UNSUPPORTED)
+        return AttachOutcome("failed", ATTACH_NOT_DONE)
 
     @staticmethod
     def _sent(marker: Path) -> bool | None:

@@ -36,7 +36,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, Qu
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
@@ -47,6 +47,9 @@ from whisper_ditado.audio import pwgraph
 from whisper_ditado.claude_cli import ClaudeError, sync_summary_cli, transcript_text
 from whisper_ditado.meeting import voices as voice_matching
 from whisper_ditado.meeting.session import MeetingStateError
+from whisper_ditado.prints import export as print_export
+from whisper_ditado.prints import files as print_files
+from whisper_ditado.prints import images as print_images
 from whisper_ditado.store import MeetingBusy, Store, Voice
 
 log = logging.getLogger("ditado")
@@ -176,6 +179,7 @@ def build_status(ctx: AppContext) -> dict:
             "meeting_id": m.current_id,
             "started_at": _iso(m.started_at),
             "followed_app": m.followed_app,
+            "print_mode": ctx.settings.get("print_mode"),
             "alerts": list(alerts),
         },
     }
@@ -290,6 +294,25 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
             raise HTTPException(404, "Reunião não encontrada")
         return meeting
 
+    def prints_json(meeting_id: str) -> list[dict]:
+        # `sent_to_claude` só considera o limite (pela posição na ordem de at_s) e o arquivo
+        # existir: decodificar as imagens a cada GET seria caro (o envio real é em
+        # `load_for_claude`, no resumo). O rótulo é o número fixo do print.
+        prints = store.list_prints(meeting_id)
+        return [
+            {"id": p.id, "label": p.label, "at_s": p.at_s, "source": p.source,
+             "created_at": p.created_at,
+             "sent_to_claude": i <= print_images.MAX_IMAGES and print_files.print_path(p).is_file()}
+            for i, p in enumerate(prints, start=1)
+        ]
+
+    def get_print(meeting_id: str, print_id: str):
+        get_meeting(meeting_id)
+        p = store.get_print(print_id)
+        if p is None or p.meeting_id != meeting_id:
+            raise HTTPException(404, "Print não encontrado")
+        return p
+
     def find_speaker(speaker_id: str):
         # o Store não tem busca de falante por id: varre as reuniões
         for summary in store.list_meetings():
@@ -325,6 +348,12 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
     @router.get("/status")
     def status() -> dict:
         return build_status(ctx)
+
+    @router.post("/meetings/print")
+    async def take_print() -> dict:
+        if not meetings.capture_print():
+            raise HTTPException(409, "Nenhuma reunião gravando com o print nativo ligado")
+        return {"ok": True}
 
     @router.post("/meetings/start")
     async def start_meeting() -> dict:
@@ -376,6 +405,7 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
             "summary_job": job_json(store.get_job(m.id, "summary")),
             "alerts": [{"kind": a.kind, "start_s": a.start_s, "end_s": a.end_s}
                        for a in store.get_alerts(m.id)],
+            "prints": prints_json(m.id),
         }
 
     @router.patch("/meetings/{meeting_id}")
@@ -427,22 +457,56 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
             raise HTTPException(404, "Áudio da reunião não encontrado")
         return StreamingResponse(_stream_ffmpeg(cmd), media_type="audio/ogg")
 
-    @router.get("/meetings/{meeting_id}/export.md")
-    def export_markdown(meeting_id: str) -> Response:
+    def export_parts(meeting_id: str, *, with_prints: bool):
         m = get_meeting(meeting_id)
         speakers, segments = store.get_speakers(m.id), store.get_segments(m.id)
-        lines = [f"# {m.title or 'Reunião sem título'}", "",
-                 f"- **Data:** {m.started_at:%d/%m/%Y %H:%M}"]
-        names = [s.label for s in speakers if s.label]
-        if names:
-            lines.append(f"- **Participantes:** {', '.join(names)}")
-        summary = store.get_summary(m.id)
-        if summary:
-            lines += ["", "## Resumo", "", summary.strip()]
-        lines += ["", "## Transcrição", "", transcript_text(segments, speakers), ""]
-        return Response("\n".join(lines), media_type="text/markdown; charset=utf-8",
+        prints = store.list_prints(m.id) if with_prints else []
+        # print sem arquivo fica fora do markdown e do zip; os outros mantêm o próprio número
+        present = [p for p in prints if print_files.print_path(p).is_file()]
+        md = print_export.markdown_with_prints(
+            m, speakers, segments, store.get_summary(m.id), present)
+        return m, md, [(print_export.zip_name(p), print_files.print_path(p)) for p in present]
+
+    @router.get("/meetings/{meeting_id}/export.md")
+    def export_markdown(meeting_id: str) -> Response:
+        m, md, _ = export_parts(meeting_id, with_prints=False)
+        return Response(md, media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition":
                                  f'attachment; filename="reuniao-{m.started_at:%Y%m%d-%H%M}.md"'})
+
+    @router.get("/meetings/{meeting_id}/export.zip")
+    def export_zip(meeting_id: str) -> Response:
+        m, md, files = export_parts(meeting_id, with_prints=True)
+        return Response(print_export.build_zip(md, files), media_type="application/zip",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="reuniao-{m.started_at:%Y%m%d-%H%M}.zip"'})
+
+    @router.get("/meetings/{meeting_id}/prints/{print_id}")
+    async def print_image(meeting_id: str, print_id: str,
+                          size: Literal["thumb", "full"] = "thumb") -> Response:
+        p = await run_in_threadpool(get_print, meeting_id, print_id)
+        path = print_files.print_path(p)
+        if size == "full":
+            if not path.is_file():
+                raise HTTPException(404, "Print ilegível")
+            return FileResponse(path, media_type="image/jpeg" if path.suffix.lower() in (
+                ".jpg", ".jpeg") else "image/png")
+        try:
+            data = await run_in_threadpool(print_images.jpeg_bytes, path, print_images.THUMB_EDGE)
+        except Exception as exc:  # o Pillow levanta de SyntaxError a DecompressionBombError
+            log.warning("print %s ilegível: %s", print_id, exc)
+            raise HTTPException(404, "Print ilegível") from exc
+        return Response(data, media_type="image/jpeg")
+
+    @router.delete("/meetings/{meeting_id}/prints/{print_id}")
+    def delete_print(meeting_id: str, print_id: str) -> dict:
+        m = get_meeting(meeting_id)
+        get_print(meeting_id, print_id)
+        if not print_files.delete_print(store, print_id):
+            raise HTTPException(404, "Print não encontrado")
+        ctx.bus.publish({"type": "tasks_changed", "meeting_id": meeting_id})
+        ctx.bus.publish({"type": "meeting_updated", "meeting_id": meeting_id, "status": m.status})
+        return {"ok": True}
 
     @router.post("/meetings/{meeting_id}/summary")
     async def summarize(meeting_id: str) -> dict:
@@ -451,7 +515,9 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         if not segments:
             raise HTTPException(400, "A reunião não tem transcrição para resumir")
         transcript = transcript_text(segments, store.get_speakers(m.id))
-        text = await call_claude(ctx.claude.summarize, transcript, settings.get("summary_prompt"))
+        claude_images = await run_in_threadpool(print_images.load_for_claude, store, m.id)
+        text = await call_claude(ctx.claude.summarize, transcript, settings.get("summary_prompt"),
+                                 claude_images.parts)
         store.set_summary(m.id, text)
         return {"summary": text}
 

@@ -35,16 +35,56 @@ def test_migrations_create_schema_and_file_is_private(tmp_path):
     path = tmp_path / "t.db"
     s = Store(path)
     assert path.stat().st_mode & 0o777 == 0o600
-    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 7
     names = {r[0] for r in s._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"meetings", "speakers", "segments", "summaries", "voices", "alerts",
             "dictation_spans", "settings", "meeting_jobs", "task_suggestions", "dictation_samples",
-            "voice_embeddings"} <= names
+            "meeting_prints", "voice_embeddings"} <= names
     s.close()
     # reabrir é idempotente
     s2 = Store(path)
-    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 7
     s2.close()
+
+
+def test_prints_crud_order_and_dedupe(store):
+    m = store.create_meeting(T0)
+    b = store.add_print(m.id, print_id="b", at_s=30.0, source="native", file_name="b.png")
+    a = store.add_print(m.id, print_id="a", at_s=5.0, source="flameshot", file_name="a.png",
+                        origin_name="x.png", origin_mtime_ns=1)
+    assert [p.id for p in store.list_prints(m.id)] == ["a", "b"]
+    assert store.add_print(m.id, print_id="c", at_s=6.0, source="flameshot", file_name="c.png",
+                           origin_name="x.png", origin_mtime_ns=1) is None  # mesma origem
+    assert store.get_print("a") == a and b.source == "native"
+    assert store.add_print("sumiu", print_id="d", at_s=1.0, source="native", file_name="d.png") is None
+    store.delete_meeting(m.id)
+    assert store.get_print("a") is None  # cascade
+
+
+def test_print_seq_is_stable_per_meeting(store):
+    m, other = store.create_meeting(T0), store.create_meeting(T0)
+    for pid, at in (("a", 9.0), ("b", 3.0), ("c", 20.0)):
+        store.add_print(m.id, print_id=pid, at_s=at, source="native", file_name=f"{pid}.png")
+    assert [(p.id, p.seq, p.label) for p in store.list_prints(m.id)] == [
+        ("b", 2, "P2"), ("a", 1, "P1"), ("c", 3, "P3")]  # ordem por at_s, número por inserção
+    assert store.add_print(other.id, print_id="x", at_s=1.0, source="native", file_name="x.png").seq == 1
+    store.add_print(m.id, print_id="d", at_s=1.0, source="flameshot", file_name="d.png",
+                    origin_name="o.png", origin_mtime_ns=1)
+    assert store.add_print(m.id, print_id="e", at_s=2.0, source="flameshot", file_name="e.png",
+                           origin_name="o.png", origin_mtime_ns=1) is None  # repetido: não gasta número
+    store.delete_print("a")
+    assert {p.id: p.seq for p in store.list_prints(m.id)} == {"d": 4, "b": 2, "c": 3}
+    assert store.add_print(m.id, print_id="f", at_s=30.0, source="native", file_name="f.png").seq == 5
+
+
+def test_delete_print_removes_from_tasks(store):
+    m = store.create_meeting(T0)
+    store.add_print(m.id, print_id="p1", at_s=1.0, source="native", file_name="p1.png")
+    store.add_print(m.id, print_id="p2", at_s=2.0, source="native", file_name="p2.png")
+    t = store.add_task(m.id, {"title": "x"}, origin="claude", print_ids=["p1", "p2"])
+    assert store.delete_print("p1").id == "p1"
+    assert store.get_task(t.id).print_ids == ["p2"]
+    assert store.delete_print("p1") is None
 
 
 def test_meeting_crud_and_cascade(store):
@@ -238,17 +278,17 @@ def test_linked_speakers_orders_by_meeting_start(store):
     assert [s.id for s in store.linked_speakers("v1")] == ["s-early2", "s-early1", "s-late"]
 
 
-def _store_at_v5(path):
+def _store_at(path, version):
     conn = sqlite3.connect(path)
-    for target, script in enumerate(store_mod._MIGRATIONS[:5], start=1):
+    for target, script in enumerate(store_mod._MIGRATIONS[:version], start=1):
         script = script() if callable(script) else script
         conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version={target};\nCOMMIT;")
     return conn
 
 
-def test_migration_v6_tags_existing_embeddings_and_settings(tmp_path):
+def test_migration_v7_tags_existing_embeddings_and_settings(tmp_path):
     path = tmp_path / "v5.db"
-    conn = _store_at_v5(path)
+    conn = _store_at(path, 5)
     vec = np.random.default_rng(1).normal(size=256).astype(np.float32)
     conn.execute("INSERT INTO meetings(id, started_at) VALUES ('m1', ?)", (T0.isoformat(),))
     conn.execute(
@@ -265,7 +305,7 @@ def test_migration_v6_tags_existing_embeddings_and_settings(tmp_path):
 
     s = Store(path)
     try:
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 7
         v1 = s.get_voice("v1")
         assert set(v1.embeddings) == {"pyannote-community-1"}
         emb = v1.embeddings["pyannote-community-1"]
@@ -282,9 +322,9 @@ def test_migration_v6_tags_existing_embeddings_and_settings(tmp_path):
         s.close()
 
 
-def test_migration_v6_without_token_keeps_local_default(tmp_path):
+def test_migration_v7_without_token_keeps_local_default(tmp_path):
     path = tmp_path / "v5.db"
-    conn = _store_at_v5(path)
+    conn = _store_at(path, 5)
     conn.execute("INSERT INTO settings(key, value) VALUES ('hf_token', 'null')")
     conn.commit()
     conn.close()
@@ -293,6 +333,35 @@ def test_migration_v6_without_token_keeps_local_default(tmp_path):
     try:
         assert s.get_setting("diarizer", "ausente") == "ausente"
         assert s.get_setting("voice_match_threshold_pyannote", "ausente") == "ausente"
+    finally:
+        s.close()
+
+
+def test_migration_v7_from_main_v6_keeps_prints(tmp_path):
+    """Banco já na V6 dos prints (a versão publicada) migra para a V7 da separação local."""
+    path = tmp_path / "v6.db"
+    conn = _store_at(path, 6)
+    vec = np.random.default_rng(2).normal(size=256).astype(np.float32)
+    conn.execute("INSERT INTO meetings(id, started_at) VALUES ('m1', ?)", (T0.isoformat(),))
+    conn.execute(
+        "INSERT INTO voices(id, name, embedding, n_samples, created_at, updated_at)"
+        " VALUES ('v1', 'Ana', ?, 3, ?, ?)", (vec.tobytes(), T0.isoformat(), T0.isoformat()))
+    conn.execute(
+        "INSERT INTO meeting_prints(id, meeting_id, at_s, source, file_name, created_at, seq)"
+        " VALUES ('p1', 'm1', 12.5, 'native', 'p1.png', ?, 1)", (T0.isoformat(),))
+    conn.execute("INSERT INTO settings(key, value) VALUES ('hf_token', ?)", (json.dumps("hf_x"),))
+    conn.commit()
+    conn.close()
+
+    s = Store(path)
+    try:
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        rows = s._conn.execute("SELECT voice_id, model, n_samples FROM voice_embeddings").fetchall()
+        assert [tuple(r) for r in rows] == [("v1", "pyannote-community-1", 3)]
+        np.testing.assert_array_equal(s.get_voice("v1").embeddings["pyannote-community-1"].vector, vec)
+        assert s.get_setting("diarizer") == "pyannote"
+        prints = s._conn.execute("SELECT id, meeting_id, at_s, file_name, seq FROM meeting_prints").fetchall()
+        assert [tuple(r) for r in prints] == [("p1", "m1", 12.5, "p1.png", 1)]
     finally:
         s.close()
 

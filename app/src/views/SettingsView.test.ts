@@ -61,6 +61,9 @@ const baseSettings: Settings = {
   issues_mcp_name: "issues",
   tasks_prompt: "",
   hf_token_set: false,
+  print_mode: "off",
+  print_folder: null,
+  print_key: "ctrl+alt+p",
 };
 
 const devices: Devices = {
@@ -403,7 +406,7 @@ describe("SettingsView", () => {
     const status = (enabled: boolean): ServerEvent => ({
       type: "status",
       dictation: { enabled, active: false, key: "ctrl+super" },
-      meeting: { state: "idle", meeting_id: null, started_at: null, followed_app: null, alerts: [] },
+      meeting: { state: "idle", meeting_id: null, started_at: null, followed_app: null, alerts: [], print_mode: "off" },
     });
     emit(status(true));
     const w = await open();

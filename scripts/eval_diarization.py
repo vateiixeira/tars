@@ -66,7 +66,7 @@ def connect(db: Path) -> sqlite3.Connection:
 
 
 def has_embedding_model(conn: sqlite3.Connection) -> bool:
-    """A coluna `speakers.embedding_model` existe a partir da migração V6."""
+    """A coluna `speakers.embedding_model` existe a partir da migração V7."""
     return any(r[1] == "embedding_model" for r in conn.execute("PRAGMA table_info(speakers)"))
 
 

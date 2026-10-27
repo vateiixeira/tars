@@ -123,6 +123,8 @@ class _Config:
     groups: tuple[frozenset[int], ...]
     output_key: str
     output_groups: tuple[frozenset[int], ...]
+    print_key: str
+    print_groups: tuple[frozenset[int], ...]
     paste: str
     min_sec: float
     max_sec: float
@@ -148,6 +150,7 @@ class DictationService:
         open_device: Callable[[str], evdev.InputDevice] = evdev.InputDevice,
         dictation_busy: DictationBusy | None = None,
         samples: DictationSamples | None = None,
+        on_print: Callable[[], object] | None = None,
     ) -> None:
         self.settings = settings
         self.transcriber = transcriber
@@ -155,6 +158,8 @@ class DictationService:
         self.samples = samples
         # Recebe (início, fim) em tempo monotônico quando uma gravação válida termina.
         self.on_span = on_span
+        # Atalho do print da reunião: vale mesmo com o ditado pausado (quem decide é a reunião).
+        self.on_print = on_print
         self._recorder_factory = recorder_factory
         self._output_recorder_factory = output_recorder_factory or (lambda: Recorder(capture_sink=True))
         self.source = "mic"
@@ -190,6 +195,7 @@ class DictationService:
         self.cfg = self._read_config(previous=None)
         self.hotkey = HotkeyState(self.cfg.groups)
         self.output_hotkey = HotkeyState(self.cfg.output_groups)
+        self.print_hotkey = HotkeyState(self.cfg.print_groups)
         self.paused = not self.settings.get("dictation_enabled")
 
     # --- configuração -----------------------------------------------------
@@ -211,12 +217,21 @@ class DictationService:
             output_key = previous.output_key if previous else DEFAULTS["output_key"]
             log.error("Atalho do áudio do PC inválido; usando %r", output_key)
             output_groups = parse_hotkey(output_key)
+        print_key = s.get("print_key")
+        try:
+            print_groups = parse_hotkey(print_key)
+        except SystemExit:
+            print_key = previous.print_key if previous else DEFAULTS["print_key"]
+            log.error("Atalho do print inválido; usando %r", print_key)
+            print_groups = parse_hotkey(print_key)
         paste_mode = s.get("paste")
         return _Config(
             key=key,
             groups=groups,
             output_key=output_key,
             output_groups=output_groups,
+            print_key=print_key,
+            print_groups=print_groups,
             paste=paste_mode,
             min_sec=float(s.get("min_sec")),
             max_sec=float(s.get("max_sec")),
@@ -241,6 +256,11 @@ class DictationService:
             self.output_hotkey = HotkeyState(new.output_groups)
             self.output_hotkey.pressed = set(pressed)
             self.skipped.clear()  # teclados descartados podem ter a nova combinação
+        if new.print_groups != old.print_groups:
+            pressed = self.print_hotkey.pressed
+            self.print_hotkey = HotkeyState(new.print_groups)
+            self.print_hotkey.pressed = set(pressed)
+            self.skipped.clear()
         if new.ignore_devices != old.ignore_devices:
             self.skipped.clear()
             for path, dev in list(self.devices.items()):
@@ -348,7 +368,7 @@ class DictationService:
             keys = set(dev.capabilities().get(ecodes.EV_KEY, []))
             has_hotkey = any(
                 all(group & keys for group in groups)
-                for groups in (self.cfg.groups, self.cfg.output_groups)
+                for groups in (self.cfg.groups, self.cfg.output_groups, self.cfg.print_groups)
             )
             if not has_hotkey or ecodes.KEY_A not in keys or self._ignored(dev):
                 self.skipped[path] = node
@@ -409,6 +429,7 @@ class DictationService:
         pressed = self._active_keys()
         self.hotkey.resync(lambda: pressed)
         self.output_hotkey.resync(lambda: pressed)
+        self.print_hotkey.resync(lambda: pressed)
         self._update_keys_released()
 
     def _update_keys_released(self) -> None:
@@ -418,11 +439,12 @@ class DictationService:
             self.keys_released.clear()
 
     def _on_key(self, code: int, value: int) -> None:
-        # Atualiza as duas máquinas antes de agir: uma tecla extra pode cancelar a fonte atual.
+        # Atualiza as máquinas antes de agir: uma tecla extra pode cancelar a fonte atual.
         actions = [
             ("mic", self.hotkey, self.hotkey.on_key(code, value, self._active_keys)),
             ("pc", self.output_hotkey, self.output_hotkey.on_key(code, value, self._active_keys)),
         ]
+        print_action = self.print_hotkey.on_key(code, value, self._active_keys)
         for source, _, action in actions:
             if source == self.source and action is Action.CANCEL:
                 self._cancel_recording("atalho com outra tecla")
@@ -434,6 +456,11 @@ class DictationService:
                     hotkey.recording = False
                 else:
                     self._start(source)
+        if print_action is Action.START and self.on_print is not None:
+            try:
+                self.on_print()
+            except Exception:
+                log.exception("Falha no atalho do print")
         self._update_keys_released()
 
     # --- gravação ---------------------------------------------------------

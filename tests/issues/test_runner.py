@@ -9,6 +9,8 @@ import pytest
 
 from whisper_ditado.issues.runner import StreamRun, ToolCall, kill_all, run_stream
 from whisper_ditado.claude_cli import ClaudeCli, ClaudeError
+from whisper_ditado.claude_cli import stream_user_message
+from whisper_ditado.prints.parts import ImagePart
 from whisper_ditado.procs import Cancellation, ProcessCancelled, cancellation_scope, current_cancellation
 
 FAKE = str(Path(__file__).parent.parent / "fixtures" / "fake_claude.py")
@@ -48,6 +50,25 @@ def test_command_line_for_restricted_read_run(env, tmp_path):
     assert "--mcp-config" not in argv and "--settings" not in argv and "--model" not in argv
     assert log()["cwd"] == str(tmp_path) and log()["stdin"] == "P"
     assert "P" not in argv
+
+
+def test_run_stream_with_images_sends_stream_json_input(env, tmp_path):
+    scenario, log = env
+    scenario()
+    images = [ImagePart("P1", 65.0, "image/png", "QUJD")]
+    run = run_stream(ClaudeCli(FAKE, None), "P", cwd=tmp_path, tools="Read", allowed=["Read"],
+                     images=images, timeout_s=10)
+    assert run.result == "OK"
+    argv = log()["argv"]
+    assert argv[:6] == ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+    assert log()["stdin"] == stream_user_message("P", images) + "\n"
+
+
+def test_run_stream_without_images_has_no_input_format(env, tmp_path):
+    scenario, log = env
+    scenario()
+    run_stream(ClaudeCli(FAKE, None), "P", cwd=tmp_path, tools="Read", allowed=["Read"], timeout_s=10)
+    assert "--input-format" not in log()["argv"] and log()["stdin"] == "P"
 
 
 def test_effort_flag_is_added_when_set(env):
@@ -239,3 +260,20 @@ def test_cancelled_scope_does_not_start_process(env):
     with pytest.raises(ProcessCancelled), cancellation_scope(cancellation):
         run_stream(ClaudeCli(FAKE, None), "P", cwd=None, tools="", allowed=[], timeout_s=60)
     assert not log.path.exists()
+
+
+def test_calls_with_prefix_keeps_order_and_names():
+    def use(i, name):
+        return {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"u{i}", "name": name, "input": {"i": i}}]}}
+
+    def res(i, text, err=False):
+        return {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"u{i}", "content": text, "is_error": err}]}}
+
+    run = StreamRun(events=[use(0, "mcp__issues__a"), res(0, "ok"), use(1, "outra"), res(1, "x"),
+                            use(2, "mcp__issues__b"), res(2, "falhou", True)],
+                    result=None, is_error=False, timed_out=False, returncode=0, stderr="")
+    assert run.calls_with_prefix("mcp__issues__") == [
+        ToolCall("mcp__issues__a", {"i": 0}, "ok", False), ToolCall("mcp__issues__b", {"i": 2}, "falhou", True)]
+    assert run.calls_with_prefix("nada") == []

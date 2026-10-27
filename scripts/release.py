@@ -17,6 +17,28 @@ VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 MANIFESTS = ("pyproject.toml", "app/package.json", "app/src-tauri/tauri.conf.json",
              "app/src-tauri/Cargo.toml", "uv.lock", "app/src-tauri/Cargo.lock")
 BINARY = "app/src-tauri/target/release/whisper-ditado-app"
+REMOTE, BRANCH = "origin", "main"
+# Mudanças nesses caminhos exigem os testes com modelos reais na GPU antes da versão.
+GPU_SENSITIVE = ("ditado.py", "pyproject.toml", "run-backend.sh", "uv.lock",
+                 "src/whisper_ditado/audio/", "src/whisper_ditado/meeting/",
+                 "src/whisper_ditado/memory.py", "src/whisper_ditado/transcriber.py")
+
+
+def _command(name: str, cmd: list[str], cwd: str = "."):
+    def run(root: Path) -> None:
+        subprocess.run(cmd, cwd=root / cwd, check=True)
+    return name, run
+
+
+# As mesmas verificações do CI, rodadas na máquina de quem publica.
+CHECKS = (
+    _command("pytest", ["uv", "run", "--frozen", "pytest", "-q"]),
+    _command("pnpm install", ["pnpm", "install", "--frozen-lockfile"], "app"),
+    _command("pnpm test", ["pnpm", "test"], "app"),
+    _command("pnpm build", ["pnpm", "build"], "app"),
+    _command("cargo test", ["cargo", "test", "--locked", "--lib"], "app/src-tauri"),
+)
+LOCK_CHECK = _command("uv lock --check", ["uv", "lock", "--check"])
 
 
 def versions(root: Path) -> dict[str, str]:
@@ -46,17 +68,20 @@ def check(root: Path, tag: str | None = None) -> str:
     return version
 
 
-def bump(root: Path, part: str) -> str:
-    old = check(root)
+def next_version(old: str, part: str) -> str:
     major, minor, patch = map(int, old.split("."))
     if part == "major":
-        new = f"{major + 1}.0.0"
-    elif part == "minor":
-        new = f"{major}.{minor + 1}.0"
-    elif part == "patch":
-        new = f"{major}.{minor}.{patch + 1}"
-    else:
-        raise ValueError("Use major, minor ou patch")
+        return f"{major + 1}.0.0"
+    if part == "minor":
+        return f"{major}.{minor + 1}.0"
+    if part == "patch":
+        return f"{major}.{minor}.{patch + 1}"
+    raise ValueError("Use major, minor ou patch")
+
+
+def bump(root: Path, part: str) -> str:
+    old = check(root)
+    new = next_version(old, part)
     updates = {}
     for path in MANIFESTS:
         original = (root / path).read_text()
@@ -112,6 +137,99 @@ def package(root: Path, binary: Path, output: Path) -> Path:
     return target
 
 
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
+    if result.returncode:
+        raise ValueError(f"git {' '.join(args)} falhou: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def _run_step(root: Path, name: str, step) -> None:
+    print(f"==> {name}", flush=True)
+    try:
+        step(root)
+    except (subprocess.CalledProcessError, OSError) as exc:
+        raise ValueError(f"{name} falhou: {exc}") from exc
+
+
+def gpu_sensitive_changes(root: Path) -> list[str] | None:
+    """Arquivos de captura, transcrição ou diarização alterados desde a última tag (None se não há tag)."""
+    last = subprocess.run(["git", "describe", "--tags", "--abbrev=0", "--match", "v*"],
+                          cwd=root, capture_output=True, text=True, check=False)
+    if last.returncode:
+        return None
+    changed = _git(root, "diff", "--name-only", f"{last.stdout.strip()}..HEAD").splitlines()
+    return [path for path in changed if path.startswith(GPU_SENSITIVE)]
+
+
+def _gpu_warning(root: Path) -> str | None:
+    sensitive = gpu_sensitive_changes(root)
+    if sensitive is not None and not sensitive:
+        return None
+    detail = "primeira versão" if sensitive is None else ", ".join(sensitive)
+    return f"Atenção: rode os testes com modelos reais na GPU antes de publicar ({detail})."
+
+
+def publish(root: Path, part: str, checks=CHECKS, lock_check=LOCK_CHECK,
+            remote: str = REMOTE, branch: str = BRANCH, allow_untracked: bool = False) -> str:
+    """Verifica, sobe a versão, commita, cria a tag anotada e envia main e tag de uma vez."""
+    if _git(root, "rev-parse", "--abbrev-ref", "HEAD") != branch:
+        raise ValueError(f"Publique a partir da branch {branch}")
+    if _git(root, "status", "--porcelain", "--untracked-files=no"):
+        raise ValueError("Faça commit ou descarte as alterações antes de publicar")
+    # As verificações rodam na pasta, mas só o commit sobe: um arquivo esquecido fora do
+    # git passaria nos testes daqui e quebraria a versão publicada.
+    untracked = _git(root, "ls-files", "--others", "--exclude-standard").splitlines()
+    if untracked and not allow_untracked:
+        listed = "\n  ".join(untracked[:20]) + ("\n  ..." if len(untracked) > 20 else "")
+        raise ValueError("Há arquivos fora do git que os testes enxergariam mas não seriam publicados:"
+                         f"\n  {listed}\nFaça commit, ignore ou remova; ou use --allow-untracked")
+    _git(root, "fetch", "-q", remote, branch)
+    upstream = f"{remote}/{branch}"
+    ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", upstream, "HEAD"],
+                              cwd=root, check=False)
+    if ancestor.returncode:
+        raise ValueError(f"A {branch} local está atrás de {upstream}: rode git pull --rebase")
+    new = next_version(check(root), part)
+    tag = f"v{new}"
+    local_tag = subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
+                               cwd=root, capture_output=True, check=False)
+    if local_tag.returncode == 0 or _git(root, "ls-remote", "--tags", remote, tag):
+        raise ValueError(f"A tag {tag} já existe")
+
+    warning = _gpu_warning(root)
+    if warning:
+        print(warning, flush=True)
+    for name, step in checks:
+        _run_step(root, name, step)
+
+    committed = False
+    try:
+        bump(root, part)
+        _run_step(root, *lock_check)
+        # --only grava só os manifestos, mesmo que algo tenha entrado no índice durante os testes.
+        _git(root, "commit", "-q", "--only", "-m", f"[Release] Publicar versão {new}", "--", *MANIFESTS)
+        committed = True
+        _git(root, "tag", "-a", tag, "-m", f"TARS {tag}")
+    except BaseException:  # inclui Ctrl-C: nada fica pela metade antes do push
+        if committed:
+            _git(root, "reset", "-q", "--keep", "HEAD~1")
+        else:
+            _git(root, "checkout", "HEAD", "--", *MANIFESTS)
+        raise
+    if warning:
+        print(warning, flush=True)  # repetido aqui porque a saída dos testes o empurra para cima
+    print(f"==> git push --atomic {remote} {branch} {tag}", flush=True)
+    pushed = subprocess.run(["git", "push", "--atomic", remote, branch, tag], cwd=root, check=False)
+    if pushed.returncode:
+        raise ValueError(
+            f"O push falhou; o commit e a tag {tag} ficaram só aqui. Se foi falha de rede, repita: "
+            f"git push --atomic {remote} {branch} {tag}. Se o {upstream} avançou, desfaça com "
+            f"git tag -d {tag} && git reset --keep HEAD~1, atualize a {branch} e publique de novo."
+        )
+    return tag
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -119,6 +237,10 @@ def main() -> None:
     validate.add_argument("--tag")
     update = commands.add_parser("bump")
     update.add_argument("part", choices=("major", "minor", "patch"))
+    release = commands.add_parser("publish", help="testa, sobe a versão, cria a tag e envia")
+    release.add_argument("part", choices=("major", "minor", "patch"))
+    release.add_argument("--allow-untracked", action="store_true",
+                         help="publica mesmo com arquivos fora do git na pasta")
     build = commands.add_parser("package")
     build.add_argument("--binary", type=Path, default=ROOT / BINARY)
     build.add_argument("--output", type=Path, default=ROOT / "dist-release")
@@ -128,6 +250,9 @@ def main() -> None:
             print(check(ROOT, args.tag))
         elif args.command == "bump":
             print(bump(ROOT, args.part))
+        elif args.command == "publish":
+            tag = publish(ROOT, args.part, allow_untracked=args.allow_untracked)
+            print(f"{tag} enviada; o workflow Release vai compilar e publicar o pacote.")
         else:
             print(package(ROOT, args.binary, args.output))
     except (ValueError, KeyError, StopIteration) as exc:

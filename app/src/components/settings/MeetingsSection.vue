@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// Seção Reuniões: título e resumo automáticos, prompt do resumo, motor de separação de falantes, limiar de voz por motor e token do Hugging Face.
-import { computed, ref } from "vue";
+// Seção Reuniões: título e resumo automáticos, prompt do resumo, motor de separação de falantes, limiar de voz por motor, prints de tela e token do Hugging Face.
+import { computed, reactive, ref } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DEFAULT_SUMMARY_PROMPT, HF_MODEL_URL, MEETING_MODEL_IDLE_OPTIONS } from "./constants";
-import type { Diarizer } from "../../api/types";
+import type { Diarizer, PrintMode } from "../../api/types";
 import SettingField from "./SettingField.vue";
 import ToggleField from "./ToggleField.vue";
 import type { SettingsForm } from "./useSettingsForm";
@@ -18,6 +18,33 @@ const idleOptions = computed(() => MEETING_MODEL_IDLE_OPTIONS.some((o) => o.valu
 async function saveIdleTime(event: Event): Promise<void> {
   const select = event.target as HTMLSelectElement;
   if (!(await props.form.save("meeting_model_idle_sec", Number(select.value)))) select.value = String(idleSeconds.value);
+}
+
+const printMode = computed<PrintMode>(() => props.form.settings.value?.print_mode ?? "off");
+
+async function savePrintMode(event: Event): Promise<void> {
+  const select = event.target as HTMLSelectElement;
+  if (!(await props.form.save("print_mode", select.value as PrintMode))) select.value = printMode.value;
+}
+
+/** Rascunho dos campos de texto dos prints: o valor recusado pelo backend continua visível, com o erro embaixo. */
+const printDrafts = reactive<{ print_folder?: string; print_key?: string }>({});
+const printFolderShown = computed(() => printDrafts.print_folder ?? props.form.settings.value?.print_folder ?? "");
+const printKeyShown = computed(() => printDrafts.print_key ?? props.form.settings.value?.print_key ?? "");
+
+function onPrintInput(key: "print_folder" | "print_key", e: Event): void {
+  printDrafts[key] = (e.target as HTMLInputElement).value;
+  props.form.clearError(key);
+}
+
+async function savePrintFolder(e: Event): Promise<void> {
+  // Vazio vai como `null` (o backend usa a pasta de Imagens).
+  const value = (e.target as HTMLInputElement).value.trim();
+  if (await props.form.save("print_folder", value === "" ? null : value)) delete printDrafts.print_folder;
+}
+
+async function savePrintKey(e: Event): Promise<void> {
+  if (await props.form.save("print_key", (e.target as HTMLInputElement).value.trim())) delete printDrafts.print_key;
 }
 
 const summary = ref<string | null>(null); // rascunho; null = igual ao salvo
@@ -161,6 +188,56 @@ async function removeToken(): Promise<void> {
         />
         <output for="meet-threshold" data-test="threshold-value">{{ thresholdText }}</output>
       </div>
+    </SettingField>
+
+    <SettingField
+      label="Prints de tela"
+      for="meet-print-mode"
+      hint="Guarda imagens da tela durante a reunião para anexar às tarefas e ao resumo."
+      :error="form.errors.print_mode"
+    >
+      <select id="meet-print-mode" class="s-select" :value="printMode" :disabled="form.saving.print_mode" @change="savePrintMode">
+        <option value="off">Desligado</option>
+        <option value="flameshot">Flameshot</option>
+        <option value="native">Nativo (tela inteira)</option>
+      </select>
+    </SettingField>
+
+    <SettingField
+      v-if="printMode === 'flameshot'"
+      label="Pasta dos prints"
+      for="meet-print-folder"
+      hint="Vazio usa a pasta de Imagens. Os arquivos criados durante a reunião são copiados ao finalizar; os originais não são alterados."
+      :error="form.errors.print_folder"
+    >
+      <input
+        id="meet-print-folder"
+        class="s-input"
+        type="text"
+        :value="printFolderShown"
+        spellcheck="false"
+        placeholder="Pasta de Imagens"
+        @input="onPrintInput('print_folder', $event)"
+        @change="savePrintFolder"
+      />
+    </SettingField>
+
+    <SettingField
+      v-if="printMode === 'native'"
+      label="Atalho do print"
+      for="meet-print-key"
+      hint="Funciona só durante uma reunião. Captura todos os monitores e toca um som curto."
+      :error="form.errors.print_key"
+    >
+      <input
+        id="meet-print-key"
+        class="s-input"
+        type="text"
+        :value="printKeyShown"
+        spellcheck="false"
+        @input="onPrintInput('print_key', $event)"
+        @change="savePrintKey"
+      />
     </SettingField>
 
     <SettingField

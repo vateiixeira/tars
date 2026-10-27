@@ -9,7 +9,14 @@ export interface ApiInfo {
 
 export type MeetingState = "idle" | "recording" | "processing";
 export type MeetingStatus = "recording" | "processing" | "ready" | "failed";
-export type AlertKind = "mic_silent" | "pc_silent" | "pc_wrong_output" | "mic_dead" | "pc_dead";
+export type AlertKind =
+  | "mic_silent"
+  | "pc_silent"
+  | "pc_wrong_output"
+  | "mic_dead"
+  | "pc_dead"
+  | "print_failed";
+export type PrintMode = "off" | "flameshot" | "native";
 /** Motor de separação de falantes (`diarizer` em `/settings`). */
 export type Diarizer = "local" | "pyannote";
 /** Alertas gravados pelo processamento da reunião (meeting/finalize.py e meeting/engines.py). */
@@ -37,6 +44,7 @@ export interface Status {
     started_at: string | null;
     followed_app: string | null;
     alerts: AlertKind[];
+    print_mode: PrintMode;
   };
 }
 
@@ -75,6 +83,19 @@ export interface Alert {
   end_s: number;
 }
 
+/** Print de tela tirado durante a reunião (`prints` do detalhe), ordenado por `at_s`. */
+export interface MeetingPrint {
+  id: string;
+  /** "P1", "P2"... */
+  label: string;
+  /** Segundos desde o início da reunião. */
+  at_s: number;
+  source: "flameshot" | "native";
+  created_at: string;
+  /** `false` quando passou do limite de prints enviados ao Claude. */
+  sent_to_claude: boolean;
+}
+
 /** `GET /meetings/{id}`. */
 export interface MeetingDetail {
   id: string;
@@ -88,6 +109,7 @@ export interface MeetingDetail {
   segments: Segment[];
   summary: string | null;
   alerts: Alert[];
+  prints: MeetingPrint[];
   summary_job: JobState | null;
 }
 
@@ -147,6 +169,9 @@ export interface Settings {
   issues_mcp_name: string;
   tasks_prompt: string;
   hf_token_set: boolean;
+  print_mode: PrintMode;
+  print_folder: string | null;
+  print_key: string;
 }
 
 /** Corpo de `PUT /settings`: qualquer subconjunto; `hf_token` só é aceito na escrita. */
@@ -213,6 +238,8 @@ export interface TaskFields {
   priority: TaskPriority;
 }
 
+export type AttachState = "none" | "sending" | "sent" | "unsupported" | "failed";
+
 export interface TaskSuggestion extends TaskFields {
   id: string;
   meeting_id: string;
@@ -233,6 +260,11 @@ export interface TaskSuggestion extends TaskFields {
   issue_number: number | null;
   issue_url: string | null;
   repeats_number: number | null;
+  /** Ids dos prints da reunião que vão junto com a tarefa no MCP de issues. */
+  print_ids: string[];
+  /** Resultado do envio dos prints ao MCP depois de criar a issue. */
+  attach_state: AttachState;
+  attach_error: string | null;
 }
 
 /** `GET /meetings/{id}/tasks`. */

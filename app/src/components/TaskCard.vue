@@ -5,9 +5,11 @@
 import { computed, reactive, ref, watch } from "vue";
 import AppIcon from "./ui/AppIcon.vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { usePrintThumbs } from "../composables/usePrintThumbs";
 import type {
   IssueOption,
   IssueOptions,
+  MeetingPrint,
   TaskFields,
   TaskKind,
   TaskPriority,
@@ -21,7 +23,7 @@ import {
   PRIORITY_LABELS,
 } from "../lib/tasks";
 
-type Changes = Partial<TaskFields> & { discarded?: boolean };
+type Changes = Partial<TaskFields> & { discarded?: boolean; print_ids?: string[] };
 
 const props = defineProps<{
   task: TaskSuggestion;
@@ -30,6 +32,8 @@ const props = defineProps<{
   missing: string[];
   /** Erro desta tarefa (recusa na criação, falha ao salvar, ao resolver...). */
   error?: string | null;
+  /** Todos os prints da reunião (a tarefa guarda só os ids dos que vão junto). */
+  prints: MeetingPrint[];
 }>();
 const emit = defineEmits<{
   // `update`, `draft` e `resolve` levam o id do próprio cartão: quem trata não depende de qual item está aberto.
@@ -157,6 +161,39 @@ async function openIssue(): Promise<void> {
     openError.value = `Não foi possível abrir o navegador: ${detail}`;
   }
 }
+
+// -- prints que vão junto ---------------------------------------------------------------------
+// As miniaturas vêm do composable (object URLs com ciclo de vida próprio). Se uma falha, fica só o rótulo.
+
+const attached = computed(() =>
+  props.task.print_ids.flatMap((id) => {
+    const print = props.prints.find((p) => p.id === id);
+    return print ? [print] : [];
+  }),
+);
+const { thumbs } = usePrintThumbs(
+  () => props.task.meeting_id,
+  () => attached.value.map((p) => p.id),
+);
+
+function removePrint(id: string): void {
+  if (locked.value) return;
+  emit("update", props.task.id, {
+    print_ids: props.task.print_ids.filter((p) => p !== id),
+  });
+}
+
+const ATTACH_NOTES: Partial<Record<TaskSuggestion["attach_state"], string>> = {
+  sending: "Enviando os prints ao MCP de issues…",
+  sent: "Prints enviados ao MCP de issues",
+};
+const attachNote = computed(() => {
+  const { attach_state: state, attach_error: error } = props.task;
+  if (state === "unsupported") return "Prints não enviados: o MCP não aceita imagens";
+  if (state === "failed")
+    return `Prints não enviados: ${error ?? "erro desconhecido"}`;
+  return ATTACH_NOTES[state] ?? null;
+});
 
 const numberDraft = ref("");
 const numberValid = computed(
@@ -378,6 +415,47 @@ function informNumber(): void {
       </li>
     </ul>
 
+    <section
+      v-if="attached.length || attachNote"
+      class="task-prints"
+      aria-label="Prints que vão junto"
+    >
+      <h4>Prints que vão junto</h4>
+      <ul v-if="attached.length">
+        <li v-for="p in attached" :key="p.id" :data-print-id="p.id">
+          <img
+            v-if="thumbs[p.id]"
+            :src="thumbs[p.id]"
+            :alt="`Print ${p.label}`"
+            width="96"
+            height="60"
+          />
+          <span v-else class="thumb-fallback">{{ p.label }}</span>
+          <span class="plabel">{{ p.label }} · {{ mmss(p.at_s) }}</span>
+          <button
+            type="button"
+            class="remove"
+            :aria-label="`Tirar ${p.label} desta tarefa`"
+            :title="`Tirar ${p.label} desta tarefa`"
+            :disabled="locked"
+            @click="removePrint(p.id)"
+          >
+            ×
+          </button>
+        </li>
+      </ul>
+      <p
+        v-if="attachNote"
+        class="msg"
+        :class="{
+          bad: task.attach_state === 'failed',
+          warn: task.attach_state === 'unsupported',
+        }"
+      >
+        {{ attachNote }}
+      </p>
+    </section>
+
     <p v-if="missing.length" class="msg bad">Falta: {{ missing.join(", ") }}</p>
     <p
       v-if="task.create_state === 'failed' && task.create_error"
@@ -429,6 +507,63 @@ function informNumber(): void {
 </template>
 
 <style scoped>
+.task-prints h4 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.task-prints ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+.task-prints li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 96px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.task-prints img,
+.thumb-fallback {
+  width: 96px;
+  height: 60px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+.thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+.task-prints .remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.task-prints .remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .task {
   container: task-editor / inline-size;
   display: flex;

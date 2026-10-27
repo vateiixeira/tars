@@ -1,9 +1,10 @@
-"""Sinais curtos de início do ditado, sem bloquear o teclado ou carregar modelos."""
+"""Sinais curtos (início do ditado, prints) e avisos, sem bloquear o teclado ou carregar modelos."""
 
 from __future__ import annotations
 
 import logging
 import math
+import shutil
 import subprocess
 import sys
 import threading
@@ -13,7 +14,7 @@ log = logging.getLogger("ditado")
 RATE = 48000
 DURATION_SEC = 0.065
 VOLUME = 0.07
-FREQUENCIES = {"mic": 880, "pc": 1320}
+FREQUENCIES = {"mic": 880, "pc": 1320, "print": 1046, "error": 330}
 _PLAYING = threading.Lock()
 
 
@@ -37,6 +38,26 @@ _TONES = {source: tone(source) for source in FREQUENCIES}
 
 def play_start_sound(source: str) -> threading.Thread | None:
     """Toca em segundo plano; sinais sobrepostos são descartados, sem acumular processos."""
+    return _play(source)
+
+
+def play_print_sound(ok: bool) -> threading.Thread | None:
+    """Tom agudo quando o print foi salvo; grave quando falhou."""
+    return _play("print" if ok else "error")
+
+
+def notify_error(message: str) -> None:
+    """Notificação do sistema (se houver `notify-send`); nunca levanta."""
+    if not shutil.which("notify-send"):
+        return
+    try:
+        subprocess.Popen(["notify-send", "-a", "TARS", "TARS", message],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        log.debug("Notificação indisponível", exc_info=True)
+
+
+def _play(source: str) -> threading.Thread | None:
     if not _PLAYING.acquire(blocking=False):
         return None
 

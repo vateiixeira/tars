@@ -468,3 +468,42 @@ def test_mcp_server_name_supports_custom_identity(settings, monkeypatch):
     monkeypatch.setenv("DITADO_ISSUES_MCP_NAME", "invalid.*")
     assert settings.get("issues_mcp_name") == "issues"
     assert settings.update({"issues_mcp_name": "my_tracker-2"})["issues_mcp_name"] == "my_tracker-2"
+
+
+def test_print_settings_defaults_and_validation(settings, tmp_path):
+    assert (settings.get("print_mode"), settings.get("print_folder"), settings.get("print_key")) == (
+        "off", None, "ctrl+alt+KEY_P")
+    settings.update({"print_mode": "flameshot", "print_folder": str(tmp_path)})
+    assert settings.get("print_folder") == str(tmp_path)
+    with pytest.raises(ValueError, match="Modo de prints inválido"):
+        settings.update({"print_mode": "x"})
+    with pytest.raises(ValueError, match="Pasta de prints não encontrada"):
+        settings.update({"print_folder": str(tmp_path / "nao")})
+    with pytest.raises(ValueError, match="caminho absoluto"):
+        settings.update({"print_folder": "rel/ativo"})
+    assert settings.update({"print_folder": ""})["print_folder"] is None
+    with pytest.raises(ValueError, match="Atalho do print inválido"):
+        settings.update({"print_key": "nada+KEY_XYZ"})
+
+
+def test_print_key_must_differ_from_dictation_keys(settings):
+    with pytest.raises(ValueError, match="O atalho do print deve ser diferente"):
+        settings.update({"print_key": settings.get("key")})
+    with pytest.raises(ValueError, match="O atalho do print deve ser diferente"):
+        settings.update({"key": "ctrl+alt+KEY_P"})
+
+
+def test_print_mode_env_is_validated(settings, monkeypatch):
+    monkeypatch.setenv("DITADO_PRINT_MODE", "native")
+    assert settings.get("print_mode") == "native"
+    monkeypatch.setenv("DITADO_PRINT_MODE", "invalido")
+    assert settings.get("print_mode") == "off"
+
+
+def test_print_key_env_is_validated(settings, monkeypatch):
+    monkeypatch.setenv("DITADO_PRINT_KEY", "ctrl+KEY_F8")
+    assert settings.get("print_key") == "ctrl+KEY_F8"
+    monkeypatch.setenv("DITADO_PRINT_KEY", "ctrl+TECLA_QUE_NAO_EXISTE")
+    assert settings.get("print_key") == "ctrl+alt+KEY_P"
+    # o atalho inválido do ambiente não chega ao parse_hotkey (que encerraria o processo)
+    assert settings.update({"key": "ctrl+super"})["key"] == "ctrl+super"

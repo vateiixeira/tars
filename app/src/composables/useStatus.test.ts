@@ -22,7 +22,7 @@ function fakeEvents() {
 
 const idle: Status = {
   dictation: { enabled: true, active: false, key: "ctrl+super" },
-  meeting: { state: "idle", meeting_id: null, started_at: null, followed_app: null, alerts: [] },
+  meeting: { state: "idle", meeting_id: null, started_at: null, followed_app: null, alerts: [], print_mode: "off" },
 };
 
 describe("useStatus", () => {

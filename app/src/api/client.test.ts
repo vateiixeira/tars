@@ -19,6 +19,28 @@ describe("client", () => {
     expect(new Headers(init.headers).get("Authorization")).toBe("Bearer tok");
   });
 
+  it("print routes", async () => {
+    const fetchFn = vi.fn(async (_u: string, _i?: RequestInit) => new Response(new Blob(["img"])));
+    const client = createClient(async () => ({ port: 5, token: "tok" }), fetchFn as unknown as typeof fetch);
+    await client.printBlob("m1", "p1", "thumb");
+    await client.exportZip("m1");
+    expect(fetchFn.mock.calls[0][0]).toBe("http://127.0.0.1:5/api/meetings/m1/prints/p1?size=thumb");
+    expect(fetchFn.mock.calls[1][0]).toBe("http://127.0.0.1:5/api/meetings/m1/export.zip");
+    fetchFn.mockImplementation(async () => new Response(JSON.stringify({ ok: true })));
+    await client.deletePrint("m1", "p1");
+    await client.takePrint();
+    expect(fetchFn.mock.calls[2][0]).toBe("http://127.0.0.1:5/api/meetings/m1/prints/p1");
+    expect(fetchFn.mock.calls[2][1]?.method).toBe("DELETE");
+    expect(fetchFn.mock.calls[3][0]).toBe("http://127.0.0.1:5/api/meetings/print");
+    expect(fetchFn.mock.calls[3][1]?.method).toBe("POST");
+  });
+
+  it("exportZip returns bytes", async () => {
+    const fetchFn = vi.fn(async () => new Response(new Uint8Array([80, 75, 3, 4])));
+    const client = createClient(async () => ({ port: 5, token: "tok" }), fetchFn);
+    expect(Array.from(await client.exportZip("m1"))).toEqual([80, 75, 3, 4]);
+  });
+
   it("client sends bearer token and parses json", async () => {
     const fetchFn = vi.fn(async () =>
       jsonResponse([{ id: "m1", title: "Daily", started_at: "2026-10-19T10:00:00",

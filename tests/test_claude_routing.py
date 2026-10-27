@@ -95,7 +95,7 @@ def test_scan_run_uses_tasks_model_and_effort(rig, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "stream")
     monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", json.dumps({"final": "[]"}))
     rig.settings.update({"issues_enabled": True, "auto_summary": False})
-    rig.jobs.on_ready(rig.mid)
+    rig.jobs.rescan(rig.mid)
     rig.idle()
     assert rig.store.get_job(rig.mid, "tasks").state == "done"
     argv = rig.argv()
@@ -107,7 +107,7 @@ def test_rescan_picks_up_new_tasks_settings(rig, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "stream")
     monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", json.dumps({"final": "[]"}))
     rig.settings.update({"issues_enabled": True, "auto_summary": False})
-    rig.jobs.on_ready(rig.mid)
+    rig.jobs.rescan(rig.mid)
     rig.idle()
     rig.settings.update({"tasks_model": "claude-haiku-4-5", "tasks_effort": None})
     rig.store.set_job(rig.mid, "tasks", "done")

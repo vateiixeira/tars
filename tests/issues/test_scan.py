@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from whisper_ditado.issues.client import IssueOptions, Option
-from whisper_ditado.issues.prompts import SCAN_SYSTEM
+from whisper_ditado.issues.prompts import PRINTS_BLOCK, SCAN_SYSTEM
 from whisper_ditado.issues.scan import (
     MAX_ITEMS,
     SCAN_TIMEOUT_S,
@@ -17,6 +17,7 @@ from whisper_ditado.issues.scan import (
     run_scan,
 )
 from whisper_ditado.claude_cli import ClaudeCli, ClaudeError
+from whisper_ditado.prints.parts import ImagePart
 from whisper_ditado.store import Segment, TaskSuggestion
 
 FAKE = str(Path(__file__).parent.parent / "fixtures" / "fake_claude.py")
@@ -97,6 +98,8 @@ def test_prompt_uses_operator_context_separately_from_transcript():
     assert "--- CONTEXTO ADICIONAL DO OPERADOR ---" in p
     assert "Foque no checkout.\nAgrupe pagamentos." in p
     assert p.index("REGRAS") < p.index("CONTEXTO ADICIONAL") < p.index("--- TRANSCRIÇÃO")
+    assert "Use as orientações abaixo para o levantamento desta reunião." in p
+    assert "refazer" not in p
     assert "precedência sobre as regras gerais" in p
     assert "CONTEXTO ADICIONAL" not in build_scan_prompt("R", "T", None, None, [], context=" \n ")
 
@@ -281,6 +284,34 @@ def test_parse_drops_unknown_keys():
     assert "rm -rf" not in json.dumps(it.as_store_item(2))
 
 
+def test_parse_scan_keeps_known_print_labels():
+    it = parse([raw_item(prints=["P2", "P9", 3, "P2"])])[0]
+    assert it.as_store_item(2, {"P1": "a", "P2": "b"})["print_ids"] == ["b"]
+    assert it.as_store_item(2)["print_ids"] == []
+
+
+def test_parse_prints_dedup_strings_only_max_five():
+    labels = [f"P{i}" for i in range(1, 9)]
+    it = parse([raw_item(prints=["P1", "P1", 7, None, *labels])])[0]
+    assert it.prints == ["P1", "P2", "P3", "P4", "P5"]
+    assert parse([raw_item(prints="P1")])[0].prints == []
+    assert parse([raw_item()])[0].prints == []
+
+
+def test_scan_system_asks_for_prints_key_after_repete():
+    assert '"prints"' in SCAN_SYSTEM
+    assert SCAN_SYSTEM.index('"repete"') < SCAN_SYSTEM.index('"prints"')
+    assert SCAN_SYSTEM.index('"trechos"') < SCAN_SYSTEM.index('"repete"')
+
+
+def test_build_scan_prompt_lists_prints_block_only_when_present():
+    without = build_scan_prompt("R", "T", None, None, [])
+    assert "PRINTS DE TELA" not in without
+    p = build_scan_prompt("R", "T", None, None, [], print_labels=["P1", "P2"])
+    assert PRINTS_BLOCK in p and '["P1", "P2"]' in p
+    assert p.index("--- RESUMO") < p.index("--- PRINTS DE TELA") < p.index("--- TRANSCRIÇÃO")
+
+
 def test_as_store_item_format():
     it = parse([raw_item(repete=217)], segments=[seg(60, 70, "x")], created={217})[0]
     assert it.as_store_item(2) == {
@@ -291,6 +322,7 @@ def test_as_store_item_format():
                       "assignee_hint": "Miguel", "team_hint": "Desenvolvimento"},
         "evidence": [{"start_s": 65.0, "end_s": 70.0, "speaker": "Ana", "text": "o Miguel pega isso"}],
         "repeats_number": 217,
+        "print_ids": [],
     }
     assert it.as_store_item(None)["fields"]["stage_id"] is None
 
@@ -343,6 +375,17 @@ def test_run_scan_uses_root_and_read_only_tools(env, tmp_path):
     assert argv[argv.index("--append-system-prompt") + 1] == SCAN_SYSTEM
     assert log["cwd"] == str(root)
     assert "REGRAS" in log["stdin"] and "[00:01] Ana: oi" in log["stdin"]
+
+
+def test_run_scan_with_images_sends_stream_json_with_labels(env, tmp_path):
+    env(final="[]")
+    images = [ImagePart("P1", 65.0, "image/jpeg", "QUJD"), ImagePart("P2", 70.0, "image/jpeg", "REVG")]
+    run_scan(ClaudeCli(FAKE, None), tmp_path, "REGRAS", "[00:01] Ana: oi", None, OPTS, [], [], images=images)
+    log = env.log()
+    assert log["argv"][:3] == ["-p", "--input-format", "stream-json"]
+    content = json.loads(log["stdin"])["message"]["content"]
+    assert PRINTS_BLOCK in content[0]["text"] and '["P1", "P2"]' in content[0]["text"]
+    assert [b["type"] for b in content[1:]] == ["text", "image", "text", "image"]
 
 
 def test_run_scan_denies_reading_secret_files(env, tmp_path):
