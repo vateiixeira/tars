@@ -153,7 +153,9 @@ CREATE TABLE meeting_prints (
     origin_name TEXT,
     origin_mtime_ns INTEGER,
     created_at TEXT NOT NULL,
-    UNIQUE (meeting_id, origin_name, origin_mtime_ns)
+    seq INTEGER NOT NULL,
+    UNIQUE (meeting_id, origin_name, origin_mtime_ns),
+    UNIQUE (meeting_id, seq)
 );
 CREATE INDEX idx_prints_meeting ON meeting_prints(meeting_id, at_s);
 ALTER TABLE task_suggestions ADD COLUMN print_ids_json TEXT NOT NULL DEFAULT '[]';
@@ -248,6 +250,11 @@ class MeetingPrint:
     origin_name: str | None
     origin_mtime_ns: int | None
     created_at: str
+    seq: int  # número do print na reunião (P1, P2...); não muda quando outro print é apagado
+
+    @property
+    def label(self) -> str:
+        return f"P{self.seq}"
 
 
 @dataclass
@@ -1002,21 +1009,26 @@ class Store:
         return MeetingPrint(
             id=row["id"], meeting_id=row["meeting_id"], at_s=row["at_s"], source=row["source"],
             file_name=row["file_name"], origin_name=row["origin_name"],
-            origin_mtime_ns=row["origin_mtime_ns"], created_at=row["created_at"],
+            origin_mtime_ns=row["origin_mtime_ns"], created_at=row["created_at"], seq=row["seq"],
         )
 
     def add_print(
         self, meeting_id: str, *, print_id: str, at_s: float, source: str, file_name: str,
         origin_name: str | None = None, origin_mtime_ns: int | None = None,
     ) -> MeetingPrint | None:
-        """Registra um print; None se já existe (mesma origem) ou se a reunião sumiu."""
+        """Registra um print; None se já existe (mesma origem) ou se a reunião sumiu.
+
+        O número (`seq`) é o maior da reunião + 1, na ordem de inserção: quem insere vários
+        de uma vez (importação do Flameshot) o faz na ordem de `at_s`.
+        """
         try:
             with self._tx() as c:
                 c.execute(
                     "INSERT INTO meeting_prints(id, meeting_id, at_s, source, file_name,"
-                    " origin_name, origin_mtime_ns, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    " origin_name, origin_mtime_ns, created_at, seq) VALUES (?,?,?,?,?,?,?,?,"
+                    " (SELECT COALESCE(MAX(seq), 0) + 1 FROM meeting_prints WHERE meeting_id=?))",
                     (print_id, meeting_id, at_s, source, file_name, origin_name,
-                     origin_mtime_ns, datetime.now().isoformat()),
+                     origin_mtime_ns, datetime.now().isoformat(), meeting_id),
                 )
         except sqlite3.IntegrityError as exc:
             if not (self._is_missing_meeting(exc) or "UNIQUE" in str(exc).upper()):

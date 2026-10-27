@@ -3,7 +3,7 @@ import zipfile
 from datetime import datetime
 from types import SimpleNamespace
 
-from whisper_ditado.prints import export, images
+from whisper_ditado.prints import export
 from whisper_ditado.store import MeetingPrint, Segment, Speaker
 
 T0 = datetime(2026, 10, 19, 10, 0)
@@ -16,12 +16,11 @@ def _seg(start, text):
 
 
 def _print(i, at_s, ext=".png"):
-    return MeetingPrint(f"id{i}", "m", at_s, "native", f"id{i}{ext}", None, None, "2026-10-19")
+    return MeetingPrint(f"id{i}", "m", at_s, "native", f"id{i}{ext}", None, None, "2026-10-19", i)
 
 
 def _md(segments, prints, summary=None):
-    return export.markdown_with_prints(
-        MEETING, SPEAKERS, segments, summary, prints, images.print_labels(prints))
+    return export.markdown_with_prints(MEETING, SPEAKERS, segments, summary, prints)
 
 
 def test_markdown_inserts_prints_after_preceding_segment():
@@ -45,10 +44,9 @@ def test_markdown_without_prints_matches_plain_export():
                   "## Resumo\n\nresumo\n\n## Transcrição\n\n[00:01] Ana: oi\n")
 
 
-def test_markdown_numbering_follows_labels_when_a_print_is_omitted():
+def test_markdown_numbering_follows_print_seq_when_one_is_missing():
     prints = [_print(1, 1), _print(2, 2), _print(3, 3)]
-    md = export.markdown_with_prints(MEETING, SPEAKERS, [_seg(0, "x")], None,
-                                     [prints[0], prints[2]], images.print_labels(prints))
+    md = _md([_seg(0, "x")], [prints[0], prints[2]])
     assert "![P1 — 00:01](prints/P01-00-01.png)" in md
     assert "![P3 — 00:03](prints/P03-00-03.png)" in md and "P02" not in md
 

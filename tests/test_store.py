@@ -56,6 +56,22 @@ def test_prints_crud_order_and_dedupe(store):
     assert store.get_print("a") is None  # cascade
 
 
+def test_print_seq_is_stable_per_meeting(store):
+    m, other = store.create_meeting(T0), store.create_meeting(T0)
+    for pid, at in (("a", 9.0), ("b", 3.0), ("c", 20.0)):
+        store.add_print(m.id, print_id=pid, at_s=at, source="native", file_name=f"{pid}.png")
+    assert [(p.id, p.seq, p.label) for p in store.list_prints(m.id)] == [
+        ("b", 2, "P2"), ("a", 1, "P1"), ("c", 3, "P3")]  # ordem por at_s, número por inserção
+    assert store.add_print(other.id, print_id="x", at_s=1.0, source="native", file_name="x.png").seq == 1
+    store.add_print(m.id, print_id="d", at_s=1.0, source="flameshot", file_name="d.png",
+                    origin_name="o.png", origin_mtime_ns=1)
+    assert store.add_print(m.id, print_id="e", at_s=2.0, source="flameshot", file_name="e.png",
+                           origin_name="o.png", origin_mtime_ns=1) is None  # repetido: não gasta número
+    store.delete_print("a")
+    assert {p.id: p.seq for p in store.list_prints(m.id)} == {"d": 4, "b": 2, "c": 3}
+    assert store.add_print(m.id, print_id="f", at_s=30.0, source="native", file_name="f.png").seq == 5
+
+
 def test_delete_print_removes_from_tasks(store):
     m = store.create_meeting(T0)
     store.add_print(m.id, print_id="p1", at_s=1.0, source="native", file_name="p1.png")

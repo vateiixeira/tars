@@ -17,17 +17,16 @@ def _mm_ss(seconds: float) -> tuple[int, int]:
     return divmod(int(seconds), 60)
 
 
-def zip_name(n: int, p: MeetingPrint) -> str:
+def zip_name(p: MeetingPrint) -> str:
     """Caminho do print dentro do zip (e no markdown): `prints/P01-00-30.png`."""
     mm, ss = _mm_ss(p.at_s)
-    return f"{PRINTS_DIR}/P{n:02d}-{mm:02d}-{ss:02d}{Path(p.file_name).suffix.lower()}"
+    return f"{PRINTS_DIR}/P{p.seq:02d}-{mm:02d}-{ss:02d}{Path(p.file_name).suffix.lower()}"
 
 
-def markdown_with_prints(meeting, speakers, segments, summary, prints, labels) -> str:
+def markdown_with_prints(meeting, speakers, segments, summary, prints) -> str:
     """Mesmo markdown do `export.md`, com uma linha de imagem após o segmento que precede cada print.
 
-    `labels` é o `print_labels` de todos os prints da reunião (P1, P2, ...), para que a
-    numeração bata com a do resumo mesmo quando `prints` omite algum.
+    Cada print usa o próprio número (`seq`), o mesmo do resumo, mesmo quando falta algum.
     """
     lines = [f"# {meeting.title or 'Reunião sem título'}", "",
              f"- **Data:** {meeting.started_at:%d/%m/%Y %H:%M}"]
@@ -38,15 +37,13 @@ def markdown_with_prints(meeting, speakers, segments, summary, prints, labels) -
         lines += ["", "## Resumo", "", summary.strip()]
     lines += ["", "## Transcrição", ""]
 
-    label_of = {pid: label for label, pid in labels.items()}
     ordered = sorted(prints, key=lambda p: p.at_s)  # estável: empates mantêm a ordem recebida
     pending = iter(ordered)
     nxt = next(pending, None)
 
     def image_line(p: MeetingPrint) -> str:
-        label = label_of[p.id]
         mm, ss = _mm_ss(p.at_s)
-        return f"![{label} — {mm:02d}:{ss:02d}]({zip_name(int(label[1:]), p)})"
+        return f"![{p.label} — {mm:02d}:{ss:02d}]({zip_name(p)})"
 
     # um print entra depois do último segmento com start_s <= at_s (antes do primeiro, se não houver)
     body: list[str] = []

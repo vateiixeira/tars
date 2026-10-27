@@ -284,11 +284,12 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         return meeting
 
     def prints_json(meeting_id: str) -> list[dict]:
-        # `sent_to_claude` só considera o limite e o arquivo existir: decodificar as imagens
-        # a cada GET seria caro (o envio real é em `load_for_claude`, no resumo).
+        # `sent_to_claude` só considera o limite (pela posição na ordem de at_s) e o arquivo
+        # existir: decodificar as imagens a cada GET seria caro (o envio real é em
+        # `load_for_claude`, no resumo). O rótulo é o número fixo do print.
         prints = store.list_prints(meeting_id)
         return [
-            {"id": p.id, "label": f"P{i}", "at_s": p.at_s, "source": p.source,
+            {"id": p.id, "label": p.label, "at_s": p.at_s, "source": p.source,
              "created_at": p.created_at,
              "sent_to_claude": i <= print_images.MAX_IMAGES and print_files.print_path(p).is_file()}
             for i, p in enumerate(prints, start=1)
@@ -449,13 +450,11 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         m = get_meeting(meeting_id)
         speakers, segments = store.get_speakers(m.id), store.get_segments(m.id)
         prints = store.list_prints(m.id) if with_prints else []
-        labels = print_images.print_labels(prints)
-        # print sem arquivo fica fora do markdown e do zip, mas mantém o número do rótulo
-        present = [(n, p) for n, p in enumerate(prints, start=1)
-                   if print_files.print_path(p).is_file()]
+        # print sem arquivo fica fora do markdown e do zip; os outros mantêm o próprio número
+        present = [p for p in prints if print_files.print_path(p).is_file()]
         md = print_export.markdown_with_prints(
-            m, speakers, segments, store.get_summary(m.id), [p for _, p in present], labels)
-        return m, md, [(print_export.zip_name(n, p), print_files.print_path(p)) for n, p in present]
+            m, speakers, segments, store.get_summary(m.id), present)
+        return m, md, [(print_export.zip_name(p), print_files.print_path(p)) for p in present]
 
     @router.get("/meetings/{meeting_id}/export.md")
     def export_markdown(meeting_id: str) -> Response:

@@ -73,6 +73,16 @@ def test_claude_images_skips_decompression_bomb(data_home, store, tmp_path, monk
     assert out.labels == {"P1": small.id, "P2": big.id}
 
 
+def test_claude_labels_survive_deleting_a_print(data_home, store, tmp_path):
+    m = store.create_meeting(T0)
+    a, b, c = (_add(store, m, tmp_path, i, (100, 50)) for i in (1, 2, 3))
+    files.delete_print(store, b.id)
+    out = images.load_for_claude(store, m.id)
+    assert out.labels == {"P1": a.id, "P3": c.id}
+    assert [p.label for p in out.parts] == ["P1", "P3"]
+    assert images.print_labels(store.list_prints(m.id)) == {"P1": a.id, "P3": c.id}
+
+
 def test_jpeg_bytes_small_image_not_upscaled_and_rgba(tmp_path):
     p = tmp_path / "x.png"
     Image.new("RGBA", (100, 40), (0, 0, 0, 0)).save(p)

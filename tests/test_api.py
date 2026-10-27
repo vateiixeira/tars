@@ -523,6 +523,20 @@ def test_meeting_detail_lists_prints_with_labels(client, ctx):
     assert client.get(f"/api/meetings/{other.id}").json()["prints"] == []
 
 
+def test_print_labels_stay_after_deleting_one(client, ctx):
+    mid = make_meeting(ctx)
+    p1, p2, p3 = (add_print(ctx, mid, at, name=f"{at}.png") for at in (2.0, 3.0, 4.0))
+    assert client.delete(f"/api/meetings/{mid}/prints/{p2.id}").status_code == 200
+    body = client.get(f"/api/meetings/{mid}").json()
+    assert [(p["id"], p["label"]) for p in body["prints"]] == [(p1.id, "P1"), (p3.id, "P3")]
+    assert client.post(f"/api/meetings/{mid}/summary").status_code == 200
+    (images,) = ctx.claude.summarize_images
+    assert [i.label for i in images] == ["P1", "P3"]
+    zf = zipfile.ZipFile(io.BytesIO(client.get(f"/api/meetings/{mid}/export.zip").content))
+    assert zf.namelist() == ["reuniao.md", "prints/P01-00-02.png", "prints/P03-00-04.png"]
+    assert "![P3 — 00:04](prints/P03-00-04.png)" in zf.read("reuniao.md").decode()
+
+
 def test_meeting_detail_flags_prints_beyond_the_claude_limit(client, ctx, monkeypatch):
     mid = make_meeting(ctx)
     monkeypatch.setattr(print_images, "MAX_IMAGES", 2)

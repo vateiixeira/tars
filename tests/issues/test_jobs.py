@@ -745,6 +745,18 @@ def test_create_then_attach_records_state(rig, store, mid, data_home, tmp_path):
     assert {"type": "tasks_changed", "meeting_id": mid} in rig.events("tasks_changed")
 
 
+def test_attach_keeps_label_after_deleting_an_earlier_print(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import delete_print
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, n_prints=3, attach=(2,))
+    delete_print(store, prints[1].id)
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(_, _, files)] = rig.issues_client.attached
+    assert [(label, name) for label, name, _ in files] == [("P3", "print-P3.jpg")]
+
+
 def test_attach_records_unsupported(rig, store, mid, data_home, tmp_path):
     task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
     rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]

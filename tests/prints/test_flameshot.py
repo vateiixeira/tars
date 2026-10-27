@@ -48,6 +48,21 @@ def test_import_folder_copies_keeps_original_and_is_idempotent(data_home, store,
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
 
 
+def test_import_folder_numbers_prints_in_meeting_order(data_home, store, tmp_path):
+    m = store.create_meeting(T0)
+    folder = tmp_path / "shots"
+    _touch(folder / "a.png", T0 + timedelta(seconds=5))
+    _touch(folder / "b.png", T0 + timedelta(seconds=6))
+
+    class Reversed:  # relógio de parede voltou: o arquivo mais novo cai antes na reunião
+        def to_rel(self, wall):
+            return 100.0 - (wall - T0).total_seconds()
+
+    flameshot.import_folder(store, m.id, folder, Reversed(), T0, END)
+    assert [(p.origin_name, p.at_s, p.label) for p in store.list_prints(m.id)] == [
+        ("b.png", 94.0, "P1"), ("a.png", 95.0, "P2")]
+
+
 def test_import_folder_missing_folder_returns_empty(data_home, store, tmp_path):
     m = store.create_meeting(T0)
     assert flameshot.import_folder(store, m.id, tmp_path / "nada", ClockMarks(T0), T0, END) == []

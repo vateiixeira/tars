@@ -29,8 +29,8 @@ class ClaudeImages:
 
 
 def print_labels(prints: list[MeetingPrint]) -> dict[str, str]:
-    """Rótulo (P1, P2, ...) -> id do print, na ordem recebida."""
-    return {f"P{i}": p.id for i, p in enumerate(prints, start=1)}
+    """Rótulo (P1, P2, ...) -> id do print; o número é o `seq` fixo de cada print."""
+    return {p.label: p.id for p in prints}
 
 
 def jpeg_bytes(path: Path, max_edge: int) -> bytes:
@@ -55,8 +55,7 @@ def jpeg_bytes(path: Path, max_edge: int) -> bytes:
 def load_for_claude(store: Store, meeting_id: str) -> ClaudeImages:
     prints = store.list_prints(meeting_id)
     out = ClaudeImages(labels=print_labels(prints))
-    label_of = {pid: label for label, pid in out.labels.items()}
-    for p in prints:
+    for p in prints:  # o limite vale pela posição na ordem de at_s, não pelo número
         if len(out.parts) >= MAX_IMAGES:
             out.omitted.append(p.id)
             continue
@@ -67,7 +66,7 @@ def load_for_claude(store: Store, meeting_id: str) -> ClaudeImages:
             out.omitted.append(p.id)
             continue
         out.parts.append(ImagePart(
-            label=label_of[p.id], at_s=p.at_s, media_type="image/jpeg",
+            label=p.label, at_s=p.at_s, media_type="image/jpeg",
             data_b64=base64.b64encode(data).decode("ascii"),
         ))
     return out

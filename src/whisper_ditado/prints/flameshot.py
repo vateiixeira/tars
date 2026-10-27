@@ -79,10 +79,12 @@ def import_folder(
         log.warning("pasta de prints do Flameshot indisponível (%s): %s", folder, exc)
         return []
     imported: list[MeetingPrint] = []
-    for c in candidates:
+    # numera na ordem da reunião (o número é atribuído na inserção)
+    timed = sorted(((marks.to_rel(c.wall), c) for c in candidates), key=lambda t: t[0])
+    for at_s, c in timed:
         try:
             p = files.store_print(
-                store, meeting_id, c.path, at_s=marks.to_rel(c.wall), source="flameshot",
+                store, meeting_id, c.path, at_s=at_s, source="flameshot",
                 move=False, origin_name=c.path.name, origin_mtime_ns=c.mtime_ns,
             )
         except OSError as exc:
