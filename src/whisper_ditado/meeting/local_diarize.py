@@ -127,6 +127,8 @@ class LocalDiarizer:
     @property
     def available(self) -> bool:
         """Os modelos carregam (tenta carregar, baixando se preciso, no primeiro acesso)."""
+        if self._backend is not None:  # sem lock: não espera um run/embed em andamento
+            return True
         with self._lock:
             return self._ensure_loaded() is not None
 

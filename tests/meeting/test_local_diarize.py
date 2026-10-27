@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import pytest
 
@@ -182,6 +184,31 @@ def test_embed_uses_speech_chunks_and_unload_releases():
     assert len(calls) == 2
 
 
+def test_available_does_not_wait_for_a_running_run():
+    started, release = threading.Event(), threading.Event()
+
+    class BlockingBackend(FakeBackend):
+        def segments(self, audio):
+            started.set()
+            assert release.wait(5)
+            return []
+
+    diarizer, _ = _diarizer(BlockingBackend([]))
+    assert diarizer.available is True  # carregado antes da separação
+    worker = threading.Thread(target=diarizer.run, args=(np.ones(SR, dtype=np.float32),))
+    worker.start()
+    try:
+        assert started.wait(5)
+        answer: list[bool] = []
+        probe = threading.Thread(target=lambda: answer.append(diarizer.available))
+        probe.start()
+        probe.join(1)
+        assert answer == [True], "available ficou esperando o run terminar"
+    finally:
+        release.set()
+        worker.join(5)
+
+
 @pytest.mark.models
 def test_local_diarizer_separates_two_synthetic_voices(tmp_path, monkeypatch):
     from tests.helpers.tts import synth
@@ -214,7 +241,8 @@ def test_local_diarizer_separates_two_synthetic_voices(tmp_path, monkeypatch):
     by_voice: dict[int, set[str]] = {0: set(), 1: set()}
     for start, end, voice in expected:
         mid = (start + end) / 2
-        hit = [turn.speaker for turn in result.turns if turn.start_s - 1 <= mid <= turn.end_s + 1]
-        assert hit, f"sem turno perto de {mid:.1f}s"
-        by_voice[voice].add(hit[0])
-    assert by_voice[0] != by_voice[1]
+        hit = [turn.speaker for turn in result.turns if turn.start_s <= mid <= turn.end_s]
+        assert hit, f"sem turno em {mid:.1f}s"
+        by_voice[voice].update(hit)
+    assert by_voice[0] and by_voice[1]
+    assert by_voice[0].isdisjoint(by_voice[1])
