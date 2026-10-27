@@ -10,6 +10,14 @@ export interface ApiInfo {
 export type MeetingState = "idle" | "recording" | "processing";
 export type MeetingStatus = "recording" | "processing" | "ready" | "failed";
 export type AlertKind = "mic_silent" | "pc_silent" | "pc_wrong_output" | "mic_dead" | "pc_dead";
+/** Motor de separação de falantes (`diarizer` em `/settings`). */
+export type Diarizer = "local" | "pyannote";
+/** Alertas gravados pelo processamento da reunião (meeting/finalize.py e meeting/engines.py). */
+export type DiarizationAlertKind =
+  | "no_diarization"
+  | "pyannote_no_token"
+  | "pyannote_missing_extra"
+  | "pyannote_failed";
 export type TrackSource = "mic" | "pc";
 /** Etapas do processamento (meeting/finalize.py). */
 export type ProgressStage = "transcrevendo" | "separando vozes" | "finalizando";
@@ -62,7 +70,7 @@ export interface Segment {
 
 /** Trecho de alerta gravado na reunião (`alerts` do detalhe). */
 export interface Alert {
-  kind: AlertKind;
+  kind: AlertKind | DiarizationAlertKind;
   start_s: number;
   end_s: number;
 }
@@ -119,7 +127,9 @@ export interface Settings {
   ydotool: string;
   auto_title: boolean;
   summary_prompt: string;
-  voice_match_threshold: number;
+  diarizer: Diarizer;
+  voice_match_threshold_local: number;
+  voice_match_threshold_pyannote: number;
   mic_device: string | null;
   pc_device: string | null;
   follow_call_app: boolean;

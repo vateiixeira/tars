@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// Seção Reuniões: título e resumo automáticos, prompt do resumo, limiar de voz e token do Hugging Face.
+// Seção Reuniões: título e resumo automáticos, prompt do resumo, motor de separação de falantes, limiar de voz por motor e token do Hugging Face.
 import { computed, ref } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DEFAULT_SUMMARY_PROMPT, HF_MODEL_URL, MEETING_MODEL_IDLE_OPTIONS } from "./constants";
+import type { Diarizer } from "../../api/types";
 import SettingField from "./SettingField.vue";
 import ToggleField from "./ToggleField.vue";
 import type { SettingsForm } from "./useSettingsForm";
@@ -32,12 +33,25 @@ async function restoreSummary(): Promise<void> {
   if (await props.form.save("summary_prompt", DEFAULT_SUMMARY_PROMPT)) summary.value = null;
 }
 
-const threshold = computed(() => props.form.settings.value?.voice_match_threshold ?? 0.6);
+const DIARIZER_OPTIONS: { value: Diarizer; label: string }[] = [
+  { value: "local", label: "Local (grátis)" },
+  { value: "pyannote", label: "pyannote (token do Hugging Face)" },
+];
+const diarizer = computed<Diarizer>(() => props.form.settings.value?.diarizer ?? "local");
+
+async function saveDiarizer(e: Event): Promise<void> {
+  const select = e.target as HTMLSelectElement;
+  if (!(await props.form.save("diarizer", select.value as Diarizer))) select.value = diarizer.value;
+}
+
+// Um limiar por motor: o campo lê e salva o do motor escolhido.
+const thresholdKey = computed(() => `voice_match_threshold_${diarizer.value}` as const);
+const threshold = computed(() => props.form.settings.value?.[thresholdKey.value] ?? 0.6);
 const thresholdText = computed(() => threshold.value.toFixed(2).replace(".", ","));
 
 async function saveThreshold(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
-  if (!(await props.form.save("voice_match_threshold", Number(input.value)))) {
+  if (!(await props.form.save(thresholdKey.value, Number(input.value)))) {
     input.value = String(threshold.value);
   }
 }
@@ -111,20 +125,38 @@ async function removeToken(): Promise<void> {
     </SettingField>
 
     <SettingField
+      label="Motor de separação de falantes"
+      for="meet-diarizer"
+      hint="O motor local funciona sem cadastro; os modelos são baixados na primeira reunião. A escolha vale a partir da próxima reunião ou reprocessamento."
+      :error="form.errors.diarizer"
+    >
+      <select
+        id="meet-diarizer"
+        class="s-select"
+        data-test="diarizer-select"
+        :value="diarizer"
+        :disabled="form.saving.diarizer"
+        @change="saveDiarizer"
+      >
+        <option v-for="o in DIARIZER_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+      </select>
+    </SettingField>
+
+    <SettingField
       label="Limiar de reconhecimento de voz"
       for="meet-threshold"
-      hint="Quanto maior, mais parecida a voz precisa ser para ser reconhecida como uma voz cadastrada."
-      :error="form.errors.voice_match_threshold"
+      hint="Quanto maior, mais parecida a voz precisa ser para ser reconhecida como uma voz cadastrada. Vale para o motor escolhido."
+      :error="form.errors[thresholdKey]"
     >
       <div class="s-row">
         <input
           id="meet-threshold"
           type="range"
-          min="0.4"
-          max="0.9"
+          min="0.1"
+          max="0.95"
           step="0.05"
           :value="threshold"
-          @input="form.clearError('voice_match_threshold')"
+          @input="form.clearError(thresholdKey)"
           @change="saveThreshold"
         />
         <output for="meet-threshold" data-test="threshold-value">{{ thresholdText }}</output>
@@ -132,6 +164,7 @@ async function removeToken(): Promise<void> {
     </SettingField>
 
     <SettingField
+      v-if="diarizer === 'pyannote'"
       label="Token do Hugging Face"
       for="meet-token"
       :error="form.errors.hf_token"
@@ -163,7 +196,7 @@ async function removeToken(): Promise<void> {
       <p v-if="form.settings.value.hf_token_set" class="s-ok" data-test="token-status">Token configurado</p>
       <p v-else class="s-note" data-test="token-status">Nenhum token configurado</p>
       <p class="s-note">
-        Necessário para separar as vozes. Crie um token de leitura no Hugging Face e aceite as condições do modelo em
+        Necessário para separar as vozes com o pyannote. Exige o extra pyannote instalado (uv sync --extra pyannote). Crie um token de leitura no Hugging Face e aceite as condições do modelo em
         <a :href="HF_MODEL_URL" data-test="hf-model-link" @click.prevent="openModelPage">pyannote/speaker-diarization-community-1</a>.
       </p>
     </SettingField>

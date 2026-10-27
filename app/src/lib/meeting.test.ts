@@ -55,4 +55,13 @@ describe("meeting helpers", () => {
       "Sem som do PC de 12:50 a 12:55",
     ]);
   });
+
+  it("labels diarization alerts without a time range", () => {
+    const m = { started_at: "2026-10-19T12:00:00", alerts: [
+      { kind: "pyannote_no_token", start_s: 0, end_s: 1800 },
+    ] };
+    expect(alertLines(m as MeetingDetail)).toEqual([
+      "pyannote não usado: falta o token do Hugging Face. Falantes separados pelo motor local",
+    ]);
+  });
 });

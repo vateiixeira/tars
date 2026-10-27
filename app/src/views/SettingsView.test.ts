@@ -41,7 +41,9 @@ const baseSettings: Settings = {
   ydotool: "/usr/bin/ydotool",
   auto_title: true,
   summary_prompt: "Resuma.",
-  voice_match_threshold: 0.6,
+  diarizer: "local",
+  voice_match_threshold_local: 0.5,
+  voice_match_threshold_pyannote: 0.6,
   mic_device: null,
   pc_device: null,
   follow_call_app: true,
@@ -451,7 +453,7 @@ describe("SettingsView", () => {
 
   it("hf token is never displayed back", async () => {
     const secret = "hf_SEGREDO123";
-    const { client } = setup();
+    const { client } = setup({}, { diarizer: "pyannote" });
     const w = await open("meetings");
     const input = w.get("#meet-token");
     expect(w.get('[data-test="token-status"]').text()).toBe("Nenhum token configurado");
@@ -483,7 +485,7 @@ describe("SettingsView", () => {
   });
 
   it("opens the Hugging Face model page in the browser", async () => {
-    setup();
+    setup({}, { diarizer: "pyannote" });
     const w = await open("meetings");
     const link = w.get('[data-test="hf-model-link"]');
     expect(link.attributes("target")).toBeUndefined();
@@ -495,7 +497,7 @@ describe("SettingsView", () => {
     expect(opener.openUrl).toHaveBeenCalledWith("https://huggingface.co/pyannote/speaker-diarization-community-1");
   });
 
-  it("restores the default summary prompt and saves the threshold", async () => {
+  it("restores the default summary prompt", async () => {
     const { client } = setup();
     const w = await open("meetings");
     await w.get('[data-test="restore-summary"]').trigger("click");
@@ -503,12 +505,43 @@ describe("SettingsView", () => {
     expect(client.putSettings).toHaveBeenLastCalledWith({ summary_prompt: DEFAULT_SUMMARY_PROMPT });
     expect(w.get('[data-test="restore-summary"]').attributes("disabled")).toBeDefined();
 
+  });
+
+  it("saves the threshold of the selected engine", async () => {
+    const { client } = setup();
+    const w = await open("meetings");
+    expect(w.get('[data-test="threshold-value"]').text()).toBe("0,50");
     const range = w.get("#meet-threshold");
-    await range.setValue("0.75");
+    await range.setValue("0.35");
     await range.trigger("change");
     await flushPromises();
-    expect(client.putSettings).toHaveBeenLastCalledWith({ voice_match_threshold: 0.75 });
+    expect(client.putSettings).toHaveBeenLastCalledWith({ voice_match_threshold_local: 0.35 });
+    expect(w.get('[data-test="threshold-value"]').text()).toBe("0,35");
+
+    await w.get('[data-test="diarizer-select"]').setValue("pyannote");
+    await flushPromises();
+    expect(w.get('[data-test="threshold-value"]').text()).toBe("0,60");
+    await w.get("#meet-threshold").setValue("0.75");
+    await w.get("#meet-threshold").trigger("change");
+    await flushPromises();
+    expect(client.putSettings).toHaveBeenLastCalledWith({ voice_match_threshold_pyannote: 0.75 });
     expect(w.get('[data-test="threshold-value"]').text()).toBe("0,75");
+  });
+
+  it("hides the token field while the local engine is selected", async () => {
+    setup();
+    const w = await open("meetings");
+    expect(w.find('[data-test="token-save"]').exists()).toBe(false);
+    expect(w.find('[data-test="hf-model-link"]').exists()).toBe(false);
+  });
+
+  it("saves the engine choice", async () => {
+    const { client } = setup();
+    const w = await open("meetings");
+    await w.get('[data-test="diarizer-select"]').setValue("pyannote");
+    await flushPromises();
+    expect(client.putSettings).toHaveBeenLastCalledWith({ diarizer: "pyannote" });
+    expect(w.find('[data-test="token-save"]').exists()).toBe(true);
   });
 
   it("renames and deletes voices with confirmation", async () => {

@@ -1,6 +1,6 @@
 // Funções puras dos componentes de reunião: texto da transcrição, nome do arquivo exportado,
 // duração legível e linhas de alerta.
-import type { AlertKind, MeetingDetail, Segment, Speaker } from "../api/types";
+import type { AlertKind, DiarizationAlertKind, MeetingDetail, Segment, Speaker } from "../api/types";
 import { mmss, timeOfDay } from "./format";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -56,19 +56,33 @@ export function peopleLabel(count: number): string {
 }
 
 /** Rótulos dos alertas já registrados (a pílula ao vivo usa outros textos, em `ALERT_MESSAGES`). */
-const ALERT_LABELS: Record<AlertKind, string> = {
+const ALERT_LABELS: Record<AlertKind | DiarizationAlertKind, string> = {
   mic_silent: "Microfone sem sinal",
   pc_silent: "Sem som do PC",
   pc_wrong_output: "Áudio da chamada fora da saída gravada",
   mic_dead: "Microfone parou",
   pc_dead: "Captura do PC parou",
+  no_diarization: "Falantes não separados: nenhum motor de separação funcionou",
+  pyannote_no_token: "pyannote não usado: falta o token do Hugging Face. Falantes separados pelo motor local",
+  pyannote_missing_extra:
+    "pyannote não usado: o extra não está instalado (uv sync --extra pyannote). Falantes separados pelo motor local",
+  pyannote_failed: "pyannote não usado: falhou ao carregar ou rodar. Falantes separados pelo motor local",
 };
+
+/** Alertas do processamento valem para a reunião toda: saem só com o rótulo, sem intervalo. */
+const DIARIZATION_ALERTS: ReadonlySet<string> = new Set<DiarizationAlertKind>([
+  "no_diarization",
+  "pyannote_no_token",
+  "pyannote_missing_extra",
+  "pyannote_failed",
+]);
 
 /** "Microfone sem sinal de 12:10 a 12:40": os offsets do alerta somados ao início da reunião. */
 export function alertLines(meeting: Pick<MeetingDetail, "started_at" | "alerts">): string[] {
   const start = new Date(meeting.started_at).getTime();
   const clock = (offset: number) => timeOfDay(new Date(start + offset * 1000).toISOString());
-  return meeting.alerts.map(
-    (a) => `${ALERT_LABELS[a.kind] ?? a.kind} de ${clock(a.start_s)} a ${clock(a.end_s)}`,
-  );
+  return meeting.alerts.map((a) => {
+    const label = ALERT_LABELS[a.kind] ?? a.kind;
+    return DIARIZATION_ALERTS.has(a.kind) ? label : `${label} de ${clock(a.start_s)} a ${clock(a.end_s)}`;
+  });
 }
