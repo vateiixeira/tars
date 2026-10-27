@@ -17,7 +17,7 @@ def test_cues_are_short_soft_and_distinct_without_clicks():
         peak = np.argmax(np.abs(np.fft.rfft(samples))) * feedback.RATE / len(samples)
         assert peak == pytest.approx(frequency, abs=16)
         tones.append(samples)
-    assert not np.array_equal(*tones)
+    assert all(not np.array_equal(a, b) for i, a in enumerate(tones) for b in tones[i + 1:])
 
 
 def test_playback_is_nonblocking_and_does_not_accumulate(monkeypatch):
@@ -51,3 +51,25 @@ def test_audio_failure_never_breaks_dictation_or_leaks_the_lock(monkeypatch, err
     thread = feedback.play_start_sound("mic")
     thread.join(2)
     assert not feedback._PLAYING.locked()
+
+
+@pytest.mark.parametrize("ok, source", [(True, "print"), (False, "error")])
+def test_print_sound_plays_print_or_error_tone(monkeypatch, ok, source):
+    calls = []
+    monkeypatch.setattr(feedback.subprocess, "run", lambda cmd, **kw: calls.append(kw))
+    thread = feedback.play_print_sound(ok)
+    thread.join(2)
+    assert [kw["input"] for kw in calls] == [feedback.tone(source)]
+    assert feedback.FREQUENCIES["print"] == 1046 and feedback.FREQUENCIES["error"] == 330
+    assert not feedback._PLAYING.locked()
+
+
+def test_notify_error_uses_notify_send_when_available(monkeypatch):
+    calls = []
+    monkeypatch.setattr(feedback.shutil, "which", lambda name: "/usr/bin/notify-send")
+    monkeypatch.setattr(feedback.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    feedback.notify_error("falhou")
+    assert calls == [["notify-send", "-a", "TARS", "TARS", "falhou"]]
+    monkeypatch.setattr(feedback.shutil, "which", lambda name: None)
+    feedback.notify_error("de novo")
+    assert len(calls) == 1

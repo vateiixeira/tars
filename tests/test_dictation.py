@@ -1051,3 +1051,65 @@ def test_each_dictation_source_plays_its_start_cue(tmp_path, monkeypatch):
         h.press(SH)
         assert sounds == ["mic", "pc"]
     run(tmp_path, scenario)
+
+
+def test_print_hotkey_calls_on_print_once_per_press_even_paused(tmp_path):
+    prints = []
+    ALT, P = e.KEY_LEFTALT, e.KEY_P
+
+    async def scenario(h):
+        h.settings.update({"dictation_enabled": False})
+        h.service.apply_settings()
+        h.press(LC)
+        h.press(ALT)
+        assert prints == []
+        h.press(P)
+        h.service._on_key(P, 2)  # autorepeat
+        h.service._on_key(P, 2)
+        assert prints == [1]
+        h.release(P)
+        h.press(P)
+        assert prints == [1, 1]
+        h.release(P)
+        h.release(ALT)
+        h.release(LC)
+        assert h.service.recorder is None and h.recorders == [] and h.output_recorders == []
+
+        # atalho trocado ao vivo
+        h.settings.update({"print_key": "alt+KEY_F7"})
+        h.service.apply_settings()
+        h.press(LC)
+        h.press(ALT)
+        h.press(P)
+        assert prints == [1, 1]
+        h.release(P)
+        h.release(ALT)
+        h.release(LC)
+        h.press(ALT)
+        h.press(e.KEY_F7)
+        assert prints == [1, 1, 1]
+        h.release(e.KEY_F7)
+        h.release(ALT)
+
+    run(tmp_path, scenario, on_print=lambda: prints.append(1))
+
+
+def test_print_hotkey_failure_is_logged_and_does_not_break_keys(tmp_path, caplog):
+    ALT, P = e.KEY_LEFTALT, e.KEY_P
+
+    def boom():
+        raise RuntimeError("falhou")
+
+    async def scenario(h):
+        h.press(LC)
+        h.press(ALT)
+        h.press(P)
+        h.release(P)
+        h.release(ALT)
+        h.press(LW)  # o ditado segue funcionando
+        assert h.service.recorder is not None
+        h.release(LW)
+        h.release(LC)
+
+    run(tmp_path, scenario, on_print=boom)
+    assert "print" in caplog.text

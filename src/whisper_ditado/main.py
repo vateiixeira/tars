@@ -192,7 +192,8 @@ async def serve(args: argparse.Namespace) -> int:
     samples = DictationSamples(store)
     if not args.no_dictation:
         service = dictation.DictationService(settings, transcriber, bus, on_span=meetings.register_dictation_span,
-                                             dictation_busy=busy, samples=samples)
+                                             dictation_busy=busy, samples=samples,
+                                             on_print=meetings.capture_print)
         # O serviço é o dono do modelo: a coroutine não deve reter a primeira instância
         # depois que o usuário escolher outro Whisper nas configurações.
         del transcriber
