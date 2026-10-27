@@ -312,6 +312,11 @@ Para usar o pyannote:
    tentado já na próxima reunião; com o mesmo token, o backend tenta de novo nas reuniões seguintes
    a cada 5 minutos, sem reiniciar.
 
+Ao atualizar, quem já tinha o token salvo no app continua no pyannote. Quem passa o token só pela
+variável de ambiente (`HF_TOKEN` ou `DITADO_HF_TOKEN`) e quer o pyannote precisa escolhê-lo no
+seletor, porque a migração só olha o token salvo no app. A variável antiga
+`DITADO_VOICE_MATCH_THRESHOLD` passa a valer como limiar do pyannote.
+
 Com o pyannote escolhido, se faltar o token, o extra ou o carregamento falhar, a reunião não fica
 sem falantes: o motor local assume e a reunião recebe um alerta (`pyannote_no_token`,
 `pyannote_missing_extra` ou `pyannote_failed`). Só quando nenhum motor funciona a reunião fica com um

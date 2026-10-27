@@ -79,6 +79,10 @@ DEFAULTS: dict[str, Any] = {
     "print_key": "ctrl+alt+KEY_P",
 }
 
+# Variáveis de ambiente com nome antigo (`DITADO_<antiga>`), lidas quando a nova não existe.
+# O limiar único de antes era o do pyannote, como na migração do banco.
+_LEGACY_ENV_KEYS = {**LEGACY_KEYS, "voice_match_threshold_pyannote": "voice_match_threshold"}
+
 PRINT_MODES = ("off", "flameshot", "native")
 
 MODEL_KEYS = ("claude_model", "tasks_model")
@@ -315,8 +319,8 @@ class Settings:
         if key in stored:
             return _resolve_tasks_prompt(stored[key]) if key == "tasks_prompt" else stored[key]
         raw = os.environ.get(f"DITADO_{key.upper()}")
-        if raw is None and key in LEGACY_KEYS:
-            raw = os.environ.get(f"DITADO_{LEGACY_KEYS[key].upper()}")
+        if raw is None and key in _LEGACY_ENV_KEYS:
+            raw = os.environ.get(f"DITADO_{_LEGACY_ENV_KEYS[key].upper()}")
         if raw is not None:
             try:
                 return _from_env(key, raw)

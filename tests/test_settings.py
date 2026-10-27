@@ -162,6 +162,18 @@ def test_diarizer_from_env_is_validated(store, monkeypatch):
     assert settings.get("diarizer") == "local"  # inválido no ambiente: loga e usa o padrão
 
 
+def test_legacy_voice_threshold_env_applies_to_pyannote(store, monkeypatch):
+    settings = Settings(store)
+    monkeypatch.setenv("DITADO_VOICE_MATCH_THRESHOLD", "0.7")
+    assert settings.get("voice_match_threshold_pyannote") == 0.7
+    assert settings.get("voice_match_threshold_local") == DEFAULTS["voice_match_threshold_local"]
+    # a variável nova vence a antiga, e o valor salvo vence as duas
+    monkeypatch.setenv("DITADO_VOICE_MATCH_THRESHOLD_PYANNOTE", "0.8")
+    assert settings.get("voice_match_threshold_pyannote") == 0.8
+    settings.update({"voice_match_threshold_pyannote": 0.5})
+    assert settings.get("voice_match_threshold_pyannote") == 0.5
+
+
 def test_min_max_validated_against_stored_values(settings):
     settings.update({"max_sec": 10})
     with pytest.raises(ValueError, match="menor que a máxima"):
