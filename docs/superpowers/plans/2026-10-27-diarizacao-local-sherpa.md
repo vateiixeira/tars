@@ -290,7 +290,7 @@ Algoritmo de `run(audio)`:
    `embeddings`.
 7. Devolve `DiarizationResult(turns, embeddings, model=self.model_id, engine="local", embed=self.embed)`.
 
-- [ ] **Step 1: Testes que falham** em `tests/meeting/test_local_diarize.py`, com um `FakeBackend(segments, vectors_by_amp)`
+- [x] **Step 1: Testes que falham** em `tests/meeting/test_local_diarize.py`, com um `FakeBackend(segments, vectors_by_amp)`
   cujo `embed_chunk` devolve o vetor pela amplitude do pedaço (mesma ideia do `FakeTranscriber`):
   - `test_run_labels_by_first_appearance_and_tags_model`: dois clusters longos (ids 1 e 0, com o 1 primeiro).
     Os rótulos são `SPEAKER_00` para o cluster 1 e `SPEAKER_01` para o 0; `result.model == "sherpa-wespeaker_en_voxceleb_resnet34_LM"`,
@@ -309,11 +309,11 @@ Algoritmo de `run(audio)`:
     (`tests.helpers.tts.synth`, vozes `pt-br` e `pt-br+f3`), mas com `LocalDiarizer()` real e
     `XDG_DATA_HOME` apontando para `tmp_path`. Espera ≥ 2 falantes e as falas de vozes diferentes em
     rótulos diferentes.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_local_diarize.py`. Expected: FAIL (módulo inexistente).
-- [ ] **Step 3:** Implementar `meeting/local_diarize.py`.
-- [ ] **Step 4:** Run: `uv run --frozen pytest -q tests/meeting/test_local_diarize.py` → PASS. Depois
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_local_diarize.py`. Expected: FAIL (módulo inexistente).
+- [x] **Step 3:** Implementar `meeting/local_diarize.py`.
+- [x] **Step 4:** Run: `uv run --frozen pytest -q tests/meeting/test_local_diarize.py` → PASS. Depois
   `uv run --frozen pytest -q -m models tests/meeting/test_local_diarize.py` → PASS (baixa ~33 MB uma vez).
-- [ ] **Step 5: Commit** `[Feat] Adicionar motor local de separação de falantes com sherpa-onnx`
+- [x] **Step 5: Commit** `[Feat] Adicionar motor local de separação de falantes com sherpa-onnx`
 
 ---
 
@@ -342,7 +342,7 @@ Algoritmo de `run(audio)`:
     Faz `mean_embedding(speech_chunks(audio, spans), f)`, em que `f(chunk)` é
     `pipeline._embedding(torch.from_numpy(chunk)[None, None].to(device))[0]`, sob o lock.
 
-- [ ] **Step 1: Testes que falham.**
+- [x] **Step 1: Testes que falham.**
   - Em `test_diarize.py` (sem pyannote): `test_unavailable_reason_without_token` (`Diarizer(None).unavailable_reason == "no_token"`)
     e `test_unavailable_reason_missing_extra` (monkeypatch de `diarize.pyannote_installed` → `False`;
     `Diarizer("tok").unavailable_reason == "missing_extra"`, e `_load` não é chamado).
@@ -352,10 +352,10 @@ Algoritmo de `run(audio)`:
     Novo `test_embed_averages_chunks_with_pipeline_embedding`: `FakePipeline` com `_embedding` que devolve
     `np.array([[1.0, 0.0]])`. `Diarizer("tok", device="cpu")` com `_pipeline` injetado:
     `embed(np.ones(16000*3, np.float32), [(0.0, 3.0)])` dá `[1, 0]`, e `embed(..., [(0.0, 0.2)])` dá `None`.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_diarize.py tests/meeting/test_diarize_pyannote.py`. Expected: FAIL.
-- [ ] **Step 3:** Implementar.
-- [ ] **Step 4:** Rodar de novo → PASS; `uv run --frozen pytest -q` → PASS.
-- [ ] **Step 5: Commit** `[Feat] Expor modelo, motivo de indisponibilidade e embed no pyannote`
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_diarize.py tests/meeting/test_diarize_pyannote.py`. Expected: FAIL.
+- [x] **Step 3:** Implementar.
+- [x] **Step 4:** Rodar de novo → PASS; `uv run --frozen pytest -q` → PASS.
+- [x] **Step 5: Commit** `[Feat] Expor modelo, motivo de indisponibilidade e embed no pyannote`
 
 ---
 
@@ -435,7 +435,7 @@ Algoritmo de `run(audio)`:
     embeddings).
   - `GET /voices`, `/enroll` e o renomear passam `_active_model(ctx)` para `_voice_json`.
 
-- [ ] **Step 1: Testes que falham.**
+- [x] **Step 1: Testes que falham.**
   - `tests/test_store.py`: `user_version` passa a 6 e `voice_embeddings` entra no conjunto de tabelas.
     `test_migration_v6_tags_existing_embeddings_and_settings`: cria um banco em V5 aplicando
     `store._MIGRATIONS[:5]` à mão (str ou callable, com `PRAGMA user_version`). Insere uma voz com
@@ -467,11 +467,11 @@ Algoritmo de `run(audio)`:
     embedding e `embedding_model=None` → 400. Novo `test_voices_report_samples_of_active_model`: com
     `ctx.diarizer` fake de `chosen_model() == "m2"` e uma voz com `m1: 3` e `m2: 1`, `GET /voices` devolve
     `n_samples == 1`; sem `ctx.diarizer`, devolve 3.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/test_store.py tests/test_settings.py tests/meeting/test_voices.py tests/meeting/test_finalize.py tests/test_api.py`.
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/test_store.py tests/test_settings.py tests/meeting/test_voices.py tests/meeting/test_finalize.py tests/test_api.py`.
   Expected: FAIL.
-- [ ] **Step 3:** Implementar store, settings, voices, finalize e api conforme as interfaces.
-- [ ] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS (inclusive `test_session.py`, que usa o `FakeDiarizer`).
-- [ ] **Step 5: Commit** `[Feat] Guardar embeddings de voz por modelo e limiar por motor`
+- [x] **Step 3:** Implementar store, settings, voices, finalize e api conforme as interfaces.
+- [x] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS (inclusive `test_session.py`, que usa o `FakeDiarizer`).
+- [x] **Step 5: Commit** `[Feat] Guardar embeddings de voz por modelo e limiar por motor`
 
 ---
 
