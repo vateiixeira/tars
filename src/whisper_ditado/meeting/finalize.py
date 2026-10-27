@@ -34,6 +34,7 @@ from whisper_ditado.meeting.timeline import (
     mark_dictated,
     merge_tracks,
 )
+from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.meeting.voices import match_speakers
 from whisper_ditado.settings import DIARIZERS, Settings, threshold_key
 from whisper_ditado.store import Segment, Speaker, Store
@@ -137,6 +138,23 @@ def _diarize(pc_audio: np.ndarray, pc_words: list[Word], diarizer) -> Diarizatio
     except Exception:
         log.exception("Falha na separação de vozes; seguindo com um único falante")
         return None
+
+
+def _load_pc(meeting_id: str) -> np.ndarray | None:
+    return load_track(paths.meeting_dir(meeting_id), "pc")
+
+
+def _ensure_voices(store: Store, result: DiarizationResult, voice_sync: VoiceSync | None) -> None:
+    """Refaz, a partir do áudio, os embeddings que faltam para o modelo desta separação.
+
+    Roda antes de casar os falantes; qualquer falha é registrada e a reunião segue sem isso.
+    """
+    if not result.model or result.embed is None:
+        return
+    try:
+        (voice_sync or VoiceSync(_load_pc)).ensure(store, result.model, result.embed)
+    except Exception:
+        log.exception("Não foi possível recalcular as vozes salvas para o modelo %s", result.model)
 
 
 def _nearest_speaker(word: Word, turns: list[Turn]) -> str | None:
@@ -249,6 +267,7 @@ def finalize(
     title_fn: Callable[[str], str] | None,
     *,
     on_progress: Progress | None = None,
+    voice_sync: VoiceSync | None = None,
 ) -> None:
     """Monta e grava a transcrição; deixa a reunião `ready` (ou `failed`, sem apagar o áudio)."""
     progress = on_progress or (lambda stage: None)
@@ -281,6 +300,7 @@ def finalize(
                 store.delete_alerts(meeting_id, kind)
             if result.fallback:
                 store.add_alert(meeting_id, result.fallback, 0.0, duration)
+            _ensure_voices(store, result, voice_sync)
         else:
             for kind in FALLBACK_ALERTS.values():
                 store.delete_alerts(meeting_id, kind)
@@ -334,11 +354,12 @@ def reprocess(
     title_fn: Callable[[str], str] | None,
     *,
     on_progress: Progress | None = None,
+    voice_sync: VoiceSync | None = None,
 ) -> None:
     """Refaz transcrição e falantes a partir do áudio salvo (título editado e resumo ficam)."""
     store.update_meeting(meeting_id, status="processing", error=None)
     finalize(meeting_id, store, settings, transcriber, diarizer, None, title_fn,
-             on_progress=on_progress)
+             on_progress=on_progress, voice_sync=voice_sync)
 
 
 def _has_audio(directory: Path) -> bool:
@@ -355,6 +376,7 @@ def recover(
     on_status: StatusCallback | None = None,
     on_progress: Callable[[str, str], None] | None = None,
     skip: Callable[[str], bool] | None = None,
+    voice_sync: VoiceSync | None = None,
 ) -> list[str]:
     """Finaliza as reuniões que ficaram em `recording`/`processing` (backend caiu).
 
@@ -387,7 +409,7 @@ def recover(
                 def progress(stage: str, mid: str = meeting.id) -> None:
                     on_progress(mid, stage)
             finalize(meeting.id, store, settings, transcriber, diarizer, None, title_fn,
-                     on_progress=progress)
+                     on_progress=progress, voice_sync=voice_sync)
             recovered.append(meeting.id)
         final = store.get_meeting(meeting.id)
         notify(meeting.id, final.status if final else "failed")

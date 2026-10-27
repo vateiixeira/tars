@@ -37,7 +37,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -50,6 +50,7 @@ from whisper_ditado.audio.capture import BYTES_PER_SAMPLE, SAMPLE_RATE, TrackRec
 from whisper_ditado.audio.levels import KINDS, HealthMonitor
 from whisper_ditado.meeting import finalize as fin
 from whisper_ditado.meeting.incremental import IncrementalTranscriber, Vad, default_vad
+from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.memory import release_unused_memory
 from whisper_ditado.settings import Settings
 from whisper_ditado.store import Store
@@ -130,7 +131,16 @@ class _YieldingDiarizer:
 
     def run(self, audio):
         self._gate()
-        return self._inner.run(audio)
+        result = self._inner.run(audio)
+        embed = getattr(result, "embed", None)
+        if embed is None:
+            return result
+
+        def gated_embed(*args, **kwargs):
+            self._gate()
+            return embed(*args, **kwargs)
+
+        return replace(result, embed=gated_embed)
 
     def unload(self) -> None:
         unload = getattr(self._inner, "unload", None)
@@ -178,6 +188,7 @@ class MeetingManager:
         self._diarizer = (_YieldingDiarizer(diarizer, gpu_gate)
                           if diarizer is not None and gpu_gate is not None else diarizer)
         self._title_fn = title_fn
+        self._voice_sync = VoiceSync(fin._load_pc)
         self._recorder_factory = recorder_factory or (
             lambda name, path, target, sink: TrackRecorder(name, path, target, sink, clock=clock)
         )
@@ -742,7 +753,8 @@ class MeetingManager:
                 return
             words = self._flush_words(s)
             fin.finalize(mid, self._store, self._settings, transcriber, self._diarizer, words,
-                         self._title_fn, on_progress=lambda stage: self._progress(mid, stage))
+                         self._title_fn, on_progress=lambda stage: self._progress(mid, stage),
+                         voice_sync=self._voice_sync)
         finally:
             self._processing_done(mid)
         self._notify_ready(mid)
@@ -755,7 +767,8 @@ class MeetingManager:
             fin.mark_failed(self._store, meeting_id, exc)
         else:
             fin.reprocess(meeting_id, self._store, self._settings, transcriber, self._diarizer,
-                          self._title_fn, on_progress=lambda st: self._progress(meeting_id, st))
+                          self._title_fn, on_progress=lambda st: self._progress(meeting_id, st),
+                          voice_sync=self._voice_sync)
         finally:
             self._processing_done(meeting_id)
 
@@ -776,7 +789,8 @@ class MeetingManager:
                     self._notify_ready(meeting_id)
 
         fin.recover(self._store, self._settings, self._get_transcriber, self._diarizer,
-                    self._title_fn, on_status=on_status, on_progress=self._progress, skip=busy)
+                    self._title_fn, on_status=on_status, on_progress=self._progress, skip=busy,
+                    voice_sync=self._voice_sync)
 
     # -- internos: eventos ---------------------------------------------------------
 

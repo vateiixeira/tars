@@ -8,7 +8,7 @@ import pytest
 
 from whisper_ditado import paths
 from whisper_ditado.meeting import finalize as fin
-from whisper_ditado.meeting.diarize import DiarizationResult, Diarizer
+from whisper_ditado.meeting.diarize import DiarizationResult, Diarizer, Embed
 from whisper_ditado.meeting.timeline import Turn
 from whisper_ditado.settings import Settings
 from whisper_ditado.store import Store, Voice, VoiceEmbedding
@@ -60,8 +60,9 @@ class FakeDiarizer:
     """Devolve `result`, carimbando `model`/`engine` quando ele vier sem esses campos."""
 
     def __init__(self, result: DiarizationResult | None = None, available: bool = True,
-                 model: str = "fake-model", engine: str = "local"):
+                 model: str = "fake-model", engine: str = "local", embed: Embed | None = None):
         self.result = result or DiarizationResult()
+        self.embed = embed
         self._available = available
         self.model = model
         self.engine = engine
@@ -74,7 +75,8 @@ class FakeDiarizer:
     def run(self, audio):
         self.calls += 1
         return dataclasses.replace(self.result, model=self.result.model or self.model,
-                                   engine=self.result.engine or self.engine)
+                                   engine=self.result.engine or self.engine,
+                                   embed=self.result.embed or self.embed)
 
 
 def w(start: float, text: str, dur: float = 0.4) -> Word:
@@ -175,6 +177,51 @@ def test_finalize_builds_transcript_with_me_and_people(store, settings):
         assert (d / f"{name}.opus").stat().st_size > 0
         assert not (d / f"{name}.raw").exists()
     assert not list(d.glob("*.part"))
+
+
+def test_finalize_computes_voice_embedding_before_matching(store, settings):
+    from whisper_ditado.store import Segment, Speaker
+
+    e3 = np.eye(4, dtype=np.float32)[2]
+    store.upsert_voice(Voice(id="v-joao", name="João",
+                             embeddings={"other-model": VoiceEmbedding(e3)}))
+    old, _ = new_meeting(store, status="ready")
+    store.replace_transcript(
+        old, [Speaker("sp-old", old, "João", "v-joao", False, 1)],
+        [Segment(None, old, "sp-old", "pc", 2.0, 4.0, "oi")])
+    mid, _ = new_meeting(store, status="processing")
+    spans_seen = []
+
+    def embed(audio, spans):
+        spans_seen.append((len(audio), list(spans)))
+        return e3
+
+    words = {"mic": [], "pc": [w(3.0, "bom"), w(6.0, "dia")]}
+    result = DiarizationResult([Turn(2.8, 3.6, "A"), Turn(5.8, 6.6, "B")],
+                               {"A": e3, "B": np.eye(4, dtype=np.float32)[0]})
+
+    fin.finalize(mid, store, settings, FakeTranscriber(),
+                 FakeDiarizer(result, model="fake-model", embed=embed), words, None)
+
+    assert store.get_meeting(mid).status == "ready"
+    assert spans_seen == [(20 * SR, [(2.0, 4.0)])]
+    assert "fake-model" in store.get_voice("v-joao").embeddings
+    assert {sp.label for sp in store.get_speakers(mid)} == {"João", "Pessoa 1"}
+
+
+def test_finalize_survives_voice_sync_failure(store, settings, caplog):
+    mid, words, result = _two_speaker_case(store)
+
+    class Boom:
+        def ensure(self, *args):
+            raise RuntimeError("sync quebrou")
+
+    fin.finalize(mid, store, settings, FakeTranscriber(),
+                 FakeDiarizer(result, embed=lambda audio, spans: None), words, None,
+                 voice_sync=Boom())
+
+    assert store.get_meeting(mid).status == "ready"
+    assert "sync quebrou" in caplog.text
 
 
 def _two_speaker_case(store, pc_s=20.0):

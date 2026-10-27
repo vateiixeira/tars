@@ -595,6 +595,39 @@ def test_diarization_waits_for_dictation_first(store, settings):
     assert log[log.index("diarize") - 1] == "gate"
 
 
+def test_voice_embedding_recompute_waits_for_dictation(store, settings):
+    from tests.meeting.test_finalize import write_raw
+    from whisper_ditado.meeting.diarize import DiarizationResult
+    from whisper_ditado.store import Segment, Speaker, Voice, VoiceEmbedding
+
+    store.upsert_voice(Voice(id="v1", name="Ana", embeddings={
+        "other-model": VoiceEmbedding(np.array([1, 0], np.float32))}))
+    old = store.create_meeting(datetime(2026, 10, 1, 9, 0)).id
+    write_raw(paths.meeting_dir(old) / "pc.raw", 5.0, 0.2)
+    store.replace_transcript(old, [Speaker("sp-old", old, "Ana", "v1", False, 1)],
+                             [Segment(None, old, "sp-old", "pc", 1.0, 3.0, "oi")])
+    log = []
+
+    def embed(audio, spans):
+        log.append("embed")
+        return np.array([1, 0], np.float32)
+
+    def gate():
+        log.append("gate")
+
+    diarizer = FakeDiarizer(DiarizationResult(embed=embed))
+    rig = Rig(store, settings, diarizer=diarizer, gpu_gate=gate)
+    rig.start()
+    rig.advance(1.0)
+    rig.manager.stop()
+    assert rig.manager.wait_idle(10)
+    assert "embed" in log
+    for i, entry in enumerate(log):
+        if entry == "embed":
+            assert log[i - 1] == "gate"
+    assert "fake-model" in store.get_voice("v1").embeddings
+
+
 def test_meeting_model_failure_is_not_retried_every_feed(store, settings, caplog):
     rig = Rig(store, settings)
 
