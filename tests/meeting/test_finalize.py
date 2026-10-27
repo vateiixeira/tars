@@ -632,16 +632,16 @@ def test_reprocess_keeps_voice_links_by_overlap(store, settings):
 def test_reprocess_inherited_voice_is_not_matched_again(store, settings):
     mid = _linked_meeting(store)
     e = np.eye(4, dtype=np.float32)
-    store.upsert_voice(Voice(id="v-bia", name="Bia", embeddings={"fake-model": VoiceEmbedding(e[1])}))
+    store.upsert_voice(Voice(id="v-carla", name="Carla", embeddings={"fake-model": VoiceEmbedding(e[1])}))
     settings.update({"voice_match_threshold_local": 0.9})
-    # X e Y parecem a Bia; X herda a Ana pelo tempo, então só Y pode ficar com a Bia
+    # X e Y parecem a Carla; X herda a Ana pelo tempo, então só Y pode ficar com a Carla
     result = DiarizationResult([Turn(2.0, 4.0, "X"), Turn(6.0, 7.0, "Y")], {"X": e[1], "Y": e[1]})
     words = [w(2.2, "oi", dur=1.5), w(6.1, "tchau")]
 
     fin.reprocess(mid, store, settings, FakeTranscriber(default=words), FakeDiarizer(result), None)
 
     speakers = {sp.label: sp.voice_id for sp in store.get_speakers(mid)}
-    assert speakers == {"Ana": "v-ana", "Bia": "v-bia"}
+    assert speakers == {"Ana": "v-ana", "Carla": "v-carla"}
 
 
 def test_reprocess_inherited_voice_is_excluded_from_matching(store, settings):

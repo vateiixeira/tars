@@ -385,7 +385,7 @@ def test_voices_report_samples_of_active_model(client, ctx):
         "m1": VoiceEmbedding(np.ones(2, np.float32), 3),
         "m2": VoiceEmbedding(np.ones(3, np.float32), 1),
     }))
-    ctx.store.upsert_voice(Voice(id="v2", name="Bia"))
+    ctx.store.upsert_voice(Voice(id="v2", name="Carla"))
     # sem diarizer: o maior número de amostras entre os modelos (0 sem nenhum)
     got = {v["id"]: v["n_samples"] for v in client.get("/api/voices").json()}
     assert got == {"v1": 3, "v2": 0}

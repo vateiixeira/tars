@@ -236,7 +236,7 @@ def test_voice_embedding_roundtrip(store):
 
 def test_voice_embeddings_per_model_roundtrip_and_cascade(store):
     store.upsert_voice(Voice(id="v1", name="Ana", created_at=T0, updated_at=T0))
-    store.upsert_voice(Voice(id="v2", name="Bia", created_at=T0, updated_at=T0))
+    store.upsert_voice(Voice(id="v2", name="Carla", created_at=T0, updated_at=T0))
     store.set_voice_embedding("v1", "m1", VoiceEmbedding(np.array([1, 0], np.float32), 3, T0))
     store.set_voice_embedding("v1", "m2", VoiceEmbedding(np.array([0, 1, 0], np.float32), 1, T0))
     store.set_voice_embedding("v2", "m1", VoiceEmbedding(np.array([0, 1], np.float32)))
@@ -294,7 +294,7 @@ def test_migration_v7_tags_existing_embeddings_and_settings(tmp_path):
     conn.execute(
         "INSERT INTO voices(id, name, embedding, n_samples, created_at, updated_at)"
         " VALUES ('v1', 'Ana', ?, 4, ?, ?)", (vec.tobytes(), T0.isoformat(), T0.isoformat()))
-    conn.execute("INSERT INTO voices(id, name) VALUES ('v2', 'Bia')")
+    conn.execute("INSERT INTO voices(id, name) VALUES ('v2', 'Carla')")
     conn.execute("INSERT INTO speakers(id, meeting_id, embedding) VALUES ('s1', 'm1', ?)",
                  (vec.tobytes(),))
     conn.execute("INSERT INTO speakers(id, meeting_id) VALUES ('s2', 'm1')")
