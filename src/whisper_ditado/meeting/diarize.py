@@ -96,6 +96,8 @@ class Diarizer:
         token = self.hf_token
         if not token:
             return None
+        if self._pipeline is not None:
+            return self._pipeline
         if not pyannote_installed():
             if not _missing_extra_logged:
                 _missing_extra_logged = True

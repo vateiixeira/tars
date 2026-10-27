@@ -25,6 +25,7 @@ def test_diarizer_unloads_and_reloads_with_current_token(monkeypatch):
         return FakePipeline()
 
     monkeypatch.setattr(Diarizer, "_load", staticmethod(load))
+    monkeypatch.setattr(diarize, "pyannote_installed", lambda: True)
     diarizer = Diarizer("first")
     assert diarizer.available
     ref = weakref.ref(diarizer._pipeline)
