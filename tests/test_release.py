@@ -94,3 +94,130 @@ def test_package_rejects_uncommitted_version_changes(project):
     release.bump(project, "patch")
     with pytest.raises(ValueError, match="Faça commit"):
         release.package(project, binary, project / "output")
+
+
+def git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture
+def repo(project, tmp_path_factory):
+    """Projeto commitado na main com um remoto `origin` (repositório bare) em dia."""
+    commit_project(project)
+    (project / ".env").unlink()
+    git(project, "branch", "-M", "main")
+    git(project, "config", "user.name", "Test")
+    git(project, "config", "user.email", "test@example.test")
+    git(project, "config", "commit.gpgsign", "false")
+    git(project, "config", "tag.gpgsign", "false")
+    remote = tmp_path_factory.mktemp("origin") / "tars.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    git(project, "remote", "add", "origin", str(remote))
+    git(project, "push", "-q", "origin", "main")
+    return project, remote
+
+
+def ok_steps(calls):
+    def step(name):
+        return (name, lambda root: calls.append(name))
+    return [step("pytest"), step("pnpm")], step("uv lock --check")
+
+
+def publish(project, part="patch", checks=None, lock_check=None):
+    calls = []
+    default_checks, default_lock = ok_steps(calls)
+    tag = release.publish(project, part, checks=checks or default_checks,
+                          lock_check=lock_check or default_lock)
+    return tag, calls
+
+
+def test_publish_runs_checks_bumps_commits_tags_and_pushes(repo):
+    project, remote = repo
+    old = release.check(project)
+    tag, calls = publish(project)
+    new = release.check(project)
+    assert tag == f"v{new}" and new != old
+    assert calls == ["pytest", "pnpm", "uv lock --check"]
+    assert git(project, "log", "-1", "--format=%s") == f"[Release] Publicar versão {new}"
+    assert git(project, "status", "--porcelain", "--untracked-files=no") == ""
+    assert git(project, "cat-file", "-t", tag) == "tag"  # tag anotada
+    assert git(remote, "rev-parse", "main") == git(project, "rev-parse", "HEAD")
+    assert git(remote, "rev-parse", f"{tag}^{{commit}}") == git(project, "rev-parse", "HEAD")
+
+
+def assert_untouched(project, remote, head, version):
+    assert release.check(project) == version
+    assert git(project, "rev-parse", "HEAD") == head
+    assert git(project, "status", "--porcelain", "--untracked-files=no") == ""
+    assert git(project, "tag", "--list") == ""
+    assert git(remote, "rev-parse", "main") == head
+
+
+def test_publish_refuses_outside_main(repo):
+    project, _remote = repo
+    git(project, "switch", "-q", "-c", "feature")
+    with pytest.raises(ValueError, match="main"):
+        publish(project)
+
+
+def test_publish_refuses_uncommitted_changes(repo):
+    project, _remote = repo
+    (project / "src/whisper_ditado/main.py").write_text("# alterado\n")
+    with pytest.raises(ValueError, match="commit"):
+        publish(project)
+
+
+def test_publish_refuses_when_behind_origin(repo, tmp_path):
+    project, remote = repo
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(remote), str(other)], check=True)
+    (other / "novo.txt").write_text("x\n")
+    git(other, "add", ".")
+    git(other, "-c", "user.name=T", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false",
+        "commit", "-qm", "remoto")
+    git(other, "push", "-q", "origin", "main")
+    with pytest.raises(ValueError, match="origin/main"):
+        publish(project)
+
+
+def test_publish_refuses_existing_tag(repo):
+    project, _remote = repo
+    major, minor, patch = map(int, release.check(project).split("."))
+    git(project, "tag", f"v{major}.{minor}.{patch + 1}")
+    with pytest.raises(ValueError, match="já existe"):
+        publish(project)
+
+
+def test_failing_check_stops_before_bump(repo):
+    project, remote = repo
+    head, version = git(project, "rev-parse", "HEAD"), release.check(project)
+
+    def failing(root):
+        raise subprocess.CalledProcessError(1, ["pytest"])
+
+    with pytest.raises(ValueError, match="pytest"):
+        publish(project, checks=[("pytest", failing)])
+    assert_untouched(project, remote, head, version)
+
+
+def test_failing_lock_check_restores_manifests(repo):
+    project, remote = repo
+    head, version = git(project, "rev-parse", "HEAD"), release.check(project)
+
+    def failing(root):
+        raise subprocess.CalledProcessError(1, ["uv", "lock", "--check"])
+
+    with pytest.raises(ValueError, match="uv lock"):
+        publish(project, lock_check=("uv lock --check", failing))
+    assert_untouched(project, remote, head, version)
+
+
+def test_gpu_reminder_lists_sensitive_changes_since_last_tag(repo):
+    project, _remote = repo
+    assert release.gpu_sensitive_changes(project) is None  # sem versão anterior para comparar
+    git(project, "tag", "-a", "v0.0.1", "-m", "anterior")
+    assert release.gpu_sensitive_changes(project) == []
+    (project / "src/whisper_ditado/transcriber.py").write_text("# muda\n")
+    git(project, "add", ".")
+    git(project, "commit", "-qm", "transcrição")
+    assert release.gpu_sensitive_changes(project) == ["src/whisper_ditado/transcriber.py"]
