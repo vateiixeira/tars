@@ -111,7 +111,7 @@ def repo(project, tmp_path_factory):
     git(project, "config", "commit.gpgsign", "false")
     git(project, "config", "tag.gpgsign", "false")
     remote = tmp_path_factory.mktemp("origin") / "tars.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    subprocess.run(["git", "init", "-q", "--bare", "--initial-branch=main", str(remote)], check=True)
     git(project, "remote", "add", "origin", str(remote))
     git(project, "push", "-q", "origin", "main")
     return project, remote
