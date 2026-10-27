@@ -128,6 +128,18 @@ def test_inherit_links_ignores_no_overlap():
     assert inherit_links({"A": [(0.0, 5.0)]}, {}) == {}
 
 
+def test_inherit_links_ignores_edge_overlap():
+    # os trechos só se encostam na borda (0,1 s): não é a mesma pessoa
+    assert inherit_links({"A": [(0.0, 10.0)]}, {"v1": [(9.9, 20.0)]}) == {}
+
+
+def test_inherit_links_requires_fraction_of_shorter_total():
+    # 2 s de 20 s em comum ficam abaixo de 30% do menor total (6 s)
+    assert inherit_links({"A": [(0.0, 20.0)]}, {"v1": [(18.0, 38.0)]}) == {}
+    # 6 s chegam ao mínimo
+    assert inherit_links({"A": [(0.0, 20.0)]}, {"v1": [(14.0, 34.0)]}) == {"A": "v1"}
+
+
 def test_inherit_links_sums_overlap_across_spans():
     new = {"A": [(0.0, 3.0), (10.0, 13.0)], "B": [(4.0, 8.0)]}
     old = {"v1": [(0.0, 3.0), (10.0, 13.0)], "v2": [(0.0, 20.0)]}

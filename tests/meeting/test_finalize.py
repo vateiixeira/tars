@@ -615,7 +615,8 @@ def test_reprocess_keeps_voice_links_by_overlap(store, settings):
     # embeddings que não casariam com v-ana pelo limiar
     result = DiarizationResult([Turn(2.0, 4.0, "X"), Turn(6.0, 7.0, "Y")],
                                {"X": e[1], "Y": e[2]})
-    words = [w(2.2, "oi"), w(2.8, "gente"), w(6.1, "tchau")]
+    # a fala de X cobre 1,6 s dos 2 s da Ana: acima da sobreposição mínima para herdar
+    words = [w(2.2, "oi"), w(2.8, "gente", dur=1.0), w(6.1, "tchau")]
 
     fin.reprocess(mid, store, settings, FakeTranscriber(default=words), FakeDiarizer(result), None)
 
@@ -635,7 +636,7 @@ def test_reprocess_inherited_voice_is_not_matched_again(store, settings):
     settings.update({"voice_match_threshold_local": 0.9})
     # X e Y parecem a Bia; X herda a Ana pelo tempo, então só Y pode ficar com a Bia
     result = DiarizationResult([Turn(2.0, 4.0, "X"), Turn(6.0, 7.0, "Y")], {"X": e[1], "Y": e[1]})
-    words = [w(2.2, "oi"), w(6.1, "tchau")]
+    words = [w(2.2, "oi", dur=1.5), w(6.1, "tchau")]
 
     fin.reprocess(mid, store, settings, FakeTranscriber(default=words), FakeDiarizer(result), None)
 

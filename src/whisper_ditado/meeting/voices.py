@@ -9,6 +9,11 @@ import numpy as np
 
 from whisper_ditado.store import Voice, VoiceEmbedding
 
+# Herança de vínculo por tempo: a sobreposição precisa ter pelo menos MIN_INHERIT_S segundos e
+# MIN_INHERIT_FRACTION do menor dos dois totais, para um toque de borda não passar uma voz adiante.
+MIN_INHERIT_S = 1.0
+MIN_INHERIT_FRACTION = 0.3
+
 
 def cosine(a: np.ndarray, b: np.ndarray) -> float:
     """Similaridade de cosseno; 0.0 se algum vetor for nulo."""
@@ -56,6 +61,11 @@ def match_speakers(
     return result
 
 
+def _total(spans: list[tuple[float, float]]) -> float:
+    """Duração somada dos trechos."""
+    return sum(max(0.0, end - start) for start, end in spans)
+
+
 def _overlap(a: list[tuple[float, float]], b: list[tuple[float, float]]) -> float:
     """Tempo total em que os dois conjuntos de trechos coincidem."""
     return sum(max(0.0, min(ae, be) - max(as_, bs)) for as_, ae in a for bs, be in b)
@@ -69,18 +79,20 @@ def inherit_links(
 
     `new_spans` é indexado pela chave do falante novo e `old_spans` pelo `voice_id` do falante
     antigo; devolve chave nova -> `voice_id`. Guloso pela maior sobreposição, um para um: cada
-    chave e cada voz entram no máximo uma vez, e só pares com sobreposição > 0.
+    chave e cada voz entram no máximo uma vez. Um par só conta se a sobreposição for de pelo
+    menos `max(MIN_INHERIT_S, MIN_INHERIT_FRACTION * menor total)`, com os totais em segundos da
+    chave nova e da voz antiga.
     """
     pairs = [
-        (_overlap(spans, old), key, voice_id)
+        (_overlap(spans, old), key, voice_id, min(_total(spans), _total(old)))
         for key, spans in new_spans.items()
         for voice_id, old in old_spans.items()
     ]
-    pairs = [p for p in pairs if p[0] > 0.0]
+    pairs = [p for p in pairs if p[0] >= max(MIN_INHERIT_S, MIN_INHERIT_FRACTION * p[3])]
     pairs.sort(key=lambda p: p[0], reverse=True)
     result: dict[str, str] = {}
     used_voices: set[str] = set()
-    for _, key, voice_id in pairs:
+    for _, key, voice_id, _ in pairs:
         if key in result or voice_id in used_voices:
             continue
         result[key] = voice_id
