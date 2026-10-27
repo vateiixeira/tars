@@ -962,14 +962,14 @@ git commit -m "[Feat] Adicionar item Tirar print na bandeja"
 **Files:**
 - Modify: `README.md`, `docs/INSTALL_RELEASE.md` (se citar dependências Python)
 
-- [ ] **Step 1: Atualizar o README**
+- [x] **Step 1: Atualizar o README**
 
 O README passa a ter:
 - a seção "Prints de tela": os três modos, a pasta do Flameshot, o atalho e a bandeja, a aba Prints, o envio ao Claude (limite de 20, lado maior 2000 px) e o export `.zip`;
 - em "Criador de issues e MCP próprio": o levantamento agora é manual, e o anexo de imagens é opcional. O MCP pode expor qualquer ferramenta de anexo, que o TARS tenta usar com os marcadores `@@PRINT_B64:Pn@@` e `@@PRINT_DATAURL:Pn@@`. A ausência dela não impede a criação;
 - as novas configurações `print_mode`, `print_folder` e `print_key` (também como `DITADO_<CHAVE>`).
 
-- [ ] **Step 2: Rodar todas as verificações**
+- [x] **Step 2: Rodar todas as verificações**
 
 Run: `uv run --frozen pytest -q && (cd app && pnpm test && pnpm build) && (cd app/src-tauri && cargo test --locked --lib)`
 Expected: PASS
@@ -981,7 +981,7 @@ Expected: PASS
 - O resumo cita o print.
 - O levantamento só roda no clique.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs/INSTALL_RELEASE.md
