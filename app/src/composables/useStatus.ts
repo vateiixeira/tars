@@ -14,6 +14,7 @@ export const ALERT_MESSAGES: Record<AlertKind, string> = {
   pc_wrong_output: "Áudio da chamada não está sendo captado",
   mic_dead: "Microfone desconectado",
   pc_dead: "Captura do áudio do PC parou",
+  print_failed: "Não foi possível tirar um print",
 };
 
 /** Pílula e botão de gravar quando o backend volta parado de uma queda no meio da gravação. */

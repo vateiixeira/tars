@@ -25,7 +25,7 @@ export function fakeEvents() {
 
 export const IDLE: Status = {
   dictation: { enabled: true, active: false, key: "ctrl+super" },
-  meeting: { state: "idle", meeting_id: null, started_at: null, followed_app: null, alerts: [] },
+  meeting: { state: "idle", meeting_id: null, started_at: null, followed_app: null, alerts: [], print_mode: "off" },
 };
 
 /** Simula a queda e a volta do backend: fecha, reabre e manda o `status` da nova conexão. */

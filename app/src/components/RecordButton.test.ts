@@ -12,7 +12,7 @@ afterEach(() => {
 
 const recording = (followed: string | null, startedAt: string): Status => ({
   dictation: { enabled: true, active: false, key: "ctrl+super" },
-  meeting: { state: "recording", meeting_id: "m1", started_at: startedAt, followed_app: followed, alerts: [] },
+  meeting: { state: "recording", meeting_id: "m1", started_at: startedAt, followed_app: followed, alerts: [], print_mode: "off" },
 });
 
 describe("RecordButton", () => {
@@ -54,7 +54,7 @@ describe("RecordButton", () => {
     emit({
       type: "status",
       dictation: { enabled: true, active: false, key: "ctrl+super" },
-      meeting: { state: "processing", meeting_id: "m1", started_at: null, followed_app: null, alerts: [] },
+      meeting: { state: "processing", meeting_id: "m1", started_at: null, followed_app: null, alerts: [], print_mode: "off" },
     });
     await flushPromises();
     expect(w.text()).toContain("Iniciar reunião");

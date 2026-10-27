@@ -9,7 +9,14 @@ export interface ApiInfo {
 
 export type MeetingState = "idle" | "recording" | "processing";
 export type MeetingStatus = "recording" | "processing" | "ready" | "failed";
-export type AlertKind = "mic_silent" | "pc_silent" | "pc_wrong_output" | "mic_dead" | "pc_dead";
+export type AlertKind =
+  | "mic_silent"
+  | "pc_silent"
+  | "pc_wrong_output"
+  | "mic_dead"
+  | "pc_dead"
+  | "print_failed";
+export type PrintMode = "off" | "flameshot" | "native";
 export type TrackSource = "mic" | "pc";
 /** Etapas do processamento (meeting/finalize.py). */
 export type ProgressStage = "transcrevendo" | "separando vozes" | "finalizando";
@@ -29,6 +36,7 @@ export interface Status {
     started_at: string | null;
     followed_app: string | null;
     alerts: AlertKind[];
+    print_mode: PrintMode;
   };
 }
 
@@ -67,6 +75,19 @@ export interface Alert {
   end_s: number;
 }
 
+/** Print de tela tirado durante a reunião (`prints` do detalhe), ordenado por `at_s`. */
+export interface MeetingPrint {
+  id: string;
+  /** "P1", "P2"... */
+  label: string;
+  /** Segundos desde o início da reunião. */
+  at_s: number;
+  source: "flameshot" | "native";
+  created_at: string;
+  /** `false` quando passou do limite de prints enviados ao Claude. */
+  sent_to_claude: boolean;
+}
+
 /** `GET /meetings/{id}`. */
 export interface MeetingDetail {
   id: string;
@@ -80,6 +101,7 @@ export interface MeetingDetail {
   segments: Segment[];
   summary: string | null;
   alerts: Alert[];
+  prints: MeetingPrint[];
   summary_job: JobState | null;
 }
 
@@ -137,6 +159,9 @@ export interface Settings {
   issues_mcp_name: string;
   tasks_prompt: string;
   hf_token_set: boolean;
+  print_mode: PrintMode;
+  print_folder: string | null;
+  print_key: string;
 }
 
 /** Corpo de `PUT /settings`: qualquer subconjunto; `hf_token` só é aceito na escrita. */

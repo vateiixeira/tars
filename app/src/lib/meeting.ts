@@ -37,10 +37,23 @@ export function transcriptText(segments: Segment[], speakers: Speaker[]): string
     .join("\n");
 }
 
-/** `reuniao-AAAAMMDD-HHMM.md`, como o backend sugere no Content-Disposition. */
-export function exportFileName(startedAt: string): string {
+/** `reuniao-AAAAMMDD-HHMM.md` (ou `.zip`), como o backend sugere no Content-Disposition. */
+export function exportFileName(startedAt: string, extension: "md" | "zip" = "md"): string {
   const d = new Date(startedAt);
-  return `reuniao-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`;
+  return `reuniao-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.${extension}`;
+}
+
+/** A fala de um instante: a de maior `start_s <= atS` (a primeira, se o instante vem antes de todas). */
+export function segmentAt(segments: Segment[], atS: number): Segment | undefined {
+  if (!segments.length) return undefined;
+  let lo = 0;
+  let hi = segments.length; // primeiro índice com start_s > atS
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (segments[mid]!.start_s <= atS) lo = mid + 1;
+    else hi = mid;
+  }
+  return segments[Math.max(0, lo - 1)];
 }
 
 /** "< 1 min", "42 min", "1 h 05 min". */
@@ -62,6 +75,7 @@ const ALERT_LABELS: Record<AlertKind, string> = {
   pc_wrong_output: "Áudio da chamada fora da saída gravada",
   mic_dead: "Microfone parou",
   pc_dead: "Captura do PC parou",
+  print_failed: "Não foi possível tirar um print",
 };
 
 /** "Microfone sem sinal de 12:10 a 12:40": os offsets do alerta somados ao início da reunião. */

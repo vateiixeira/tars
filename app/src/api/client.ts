@@ -129,6 +129,16 @@ export function createClient(getInfo: () => Promise<ApiInfo>, fetchFn: typeof fe
     /** Markdown da reunião (o nome do arquivo do backend não é exposto via CORS). */
     exportMarkdown: async (id: string): Promise<string> =>
       (await request("GET", `/meetings/${enc(id)}/export.md`)).text(),
+    /** Zip da reunião: markdown + imagens dos prints. */
+    exportZip: async (id: string): Promise<Uint8Array> =>
+      new Uint8Array(await (await request("GET", `/meetings/${enc(id)}/export.zip`)).arrayBuffer()),
+    /** Imagem do print: miniatura (jpeg até 480px) ou o arquivo original. */
+    printBlob: async (meetingId: string, printId: string, size: "thumb" | "full"): Promise<Blob> =>
+      (await request("GET", `/meetings/${enc(meetingId)}/prints/${enc(printId)}${query({ size })}`)).blob(),
+    deletePrint: (meetingId: string, printId: string) =>
+      json<{ ok: true }>("DELETE", `/meetings/${enc(meetingId)}/prints/${enc(printId)}`),
+    /** Tira um print agora (só com a gravação em andamento; 409 caso contrário). */
+    takePrint: () => json<{ ok: true }>("POST", "/meetings/print"),
     summarize: (id: string) => json<{ summary: string }>("POST", `/meetings/${enc(id)}/summary`),
     nameSuggestions: (id: string) =>
       json<NameSuggestion[]>("POST", `/meetings/${enc(id)}/name-suggestions`),
