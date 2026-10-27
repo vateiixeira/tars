@@ -3,15 +3,23 @@
 Os modelos vêm das releases do GitHub do k2-fsa (ver `sherpa_models`); nada usa GPU nem o
 Hugging Face. O clustering do sherpa-onnx tende a quebrar uma voz em vários clusters pequenos, então
 o resultado passa por uma etapa que funde os clusters curtos no falante longo mais parecido.
+
+O `OfflineSpeakerDiarization.process` do sherpa-onnx segura o GIL do começo ao fim (minutos numa
+reunião longa), o que pararia a API e o ditado, que rodam no mesmo processo. Por isso a segmentação
+roda num processo filho persistente (spawn, nunca fork: o pai tem threads, CUDA e PortAudio). O
+`SpeakerEmbeddingExtractor.compute` solta o GIL e continua no processo principal.
 """
 
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import os
 import threading
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Protocol
 
@@ -43,15 +51,145 @@ class SherpaBackend(Protocol):
     def embed_chunk(self, chunk: np.ndarray) -> np.ndarray: ...
 
 
+def _diarization_config(so, segmentation: Path | str, embedding: Path | str,
+                        cluster_threshold: float, num_threads: int):
+    return so.OfflineSpeakerDiarizationConfig(
+        segmentation=so.OfflineSpeakerSegmentationModelConfig(
+            pyannote=so.OfflineSpeakerSegmentationPyannoteModelConfig(model=str(segmentation)),
+            num_threads=num_threads,
+        ),
+        embedding=so.SpeakerEmbeddingExtractorConfig(model=str(embedding), num_threads=num_threads),
+        clustering=so.FastClusteringConfig(num_clusters=-1, threshold=cluster_threshold),
+    )
+
+
+# --- processo filho -------------------------------------------------------------------------------
+
+_child_diarization = None
+
+
+def _child_start(init: Callable[..., None] | None, *args) -> None:
+    """Initializer do filho: sai junto com o pai e então roda `init(*args)`.
+
+    O backend sai por `os._exit` (sem finalizar o pool) e pode morrer por `kill -9`; sem a vigia,
+    o filho ficaria órfão para sempre esperando trabalho. Ela só roda quando o GIL do filho está
+    livre, então um `process` em andamento termina antes.
+    """
+    parent = multiprocessing.parent_process()
+    if parent is not None:
+
+        def exit_with_parent() -> None:
+            parent.join()
+            os._exit(0)
+
+        threading.Thread(target=exit_with_parent, name="vigia-do-pai", daemon=True).start()
+    if init is not None:
+        init(*args)
+
+
+def _child_init(
+    segmentation: str, embedding: str, cluster_threshold: float, num_threads: int
+) -> None:
+    global _child_diarization
+    import sherpa_onnx as so
+
+    config = _diarization_config(so, segmentation, embedding, cluster_threshold, num_threads)
+    _child_diarization = so.OfflineSpeakerDiarization(config)
+
+
+def _child_segments(audio: np.ndarray) -> list[tuple[float, float, int]]:
+    samples = np.ascontiguousarray(audio, dtype=np.float32)
+    result = _child_diarization.process(samples).sort_by_start_time()
+    return [(float(r.start), float(r.end), int(r.speaker)) for r in result]
+
+
+# --- processo pai ---------------------------------------------------------------------------------
+
+_live_pools: set[ProcessPoolExecutor] = set()
+_live_lock = threading.Lock()
+
+
+def _terminate_children() -> None:
+    """Na saída do interpretador: mata os filhos antes que o `concurrent.futures` espere por eles.
+
+    Sem isso, um `process` em andamento seguraria a saída até terminar (minutos). Registrado em
+    `threading._register_atexit` depois do `concurrent.futures.process`, então roda antes dele.
+    """
+    with _live_lock:
+        pools = list(_live_pools)
+        _live_pools.clear()
+    for pool in pools:
+        _shutdown(pool, terminate=True)
+
+
+def _shutdown(pool: ProcessPoolExecutor, *, terminate: bool) -> None:
+    processes = list((pool._processes or {}).values()) if terminate else []
+    pool.shutdown(wait=False, cancel_futures=True)
+    for proc in processes:
+        proc.terminate()
+
+
+threading._register_atexit(_terminate_children)
+
+
+class _ChildProcess:
+    """Um processo filho persistente (spawn) para rodar funções do nível do módulo.
+
+    Criado no primeiro uso. Se o filho morrer (`BrokenProcessPool`), a chamada falha e a próxima
+    cria outro, sem deixar o motor quebrado até reiniciar o backend.
+    """
+
+    def __init__(self, init: Callable[..., None] | None = None, initargs: tuple = ()) -> None:
+        self._init = init
+        self._initargs = initargs
+        self._pool: ProcessPoolExecutor | None = None
+        self._lock = threading.Lock()
+
+    def _get(self) -> ProcessPoolExecutor:
+        with self._lock:
+            if self._pool is None:
+                self._pool = ProcessPoolExecutor(
+                    max_workers=1,
+                    mp_context=multiprocessing.get_context("spawn"),
+                    initializer=_child_start,
+                    initargs=(self._init, *self._initargs),
+                )
+                with _live_lock:
+                    _live_pools.add(self._pool)
+            return self._pool
+
+    def _discard(self, pool: ProcessPoolExecutor) -> None:
+        with self._lock:
+            if self._pool is pool:
+                self._pool = None
+        with _live_lock:
+            _live_pools.discard(pool)
+        _shutdown(pool, terminate=False)
+
+    def run(self, fn: Callable, *args):
+        """Roda `fn(*args)` no filho; exceções do filho sobem como vieram."""
+        pool = self._get()
+        try:
+            return pool.submit(fn, *args).result()
+        except BrokenProcessPool as exc:
+            self._discard(pool)
+            raise RuntimeError("o processo da separação local terminou inesperadamente") from exc
+
+    def close(self) -> None:
+        """Encerra o filho (se houver), liberando a memória dele; o próximo `run` cria outro."""
+        with self._lock:
+            pool = self._pool
+        if pool is not None:
+            self._discard(pool)
+
+
 class _Sherpa:
-    def __init__(self, diarization, extractor) -> None:
-        self._diarization = diarization
+    def __init__(self, child: _ChildProcess, extractor) -> None:
+        self._child = child
         self._extractor = extractor
 
     def segments(self, audio: np.ndarray) -> list[tuple[float, float, int]]:
-        samples = np.ascontiguousarray(audio, dtype=np.float32)
-        result = self._diarization.process(samples).sort_by_start_time()
-        return [(float(r.start), float(r.end), int(r.speaker)) for r in result]
+        return self._child.run(_child_segments, np.ascontiguousarray(audio, dtype=np.float32))
 
     def embed_chunk(self, chunk: np.ndarray) -> np.ndarray:
         stream = self._extractor.create_stream()
@@ -59,35 +197,33 @@ class _Sherpa:
         stream.input_finished()
         return np.asarray(self._extractor.compute(stream), dtype=np.float32)
 
+    def close(self) -> None:
+        self._child.close()
+
 
 def load_backend(
     segmentation: Path, embedding: Path, cluster_threshold: float, num_threads: int
 ) -> SherpaBackend:
-    """Carrega a diarização do sherpa-onnx e um extrator de embedding separado (mesmo modelo)."""
+    """Valida a diarização do sherpa-onnx aqui e a roda num processo filho; o extrator de embedding
+    (mesmo modelo) fica neste processo."""
     import sherpa_onnx as so
 
-    embedding_config = so.SpeakerEmbeddingExtractorConfig(
-        model=str(embedding), num_threads=num_threads
-    )
-    config = so.OfflineSpeakerDiarizationConfig(
-        segmentation=so.OfflineSpeakerSegmentationModelConfig(
-            pyannote=so.OfflineSpeakerSegmentationPyannoteModelConfig(model=str(segmentation)),
-            num_threads=num_threads,
-        ),
-        embedding=embedding_config,
-        clustering=so.FastClusteringConfig(num_clusters=-1, threshold=cluster_threshold),
-    )
+    config = _diarization_config(so, segmentation, embedding, cluster_threshold, num_threads)
     if not config.validate():
         raise RuntimeError(
             f"configuração inválida do sherpa-onnx (segmentação {segmentation}, embedding {embedding})"
         )
-    diarization = so.OfflineSpeakerDiarization(config)
-    if diarization.sample_rate != SAMPLE_RATE:
-        raise RuntimeError(
-            f"taxa de amostragem inesperada no sherpa-onnx: {diarization.sample_rate}"
-        )
-    extractor = so.SpeakerEmbeddingExtractor(embedding_config)
-    return _Sherpa(diarization, extractor)
+    # Carrega uma vez aqui só para falhar cedo (modelo ilegível, taxa errada); o filho monta a dele.
+    sample_rate = so.OfflineSpeakerDiarization(config).sample_rate
+    if sample_rate != SAMPLE_RATE:
+        raise RuntimeError(f"taxa de amostragem inesperada no sherpa-onnx: {sample_rate}")
+    extractor = so.SpeakerEmbeddingExtractor(
+        so.SpeakerEmbeddingExtractorConfig(model=str(embedding), num_threads=num_threads)
+    )
+    child = _ChildProcess(
+        _child_init, (str(segmentation), str(embedding), float(cluster_threshold), int(num_threads))
+    )
+    return _Sherpa(child, extractor)
 
 
 class LocalDiarizer:
@@ -171,9 +307,12 @@ class LocalDiarizer:
         return self._failed_at is None or self._clock() - self._failed_at >= self.RETRY_AFTER_S
 
     def unload(self) -> None:
-        """Solta os modelos; o próximo uso os carrega de novo do cache local."""
+        """Solta os modelos e encerra o processo filho; o próximo uso os carrega de novo do cache."""
         with self._lock:
-            self._backend = None
+            backend, self._backend = self._backend, None
+            close = getattr(backend, "close", None)
+            if close is not None:
+                close()
 
     def embed(self, audio: np.ndarray, spans: Sequence[tuple[float, float]]) -> np.ndarray | None:
         """Embedding médio dos trechos, ou None sem fala suficiente ou com o motor indisponível."""

@@ -1,4 +1,10 @@
+import os
+import signal
+import subprocess
+import sys
+import textwrap
 import threading
+import time
 
 import numpy as np
 import pytest
@@ -9,6 +15,8 @@ from whisper_ditado.meeting.local_diarize import (
     MIN_SPEAKER_S,
     RETRY_AFTER_S,
     LocalDiarizer,
+    _ChildProcess,
+    _Sherpa,
     default_threads,
 )
 
@@ -209,30 +217,125 @@ def test_available_does_not_wait_for_a_running_run():
         worker.join(5)
 
 
-@pytest.mark.models
-def test_local_diarizer_separates_two_synthetic_voices(tmp_path, monkeypatch):
-    from tests.helpers.tts import synth
+def _wait_gone(pid: int, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    # As vozes do espeak são sintéticas e bem mais próximas que vozes reais (cosseno ~0.65): o teste
-    # fixa o próprio threshold de distância em vez de depender do default, calibrado em reuniões reais.
-    diarizer = LocalDiarizer(cluster_threshold=0.2)
-    assert diarizer.available, diarizer.last_error
+
+def test_child_process_is_spawned_persistent_and_recreated_after_dying():
+    child = _ChildProcess()
+    try:
+        pid = child.run(os.getpid)
+        assert pid != os.getpid()
+        assert child._pool._mp_context.get_start_method() == "spawn"  # nunca fork
+        assert child.run(os.getpid) == pid  # o mesmo filho atende as chamadas seguintes
+
+        with pytest.raises(ValueError):  # exceção vinda do filho sobe como veio
+            child.run(int, "não é número")
+        assert child.run(os.getpid) == pid
+
+        with pytest.raises(RuntimeError, match="terminou inesperadamente"):
+            child.run(os._exit, 1)  # o filho morre: BrokenProcessPool
+        assert _wait_gone(pid)
+        assert child.run(os.getpid) not in (pid, os.getpid())  # recriado, não fica quebrado
+    finally:
+        child.close()
+
+
+def test_unload_stops_the_child_process():
+    child = _ChildProcess()
+    diarizer = LocalDiarizer(loader=lambda: _Sherpa(child, extractor=None))
+    assert diarizer.available
+    pid = child.run(os.getpid)
+
+    diarizer.unload()
+    assert _wait_gone(pid), "o processo filho continuou vivo depois do unload"
+    assert child._pool is None
+
+
+_EXIT_SCRIPT = """
+import os, sys, threading, time
+from whisper_ditado.meeting.local_diarize import _ChildProcess
+
+child = _ChildProcess()
+with open(sys.argv[2], "w") as f:
+    f.write(str(child.run(os.getpid)))
+if sys.argv[1] == "busy":  # um trabalho longo em andamento no filho na hora da saída
+    threading.Thread(target=child.run, args=(time.sleep, 60), daemon=True).start()
+    time.sleep(0.5)
+elif sys.argv[1] == "hard":  # o backend sai por os._exit, sem finalizar o pool
+    os._exit(0)
+"""
+
+
+@pytest.mark.parametrize("mode", ["idle", "busy", "hard"])
+def test_child_process_ends_with_the_parent(tmp_path, mode):
+    pid_file, err_file = tmp_path / "child.pid", tmp_path / "stderr"
+    # saídas em arquivo, não em pipe: um filho órfão herdaria o pipe e seguraria a leitura
+    with err_file.open("wb") as err:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", textwrap.dedent(_EXIT_SCRIPT), mode, str(pid_file)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err,
+        )
+    child_pid = None
+    try:
+        proc.wait(timeout=30)
+        assert proc.returncode == 0, err_file.read_text()
+        child_pid = int(pid_file.read_text())
+        assert _wait_gone(child_pid), f"processo filho órfão ({mode})"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        if child_pid is not None and not _wait_gone(child_pid, 0):
+            os.kill(child_pid, signal.SIGKILL)
+
+
+@pytest.fixture(scope="module")
+def models_home(tmp_path_factory):
+    """XDG_DATA_HOME temporário compartilhado pelos testes do módulo: baixa os modelos uma vez."""
+    return tmp_path_factory.mktemp("xdg-data")
+
+
+def _two_voices(utterances: int) -> tuple[np.ndarray, list[tuple[float, float, int]]]:
+    """Falas alternadas de duas vozes do espeak, com 0,8 s de silêncio entre elas."""
+    from tests.helpers.tts import synth
 
     gap = np.zeros(int(0.8 * SR), dtype=np.float32)
     texts = [
         "Bom dia pessoal, vamos começar a reunião de hoje.",
         "Obrigada, eu preparei o relatório das vendas do mês.",
     ]
+    voices = [synth(texts[0], voice="pt-br"), synth(texts[1], voice="pt-br+f3")]
     chunks, expected = [], []
     t = 0.0
-    for i in range(8):
-        voice = "pt-br" if i % 2 == 0 else "pt-br+f3"
-        audio = synth(texts[i % 2], voice=voice)
+    for i in range(utterances):
+        audio = voices[i % 2]
         chunks += [audio, gap]
         expected.append((t, t + len(audio) / SR, i % 2))
         t += len(audio) / SR + 0.8
-    result = diarizer.run(np.concatenate(chunks))
+    return np.concatenate(chunks), expected
+
+
+@pytest.mark.models
+def test_local_diarizer_separates_two_synthetic_voices(models_home, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(models_home))
+    # As vozes do espeak são sintéticas e bem mais próximas que vozes reais (cosseno ~0.65): o teste
+    # fixa o próprio threshold de distância em vez de depender do default, calibrado em reuniões reais.
+    diarizer = LocalDiarizer(cluster_threshold=0.2)
+    assert diarizer.available, diarizer.last_error
+
+    audio, expected = _two_voices(8)
+    try:
+        result = diarizer.run(audio)
+    finally:
+        diarizer.unload()
 
     assert result.engine == "local"
     assert len({turn.speaker for turn in result.turns}) >= 2
@@ -246,3 +349,36 @@ def test_local_diarizer_separates_two_synthetic_voices(tmp_path, monkeypatch):
         by_voice[voice].update(hit)
     assert by_voice[0] and by_voice[1]
     assert by_voice[0].isdisjoint(by_voice[1])
+
+
+@pytest.mark.models
+def test_run_does_not_hold_the_gil(models_home, monkeypatch):
+    """A separação não pode parar as outras threads do backend (API, ditado) enquanto roda."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(models_home))
+    diarizer = LocalDiarizer(cluster_threshold=0.2)
+    assert diarizer.available, diarizer.last_error
+    audio, _ = _two_voices(24)  # ~95 s
+    assert 60 * SR <= len(audio) <= 120 * SR
+
+    gaps: list[float] = []
+    stop = threading.Event()
+
+    def tick():
+        last = time.perf_counter()
+        while not stop.is_set():
+            time.sleep(0.01)
+            now = time.perf_counter()
+            gaps.append(now - last)
+            last = now
+
+    ticker = threading.Thread(target=tick)
+    ticker.start()
+    try:
+        result = diarizer.run(audio)
+    finally:
+        stop.set()
+        ticker.join(5)
+        diarizer.unload()
+
+    assert result.turns
+    assert max(gaps) < 0.5, f"outra thread ficou {max(gaps):.2f}s parada durante a separação"
