@@ -35,7 +35,7 @@ from whisper_ditado.meeting.timeline import (
     merge_tracks,
 )
 from whisper_ditado.meeting.voice_sync import VoiceSync
-from whisper_ditado.meeting.voices import match_speakers
+from whisper_ditado.meeting.voices import inherit_links, match_speakers
 from whisper_ditado.settings import DIARIZERS, Settings, threshold_key
 from whisper_ditado.store import Segment, Speaker, Store
 from whisper_ditado.transcriber import Word
@@ -180,8 +180,12 @@ def _build_speakers(
     result: DiarizationResult,
     voices: list,
     threshold: float | None,
+    inherited: dict[str, str] | None = None,
 ) -> tuple[list[Speaker], dict[str, str]]:
     """Falantes que aparecem nos segmentos e o mapa chave interna -> id do falante.
+
+    `inherited` (chave -> voice_id) traz os vínculos que o usuário já tinha na reunião: essas
+    chaves ficam com a voz e o nome dela, e o casamento automático só olha o resto.
 
     Embedding sem modelo conhecido (`result.model` vazio) não é gravado nem comparado; sem
     limiar (motor desconhecido) grava os embeddings mas não casa com as vozes salvas.
@@ -202,11 +206,13 @@ def _build_speakers(
 
     model = result.model
     embeddings = result.embeddings if model else {}
-    matches: dict[str, str] = {}
-    if model and threshold is not None:
-        known = {key: embeddings[key] for key in pc_keys if key in embeddings}
-        matches = match_speakers(known, voices, threshold, model)
     names = {voice.id: voice.name for voice in voices}
+    inherited = {k: v for k, v in (inherited or {}).items() if k in pc_keys and v in names}
+    matches: dict[str, str] = dict(inherited)
+    if model and threshold is not None:
+        known = {key: embeddings[key] for key in pc_keys if key in embeddings and key not in inherited}
+        free = [voice for voice in voices if voice.id not in inherited.values()]
+        matches.update(match_speakers(known, free, threshold, model))
     people = 0
     for color, key in enumerate(pc_keys, start=1):
         voice_id = matches.get(key)
@@ -228,6 +234,24 @@ def _build_speakers(
 
 
 # -- pipeline ----------------------------------------------------------------------
+
+
+def _previous_links(store: Store, meeting_id: str, voices: list) -> dict[str, list[tuple[float, float]]]:
+    """Trechos do PC de cada voz ligada aos falantes atuais da reunião (voice_id -> trechos).
+
+    Só entram vozes que ainda existem; sem falantes antigos (finalização normal) volta vazio.
+    """
+    existing = {voice.id for voice in voices}
+    by_voice = {sp.id: sp.voice_id for sp in store.get_speakers(meeting_id)
+                if sp.voice_id in existing and not sp.is_me}
+    spans: dict[str, list[tuple[float, float]]] = {}
+    if not by_voice:
+        return spans
+    for seg in store.get_segments(meeting_id):
+        voice_id = by_voice.get(seg.speaker_id)
+        if voice_id is not None and seg.source == "pc":
+            spans.setdefault(voice_id, []).append((seg.start_s, seg.end_s))
+    return spans
 
 
 def _threshold(settings: Settings, engine: str) -> float | None:
@@ -320,7 +344,13 @@ def finalize(
             if seg.text:
                 drafts.append(seg)
         threshold = _threshold(settings, diarized.engine) if diarized.model else None
-        speakers, ids = _build_speakers(meeting_id, drafts, diarized, store.list_voices(), threshold)
+        voices = store.list_voices()
+        new_spans: dict[str, list[tuple[float, float]]] = {}
+        for seg in drafts:
+            if seg.source == "pc" and seg.speaker != _PARTICIPANTS:
+                new_spans.setdefault(seg.speaker, []).append((seg.start_s, seg.end_s))
+        inherited = inherit_links(new_spans, _previous_links(store, meeting_id, voices))
+        speakers, ids = _build_speakers(meeting_id, drafts, diarized, voices, threshold, inherited)
         segments = [
             Segment(None, meeting_id, ids[s.speaker], s.source, s.start_s, s.end_s, s.text, s.dictated)
             for s in drafts

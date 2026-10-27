@@ -56,6 +56,38 @@ def match_speakers(
     return result
 
 
+def _overlap(a: list[tuple[float, float]], b: list[tuple[float, float]]) -> float:
+    """Tempo total em que os dois conjuntos de trechos coincidem."""
+    return sum(max(0.0, min(ae, be) - max(as_, bs)) for as_, ae in a for bs, be in b)
+
+
+def inherit_links(
+    new_spans: dict[str, list[tuple[float, float]]],
+    old_spans: dict[str, list[tuple[float, float]]],
+) -> dict[str, str]:
+    """Passa vínculos de voz de uma separação antiga para a nova pela sobreposição no tempo.
+
+    `new_spans` é indexado pela chave do falante novo e `old_spans` pelo `voice_id` do falante
+    antigo; devolve chave nova -> `voice_id`. Guloso pela maior sobreposição, um para um: cada
+    chave e cada voz entram no máximo uma vez, e só pares com sobreposição > 0.
+    """
+    pairs = [
+        (_overlap(spans, old), key, voice_id)
+        for key, spans in new_spans.items()
+        for voice_id, old in old_spans.items()
+    ]
+    pairs = [p for p in pairs if p[0] > 0.0]
+    pairs.sort(key=lambda p: p[0], reverse=True)
+    result: dict[str, str] = {}
+    used_voices: set[str] = set()
+    for _, key, voice_id in pairs:
+        if key in result or voice_id in used_voices:
+            continue
+        result[key] = voice_id
+        used_voices.add(voice_id)
+    return result
+
+
 def enroll(
     voice: Voice | None,
     name: str,

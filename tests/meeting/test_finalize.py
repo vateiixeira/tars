@@ -589,3 +589,66 @@ def test_end_to_end_with_synthetic_tracks(store, settings, tmp_path):
     assert "deploy" in text
     assert (d / "mic.opus").exists() and (d / "pc.opus").exists()
     assert not (d / "mic.raw").exists() and not (d / "pc.raw").exists()
+
+
+def _linked_meeting(store):
+    """Reunião pronta com "Ana" (voz v-ana, pc em 2-4 s) e "Pessoa 1" (sem voz, pc em 6-7 s)."""
+    from whisper_ditado.store import Segment, Speaker
+
+    mid, _ = new_meeting(store, status="ready")
+    store.upsert_voice(Voice(id="v-ana", name="Ana", embeddings={
+        "fake-model": VoiceEmbedding(np.eye(4, dtype=np.float32)[0])}))
+    store.replace_transcript(mid, [
+        Speaker("sp-ana", mid, "Ana", "v-ana", False, 1),
+        Speaker("sp-p1", mid, "Pessoa 1", None, False, 2),
+    ], [
+        Segment(None, mid, "sp-ana", "pc", 2.0, 4.0, "oi"),
+        Segment(None, mid, "sp-p1", "pc", 6.0, 7.0, "tchau"),
+    ])
+    return mid
+
+
+def test_reprocess_keeps_voice_links_by_overlap(store, settings):
+    mid = _linked_meeting(store)
+    settings.update({"voice_match_threshold_local": 0.99})
+    e = np.eye(4, dtype=np.float32)
+    # embeddings que não casariam com v-ana pelo limiar
+    result = DiarizationResult([Turn(2.0, 4.0, "X"), Turn(6.0, 7.0, "Y")],
+                               {"X": e[1], "Y": e[2]})
+    words = [w(2.2, "oi"), w(2.8, "gente"), w(6.1, "tchau")]
+
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=words), FakeDiarizer(result), None)
+
+    assert store.get_meeting(mid).status == "ready"
+    names = {sp.id: sp for sp in store.get_speakers(mid)}
+    got = [(names[s.speaker_id].label, names[s.speaker_id].voice_id, s.start_s)
+           for s in store.get_segments(mid) if s.source == "pc"]
+    assert got == [("Ana", "v-ana", 2.2), ("Pessoa 1", None, 6.1)]
+    ana = next(sp for sp in names.values() if sp.label == "Ana")
+    assert ana.embedding is not None and ana.embedding_model == "fake-model"
+
+
+def test_reprocess_inherited_voice_is_not_matched_again(store, settings):
+    mid = _linked_meeting(store)
+    e = np.eye(4, dtype=np.float32)
+    store.upsert_voice(Voice(id="v-bia", name="Bia", embeddings={"fake-model": VoiceEmbedding(e[1])}))
+    settings.update({"voice_match_threshold_local": 0.9})
+    # X e Y parecem a Bia; X herda a Ana pelo tempo, então só Y pode ficar com a Bia
+    result = DiarizationResult([Turn(2.0, 4.0, "X"), Turn(6.0, 7.0, "Y")], {"X": e[1], "Y": e[1]})
+    words = [w(2.2, "oi"), w(6.1, "tchau")]
+
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=words), FakeDiarizer(result), None)
+
+    speakers = {sp.label: sp.voice_id for sp in store.get_speakers(mid)}
+    assert speakers == {"Ana": "v-ana", "Bia": "v-bia"}
+
+
+def test_reprocess_without_diarization_does_not_inherit(store, settings):
+    mid = _linked_meeting(store)
+    words = [w(2.2, "oi"), w(6.1, "tchau")]
+
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=words),
+                  FakeDiarizer(available=False), None)
+
+    speakers = store.get_speakers(mid)
+    assert [(sp.label, sp.voice_id) for sp in speakers] == [("Participantes", None)]

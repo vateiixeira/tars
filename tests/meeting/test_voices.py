@@ -1,6 +1,6 @@
 import numpy as np
 
-from whisper_ditado.meeting.voices import cosine, enroll, match_speakers
+from whisper_ditado.meeting.voices import cosine, enroll, inherit_links, match_speakers
 from whisper_ditado.store import Voice, VoiceEmbedding
 
 M = "modelo-x"
@@ -105,3 +105,31 @@ def test_enroll_updates_only_the_given_model():
     assert set(added.embeddings) == {"m1", "m2", "m3"}
     assert added.embeddings["m3"].n_samples == 1
     assert np.allclose(added.embeddings["m3"].vector, [1.0, 0.0, 0.0])
+
+
+def test_inherit_links_picks_largest_overlap():
+    new = {"A": [(0.0, 10.0)], "B": [(10.0, 20.0)]}
+    old = {"v1": [(8.0, 20.0)]}
+    assert inherit_links(new, old) == {"B": "v1"}
+
+
+def test_inherit_links_is_one_to_one():
+    # o cluster antigo v1 se dividiu em A e B: só o de maior sobreposição herda
+    new = {"A": [(0.0, 12.0)], "B": [(12.0, 20.0)]}
+    old = {"v1": [(0.0, 20.0)]}
+    assert inherit_links(new, old) == {"A": "v1"}
+    # e uma chave nova também só fica com uma voz
+    assert inherit_links({"A": [(0.0, 20.0)]}, {"v1": [(0.0, 12.0)], "v2": [(12.0, 20.0)]}) == {"A": "v1"}
+
+
+def test_inherit_links_ignores_no_overlap():
+    assert inherit_links({"A": [(0.0, 5.0)]}, {"v1": [(5.0, 9.0)]}) == {}
+    assert inherit_links({}, {"v1": [(0.0, 9.0)]}) == {}
+    assert inherit_links({"A": [(0.0, 5.0)]}, {}) == {}
+
+
+def test_inherit_links_sums_overlap_across_spans():
+    new = {"A": [(0.0, 3.0), (10.0, 13.0)], "B": [(4.0, 8.0)]}
+    old = {"v1": [(0.0, 3.0), (10.0, 13.0)], "v2": [(0.0, 20.0)]}
+    # A: v1=6, v2=6 (empate, vale a ordem); B: v1=0, v2=4 e sobra a v2
+    assert inherit_links(new, old) == {"A": "v1", "B": "v2"}
