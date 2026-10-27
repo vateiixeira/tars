@@ -1,4 +1,5 @@
 import os
+import subprocess
 import stat
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -74,3 +75,24 @@ def test_resolve_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(flameshot, "default_folder", lambda: tmp_path / "def")
     assert flameshot.resolve_folder(None) == tmp_path / "def"
     assert flameshot.resolve_folder("  ") == tmp_path / "def"
+
+
+def _xdg_answers(monkeypatch, out):
+    def run(cmd, **kwargs):
+        assert cmd == ["xdg-user-dir", "PICTURES"]
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+    monkeypatch.setattr(flameshot.subprocess, "run", run)
+
+
+def test_default_folder_uses_xdg_pictures(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    pics = tmp_path / "Imagens"
+    pics.mkdir()
+    _xdg_answers(monkeypatch, f"{pics}\n")
+    assert flameshot.default_folder() == pics
+
+
+def test_default_folder_ignores_home_when_pictures_is_not_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _xdg_answers(monkeypatch, f"{tmp_path}/\n")  # sem PICTURES, o xdg-user-dir devolve o $HOME
+    assert flameshot.default_folder() == tmp_path / "Pictures"

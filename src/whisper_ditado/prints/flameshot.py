@@ -34,7 +34,8 @@ def default_folder() -> Path:
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return fallback
-    if out and Path(out).is_dir():
+    # sem PICTURES configurado o xdg-user-dir devolve o $HOME: varrer a home inteira, não
+    if out and Path(out).is_dir() and Path(out).resolve() != Path.home().resolve():
         return Path(out)
     return fallback
 
