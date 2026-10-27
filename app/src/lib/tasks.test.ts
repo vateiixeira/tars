@@ -40,6 +40,9 @@ const ITEM: TaskSuggestion = {
   issue_number: null,
   issue_url: null,
   repeats_number: null,
+  print_ids: [],
+  attach_state: "none",
+  attach_error: null,
 };
 
 const CREATED_ITEM: TaskSuggestion = {

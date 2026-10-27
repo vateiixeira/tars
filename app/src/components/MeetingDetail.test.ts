@@ -491,6 +491,7 @@ describe("MeetingDetail", () => {
       team_id: null, stage_id: null, priority: "medium" as const, suggested: null, evidence: [],
       edited: false, discarded: false, create_state: "none" as const, create_error: null,
       issue_number: null, issue_url: null, repeats_number: null,
+      print_ids: [], attach_state: "none", attach_error: null,
     };
     const listTasks = vi.fn(async () => ({
       enabled: true,
@@ -567,6 +568,7 @@ describe("MeetingDetail", () => {
       suggested: null, evidence: [{ start_s: 31, end_s: 40, speaker: "Pessoa 2", text: "Oi" }],
       edited: false, discarded: false, create_state: "none", create_error: null,
       issue_number: null, issue_url: null, repeats_number: null,
+      print_ids: [], attach_state: "none", attach_error: null,
     };
     const listTasks = vi.fn(async () => ({ enabled: true, scan: null, items: [item] }));
     const issueOptions = vi.fn(async () => ({

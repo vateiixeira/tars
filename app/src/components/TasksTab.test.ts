@@ -57,6 +57,9 @@ const task = (extra: Partial<TaskSuggestion> = {}): TaskSuggestion => ({
   issue_number: null,
   issue_url: null,
   repeats_number: null,
+  print_ids: [],
+  attach_state: "none",
+  attach_error: null,
   ...extra,
 });
 
@@ -75,7 +78,7 @@ async function mountTab(initial: TasksPayload, overrides: Record<string, unknown
   const issueOptions = vi.fn(async (_refresh?: boolean) => OPTIONS);
   const ctx = installStore({ listTasks, issueOptions, ...overrides });
   const w = mount(TasksTab, {
-    props: { meetingId: "m1", startedAt: "2026-10-19T14:00:00" },
+    props: { meetingId: "m1", startedAt: "2026-10-19T14:00:00", prints: [] },
     attachTo: document.body,
   });
   await flushPromises();
@@ -90,6 +93,27 @@ const row = (w: ReturnType<typeof mount>, id: string) => w.get(`[data-row-id="${
 const openId = (w: ReturnType<typeof mount>) => w.get(".detail [data-task-id]").attributes("data-task-id");
 
 describe("TasksTab", () => {
+  it("antes do primeiro levantamento mostra o botão Levantar tarefas e o campo de contexto", async () => {
+    const scanTasks = vi.fn(async () => ({ state: "running" as const }));
+    const { w } = await mountTab(payload([], { scan: null }), { scanTasks });
+    expect(w.text()).toContain("Revise os prints e clique em Levantar tarefas.");
+    expect(w.text()).not.toContain("Refazer sugestões");
+    expect(w.get(".scan-context summary").text()).toBe("Contexto para o levantamento (opcional)");
+    expect(w.get(".scan-context").text()).toContain(
+      "O texto será usado junto com a transcrição e os prints ao levantar as tarefas. Tarefas editadas, descartadas ou já enviadas são preservadas.",
+    );
+    await w.get(".scan-context textarea").setValue("  Foque no checkout.  ");
+    await btn(w, "Levantar tarefas").trigger("click");
+    await flushPromises();
+    expect(scanTasks).toHaveBeenCalledWith("m1", "Foque no checkout.");
+  });
+
+  it("depois de um levantamento o botão vira Refazer sugestões", async () => {
+    const { w } = await mountTab(payload([task()]));
+    expect(btn(w, "Refazer sugestões")).toBeDefined();
+    expect(w.findAll("button").some((b) => b.text().includes("Levantar tarefas"))).toBe(false);
+  });
+
   it("mostra 'Levantando tarefas…' com o levantamento rodando", async () => {
     const { w } = await mountTab(payload([], { scan: { state: "running", error: null, updated_at: "x" } }));
     expect(w.text()).toContain("Levantando tarefas…");

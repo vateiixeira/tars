@@ -152,7 +152,7 @@ export function createClient(getInfo: () => Promise<ApiInfo>, fetchFn: typeof fe
       json<{ scan: JobState | null }>("POST", `/meetings/${enc(meetingId)}/tasks/scan/cancel`),
     addTask: (meetingId: string, fields: Partial<TaskFields>) =>
       json<TaskSuggestion>("POST", `/meetings/${enc(meetingId)}/tasks`, fields),
-    updateTask: (taskId: string, changes: Partial<TaskFields> & { discarded?: boolean }) =>
+    updateTask: (taskId: string, changes: Partial<TaskFields> & { discarded?: boolean; print_ids?: string[] }) =>
       json<TaskSuggestion>("PATCH", `/tasks/${enc(taskId)}`, changes),
     createTasks: (meetingId: string, items: (TaskFields & { id: string })[]) =>
       json<CreateResult>("POST", `/meetings/${enc(meetingId)}/tasks/create`, { items }),

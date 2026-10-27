@@ -872,6 +872,7 @@ onBeforeUnmount(() => {
               :key="meeting.id"
               :meeting-id="meeting.id"
               :started-at="meeting.started_at"
+              :prints="meeting.prints"
               @play="playAudio"
             />
           </div>

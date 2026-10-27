@@ -228,6 +228,8 @@ export interface TaskFields {
   priority: TaskPriority;
 }
 
+export type AttachState = "none" | "sending" | "sent" | "unsupported" | "failed";
+
 export interface TaskSuggestion extends TaskFields {
   id: string;
   meeting_id: string;
@@ -248,6 +250,11 @@ export interface TaskSuggestion extends TaskFields {
   issue_number: number | null;
   issue_url: string | null;
   repeats_number: number | null;
+  /** Ids dos prints da reunião que vão junto com a tarefa no MCP de issues. */
+  print_ids: string[];
+  /** Resultado do envio dos prints ao MCP depois de criar a issue. */
+  attach_state: AttachState;
+  attach_error: string | null;
 }
 
 /** `GET /meetings/{id}/tasks`. */
