@@ -6,7 +6,8 @@ Durante a série 0.x, mudanças incompatíveis podem incrementar minor e devem s
 
 ## Preparar uma versão
 
-Na branch de preparação, atualize os seis arquivos de versão com um só comando:
+Na `main`, ou numa branch se quiser revisar por pull request, atualize os seis arquivos de versão
+com um só comando:
 
 ```bash
 python3 scripts/release.py bump patch   # ou minor / major
@@ -14,7 +15,9 @@ python3 scripts/release.py check
 uv lock --check
 ```
 
-Revise e envie o commit por pull request. Depois de integrar em `main` e conferir o CI:
+Revise o diff e envie o commit para `main`, direto ou por pull request. O PR é opcional: ele só
+roda o CI antes de o bump entrar em `main`, e o workflow **Release** valida a versão e roda o CI
+completo de novo antes de publicar. Depois que o CI passar em `main`:
 
 ```bash
 git checkout main

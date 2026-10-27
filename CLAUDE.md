@@ -22,7 +22,7 @@ sem atualizar dependências:
 - `app/src-tauri/Cargo.toml`
 - `app/src-tauri/Cargo.lock`
 
-Na branch de preparação:
+Na `main` (ou numa branch, se quiser revisar por pull request):
 
 ```bash
 python3 scripts/release.py bump patch # ou minor / major
@@ -30,8 +30,9 @@ python3 scripts/release.py check
 uv lock --check
 ```
 
-Revise o diff e integre a alteração por pull request. Depois que o commit estiver
-em `main` e o CI passar, a publicação usa uma tag anotada com a versão preparada.
+Revise o diff e envie o commit para `main`, direto ou por pull request; o PR é
+opcional. Depois que o CI passar em `main`, a publicação usa uma tag anotada com
+a versão preparada.
 Exemplo para `0.1.1` (substitua pela versão que será publicada):
 
 ```bash
