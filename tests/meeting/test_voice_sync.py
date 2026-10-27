@@ -152,6 +152,26 @@ def test_ensure_skips_exceptions_and_retries_them_next_time(store, caplog):
     assert store.get_voice("v1").embeddings[NEW].n_samples == 1  # só a reunião `good`
 
 
+def test_ensure_skips_voice_deleted_during_sync(store, caplog):
+    make_voice(store, "v1")
+    make_voice(store, "v2")
+    gone = add_meeting(store, "v1")
+    add_meeting(store, "v2")
+
+    def load_pc(mid):
+        if mid == gone:
+            store.delete_voice("v1")  # apagada pela API enquanto o ensure roda
+        return AUDIO
+
+    sync = VoiceSync(load_pc)
+    with caplog.at_level("WARNING", logger="ditado"):
+        assert sync.ensure(store, NEW, lambda a, s: unit(1, 0)) == ["v2"]
+
+    assert store.get_voice("v1") is None
+    assert NEW in store.get_voice("v2").embeddings
+    assert any(r.levelname == "WARNING" and "v1" in r.getMessage() for r in caplog.records)
+
+
 def test_ensure_loads_one_meeting_at_a_time(store):
     make_voice(store)
     add_meeting(store, "v1")

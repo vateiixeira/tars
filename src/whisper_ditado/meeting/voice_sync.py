@@ -8,6 +8,7 @@ assim nenhuma voz precisa ser cadastrada de novo.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from collections.abc import Callable
 from datetime import datetime
 
@@ -74,8 +75,12 @@ class VoiceSync:
                     self._empty.add(attempt)
                 continue
             vector = _normalize(np.mean(samples[voice_id], axis=0))
-            store.set_voice_embedding(
-                voice_id, model, VoiceEmbedding(vector, len(samples[voice_id]), datetime.now()))
+            try:
+                store.set_voice_embedding(
+                    voice_id, model, VoiceEmbedding(vector, len(samples[voice_id]), datetime.now()))
+            except sqlite3.Error as exc:  # ex.: voz apagada durante o recálculo (chave estrangeira)
+                log.warning("voz %s não recebeu o embedding do modelo %s: %s", voice_id, model, exc)
+                continue
             log.info("voz %s recalculada para o modelo %s (%d amostras)",
                      voice_id, model, len(samples[voice_id]))
             updated.append(voice_id)
