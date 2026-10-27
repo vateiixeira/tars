@@ -30,15 +30,40 @@ def test_migrations_create_schema_and_file_is_private(tmp_path):
     path = tmp_path / "t.db"
     s = Store(path)
     assert path.stat().st_mode & 0o777 == 0o600
-    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 6
     names = {r[0] for r in s._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"meetings", "speakers", "segments", "summaries", "voices", "alerts",
-            "dictation_spans", "settings", "meeting_jobs", "task_suggestions", "dictation_samples"} <= names
+            "dictation_spans", "settings", "meeting_jobs", "task_suggestions", "dictation_samples",
+            "meeting_prints"} <= names
     s.close()
     # reabrir é idempotente
     s2 = Store(path)
-    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 6
     s2.close()
+
+
+def test_prints_crud_order_and_dedupe(store):
+    m = store.create_meeting(T0)
+    b = store.add_print(m.id, print_id="b", at_s=30.0, source="native", file_name="b.png")
+    a = store.add_print(m.id, print_id="a", at_s=5.0, source="flameshot", file_name="a.png",
+                        origin_name="x.png", origin_mtime_ns=1)
+    assert [p.id for p in store.list_prints(m.id)] == ["a", "b"]
+    assert store.add_print(m.id, print_id="c", at_s=6.0, source="flameshot", file_name="c.png",
+                           origin_name="x.png", origin_mtime_ns=1) is None  # mesma origem
+    assert store.get_print("a") == a and b.source == "native"
+    assert store.add_print("sumiu", print_id="d", at_s=1.0, source="native", file_name="d.png") is None
+    store.delete_meeting(m.id)
+    assert store.get_print("a") is None  # cascade
+
+
+def test_delete_print_removes_from_tasks(store):
+    m = store.create_meeting(T0)
+    store.add_print(m.id, print_id="p1", at_s=1.0, source="native", file_name="p1.png")
+    store.add_print(m.id, print_id="p2", at_s=2.0, source="native", file_name="p2.png")
+    t = store.add_task(m.id, {"title": "x"}, origin="claude", print_ids=["p1", "p2"])
+    assert store.delete_print("p1").id == "p1"
+    assert store.get_task(t.id).print_ids == ["p2"]
+    assert store.delete_print("p1") is None
 
 
 def test_meeting_crud_and_cascade(store):

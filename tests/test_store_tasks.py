@@ -37,7 +37,7 @@ def test_migrations_on_existing_v1_db(tmp_path):
     conn.close()
     s = Store(path)
     try:
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert s.get_meeting("m1").title == "Antiga"
         assert s.list_tasks("m1") == [] and s.get_job("m1", "tasks") is None
     finally:
@@ -309,3 +309,32 @@ def test_update_and_claim_rolls_back_when_a_write_fails(store, mid, monkeypatch)
         store.update_and_claim([(a.id, {"title": "Novo"}), (b.id, {"title": "Novo"})])
     monkeypatch.undo()
     assert [(t.title, t.create_state) for t in store.list_tasks(mid)] == [("A", "none")] * 2
+
+
+def test_set_task_print_ids_validates_and_locks(store, mid):
+    store.add_print(mid, print_id="p1", at_s=1.0, source="native", file_name="p1.png")
+    t = store.add_task(mid, {"title": "x"}, origin="claude", print_ids=["p1"])
+    assert store.set_task_print_ids(t.id, []).print_ids == []
+    with pytest.raises(ValueError):
+        store.set_task_print_ids(t.id, ["outro"])
+    with pytest.raises(KeyError):
+        store.set_task_print_ids("nao-existe", [])
+    store.claim_tasks_for_create([t.id])
+    with pytest.raises(TaskLocked):
+        store.set_task_print_ids(t.id, ["p1"])
+
+
+def test_scan_items_keep_print_ids_and_attach_defaults(store, mid):
+    store.add_print(mid, print_id="p1", at_s=1.0, source="native", file_name="p1.png")
+    [t] = store.replace_scan_tasks(mid, [{"fields": {"title": "x"}, "print_ids": ["p1"]}])
+    assert (t.print_ids, t.attach_state, t.attach_error) == (["p1"], "none", None)
+    store.set_attach_state(t.id, "failed", "sem suporte")
+    assert (store.get_task(t.id).attach_state, store.get_task(t.id).attach_error) == ("failed", "sem suporte")
+
+
+def test_recover_interrupted_fails_sending_attach(store, mid):
+    t = store.add_task(mid, {"title": "x"}, origin="claude")
+    store.set_attach_state(t.id, "sending")
+    store.recover_interrupted()
+    got = store.get_task(t.id)
+    assert (got.attach_state, got.attach_error) == ("failed", store_mod._RESTART_JOB_ERROR)
