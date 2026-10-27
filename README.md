@@ -143,6 +143,9 @@ definidas como `Environment=` no `whisper-ditado-backend.service`, valem como pa
 | `DITADO_IGNORE_DEVICES` | `ydotoold` | Dispositivos ignorados (por nome, separados por vírgula) |
 | `DITADO_DEBUG` | `0` | `1` mostra o texto transcrito nos logs |
 | `DITADO_MEETING_MODEL_IDLE_SEC` | `120` | Segundos sem reunião/processamento antes de liberar os modelos de reunião; `0` mantém carregados |
+| `DITADO_PRINT_MODE` | `off` | Prints de tela nas reuniões: `off`, `flameshot` ou `native` (veja [Prints de tela](#prints-de-tela)) |
+| `DITADO_PRINT_FOLDER` | vazio (pasta de Imagens) | Pasta lida no modo `flameshot`; caminho absoluto |
+| `DITADO_PRINT_KEY` | `ctrl+alt+KEY_P` | Atalho do print no modo `native`, no mesmo formato de `DITADO_KEY`; deve ser diferente dos atalhos de ditado |
 
 `shift+insert` é o padrão porque cola em apps GTK, Chrome/Electron e terminais VTE
 (o texto também é copiado para a seleção primária).
@@ -340,6 +343,58 @@ A captura usa o mesmo modelo Whisper, sem criar reunião nem marcar a fala como 
 Ao iniciar o ditado, um sinal curto de 65 ms confirma a captura: um tom para o microfone e
 outro, mais agudo, para o áudio do computador. O aviso toca em segundo plano e não carrega modelos.
 
+### Prints de tela
+
+Em **Configurações → Reuniões → Prints de tela**, escolha como o TARS guarda imagens da tela
+durante uma reunião. Cada print guarda o horário relativo ao início da gravação, para ficar
+junto da fala daquele momento. O padrão é **Desligado**.
+
+- **Flameshot**: o TARS não captura nada. Ao finalizar a reunião, ele **copia** para a reunião as
+  imagens `.png`, `.jpg` e `.jpeg` da pasta escolhida (sem entrar em subpastas nem ler arquivos
+  ocultos) cuja data de modificação cai entre o início e o fim da gravação, mais 10 segundos de
+  folga para o print tirado na hora de parar. Com a pasta vazia, vale a pasta de Imagens do
+  usuário (`xdg-user-dir PICTURES`, ou `~/Pictures`). Os originais não são alterados nem apagados.
+  Funciona com qualquer ferramenta que salve arquivos nessa pasta.
+- **Nativo (tela inteira)**: durante uma reunião em gravação, o atalho (padrão
+  **Ctrl + Alt + P**, em **Atalho do print**) ou o item **Tirar print** da bandeja captura todos
+  os monitores numa imagem só, sem abrir janela, e toca um som curto. Fora de uma reunião em
+  gravação, nada acontece. Se a captura falhar, toca outro som, o sistema mostra uma
+  notificação e a reunião registra o alerta "Não foi possível tirar um print". A captura usa o
+  portal Screenshot do xdg-desktop-portal (`interactive=false`); o arquivo que o portal grava em
+  Imagens é **movido** para a reunião e deixa de aparecer lá.
+
+No Wayland, o modo Nativo depende de o GNOME deixar o portal capturar sem perguntar. Se o seu
+GNOME pedir permissão a cada captura, o modo Nativo fica indisponível, porque uma janela a cada
+print atrapalha a reunião; use o modo Flameshot. Um diálogo só na primeira vez é aceitável. O modo
+Nativo usa o `xdg-desktop-portal` da sessão e o `pw-play` para o som.
+
+Com prints, o detalhe da reunião ganha a aba **Prints (N)**, entre Transcrição e Tarefas. Ela
+mostra miniaturas com horário e a fala daquele momento, amplia a imagem ao clicar e permite
+**Apagar** (com confirmação; remove também o arquivo). Na transcrição, a fala do momento ganha o
+selo 📷 com o número do print. Os prints só aparecem depois da finalização.
+
+Os prints também vão ao Claude:
+
+- O **resumo** continua automático e **já enxerga os prints**, antes de você revisá-los. Para
+  revisar antes, desligue **Resumir automaticamente** nas mesmas configurações e use o botão
+  **Resumir** depois.
+- O **levantamento de tarefas** roda só quando você clica em **Levantar tarefas** (ou **Refazer
+  sugestões**), com ou sem prints. Revise e apague os prints antes disso. O Claude pode citar um
+  print como evidência de uma sugestão, e cada sugestão mostra os prints citados.
+- O resumo e o levantamento recebem no máximo **20 prints**, em ordem de horário, com o **lado
+  maior reduzido a 2000 px** e convertidos em JPEG. Os que ficam de fora aparecem na aba com o
+  aviso "Não enviado ao Claude (limite de 20)". O texto dentro de uma imagem é tratado como
+  dado, nunca como instrução.
+
+O **export** da reunião vira um `.zip` quando há prints, com `reuniao.md` (as imagens entram no
+ponto da fala em que foram tiradas) e a pasta `prints/`. Sem prints, continua sendo só o `.md`.
+Excluir a reunião apaga os prints.
+
+As configurações são `print_mode` (`off`, `flameshot` ou `native`), `print_folder` e `print_key`
+(também como `DITADO_<CHAVE>`). Com a pasta vazia, vale a de Imagens. O atalho precisa ser
+diferente dos atalhos de ditado. O backend usa as bibliotecas Python Pillow (imagens) e jeepney
+(D-Bus do portal), instaladas por `uv sync`.
+
 ### Criador de issues e MCP próprio
 
 Em **Configurações → Criador de issues**, ative o levantamento, escolha a pasta raiz dos
@@ -347,6 +402,9 @@ projetos e informe o **endereço HTTPS do MCP de issues**. Instalações novas c
 configurado. O prompt do levantamento tem regras genéricas e pode ser editado para os seus
 projetos; **Restaurar padrão** recupera essas regras. O Claude consulta os projetos em modo de
 leitura. As sugestões continuam passando pela revisão antes de qualquer criação.
+O levantamento é **sempre manual**: ele roda ao clicar em **Levantar tarefas** na aba Tarefas e não
+dispara mais sozinho quando a reunião fica pronta. O campo de contexto da aba já pode ser
+preenchido antes da primeira rodada. Só o resumo continua automático.
 
 O servidor é conectado via HTTP pelo Claude Code com o nome local configurável (padrão `issues`).
 Use o mesmo nome do servidor já autenticado no Claude Code. Quando o MCP exigir
@@ -366,6 +424,20 @@ Depois abra `claude` e autentique o servidor em `/mcp`. O contrato das ferrament
   descrição como texto, responsável/equipe/etapa como ids inteiros, produtos como lista de ids e
   prioridade `low`, `medium`, `high` ou `urgent`. Retorna ao menos `{number: inteiro, url: texto}`.
   A URL da issue pode pertencer a qualquer provedor HTTPS.
+
+O anexo de imagens é **opcional** e não faz parte do contrato fixo. O MCP pode expor qualquer
+ferramenta que receba imagens. Depois que `criar_issue` devolve a issue, o TARS pede ao Claude
+que use essa ferramenta com os prints da sugestão que você manteve (um "x" na sugestão tira um
+print só dela). Como o Claude não repete megabytes de base64 numa chamada, ele escreve
+marcadores nos argumentos e um hook local troca cada um pelo JPEG real:
+
+- `@@PRINT_B64:Pn@@` vira o base64 puro do JPEG do print `Pn` (do tamanho reduzido, 2000 px);
+- `@@PRINT_DATAURL:Pn@@` vira `data:image/jpeg;base64,<base64>`.
+
+Esse hook só aceita os prints listados e bloqueia `criar_issue` nessa etapa. O anexo é
+melhor esforço e nunca bloqueia nem desfaz a criação: se o MCP não tiver ferramenta de imagem, ou
+o envio falhar, a issue continua criada e a sugestão mostra uma nota (por exemplo, "Prints não
+enviados: o MCP não aceita imagens").
 
 As ferramentas e os campos desse contrato permanecem fixos; o prompt ajusta as regras de
 levantamento, sem alterar o formato da integração. O hook de criação continua conferindo os

@@ -31,6 +31,10 @@ Abra **TARS** pelo menu. Mantenha a pasta extraída no mesmo lugar após instala
 Os modelos são baixados no primeiro uso. Claude Code e o token do Hugging Face são opcionais,
 conforme as funcionalidades descritas no README.
 
+Os prints de tela nas reuniões são opcionais. As bibliotecas Python que eles usam (Pillow e
+jeepney) vêm do `uv sync`. O modo Nativo usa o `xdg-desktop-portal` da sessão, e o modo Flameshot
+lê uma pasta de imagens, sem exigir o Flameshot instalado; veja "Prints de tela" no README.
+
 Para atualizar, extraia a nova versão em outra pasta e prepare suas dependências com `uv sync --frozen --no-dev`.
 Encerre o app e pare o backend quando não houver reunião ou ditado em andamento. Execute o
 instalador da nova pasta e inicie o app novamente. Reuniões, vozes e configurações ficam na
