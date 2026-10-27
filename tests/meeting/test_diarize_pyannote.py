@@ -195,9 +195,37 @@ def test_run_drops_zero_padded_and_non_finite_embeddings():
 def test_run_on_silence_returns_empty_result():
     output = _output(spans=[], exclusive=[], embeddings=np.zeros((0, 256)))
     diarizer, _ = _with_pipeline(output)
-    assert diarizer.run(np.zeros(16000 * 3, dtype=np.float32)) == DiarizationResult([], {})
+    assert diarizer.run(np.zeros(16000 * 3, dtype=np.float32)) == DiarizationResult(
+        [], {}, model="pyannote-community-1", engine="pyannote")
     diarizer, _ = _with_pipeline(_output([], [], None))
-    assert diarizer.run(np.zeros(16000, dtype=np.float32)) == DiarizationResult([], {})
+    assert diarizer.run(np.zeros(16000, dtype=np.float32)) == DiarizationResult(
+        [], {}, model="pyannote-community-1", engine="pyannote")
+
+
+def test_run_result_exposes_embed():
+    output = _output(spans=[], exclusive=[], embeddings=None)
+    diarizer, _ = _with_pipeline(output)
+    assert diarizer.run(np.zeros(0, dtype=np.float32)).embed == diarizer.embed
+    assert diarizer.run(np.zeros(16000, dtype=np.float32)).embed == diarizer.embed
+
+
+def test_embed_averages_chunks_with_pipeline_embedding():
+    class EmbPipeline(FakePipeline):
+        def _embedding(self, waveforms):
+            self.calls.append(tuple(waveforms.shape))
+            return np.array([[1.0, 0.0]])
+
+    diarizer = Diarizer("tok", device="cpu")
+    diarizer._pipeline = EmbPipeline()
+    audio = np.ones(16000 * 3, dtype=np.float32)
+    np.testing.assert_allclose(diarizer.embed(audio, [(0.0, 3.0)]), [1, 0])
+    assert diarizer._pipeline.calls == [(1, 1, 16000 * 3)]
+    assert diarizer.embed(audio, [(0.0, 0.2)]) is None
+
+
+def test_embed_raises_when_unavailable():
+    with pytest.raises(RuntimeError, match="diarização indisponível"):
+        Diarizer(None).embed(np.ones(16000 * 3, dtype=np.float32), [(0.0, 3.0)])
 
 
 @pytest.mark.gpu
