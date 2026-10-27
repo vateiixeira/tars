@@ -167,9 +167,9 @@ def test_publish_refuses_uncommitted_changes(repo):
         publish(project)
 
 
-def test_publish_refuses_when_behind_origin(repo, tmp_path):
+def test_publish_refuses_when_behind_origin(repo, tmp_path_factory):
     project, remote = repo
-    other = tmp_path / "other"
+    other = tmp_path_factory.mktemp("clone") / "other"
     subprocess.run(["git", "clone", "-q", str(remote), str(other)], check=True)
     (other / "novo.txt").write_text("x\n")
     git(other, "add", ".")
@@ -221,3 +221,67 @@ def test_gpu_reminder_lists_sensitive_changes_since_last_tag(repo):
     git(project, "add", ".")
     git(project, "commit", "-qm", "transcrição")
     assert release.gpu_sensitive_changes(project) == ["src/whisper_ditado/transcriber.py"]
+
+
+def test_publish_refuses_untracked_files_unless_allowed(repo):
+    project, remote = repo
+    (project / "src/whisper_ditado/novo.py").write_text("# esquecido fora do git\n")
+    with pytest.raises(ValueError, match="novo.py"):
+        publish(project)
+    calls = []
+    checks, lock = ok_steps(calls)
+    tag = release.publish(project, "patch", checks=checks, lock_check=lock, allow_untracked=True)
+    assert git(remote, "rev-parse", f"{tag}^{{commit}}") == git(project, "rev-parse", "HEAD")
+    assert "novo.py" not in git(project, "show", "--name-only", "--format=", "HEAD")
+
+
+def test_publish_refuses_tag_that_exists_only_on_remote(repo):
+    project, _remote = repo
+    major, minor, patch = map(int, release.check(project).split("."))
+    git(project, "tag", f"v{major}.{minor}.{patch + 1}")
+    git(project, "push", "-q", "origin", "--tags")
+    git(project, "tag", "-d", f"v{major}.{minor}.{patch + 1}")
+    with pytest.raises(ValueError, match="já existe"):
+        publish(project)
+
+
+def test_failing_tag_undoes_release_commit(repo):
+    project, _remote = repo
+    head, version = git(project, "rev-parse", "HEAD"), release.check(project)
+    major, minor, patch = map(int, version.split("."))
+    # Uma tag "vX.Y.Z/x" impede criar "vX.Y.Z" (conflito de diretório em refs/tags).
+    git(project, "tag", f"v{major}.{minor}.{patch + 1}/x")
+    with pytest.raises(ValueError, match="git tag"):
+        publish(project)
+    assert release.check(project) == version
+    assert git(project, "rev-parse", "HEAD") == head
+    assert git(project, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def test_failed_push_keeps_commit_and_tag_locally(repo):
+    project, remote = repo
+    hook = remote / "hooks/pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    head = git(project, "rev-parse", "HEAD")
+    with pytest.raises(ValueError, match="push falhou"):
+        publish(project)
+    new = release.check(project)
+    assert git(project, "log", "-1", "--format=%s") == f"[Release] Publicar versão {new}"
+    assert git(project, "tag", "--list") == f"v{new}"
+    assert git(remote, "rev-parse", "main") == head
+    assert git(remote, "tag", "--list") == ""
+
+
+def test_release_commit_contains_only_manifests(repo):
+    project, _remote = repo
+
+    def stage_something(root):
+        (root / "src/whisper_ditado/main.py").write_text("# alterado durante os testes\n")
+        git(root, "add", "src/whisper_ditado/main.py")
+
+    release.publish(project, "patch", checks=[("ide", stage_something)],
+                    lock_check=("lock", lambda root: None))
+    changed = git(project, "show", "--name-only", "--format=", "HEAD").splitlines()
+    assert sorted(changed) == sorted(release.MANIFESTS)
+    assert "main.py" in git(project, "diff", "--cached", "--name-only")

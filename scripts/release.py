@@ -19,8 +19,9 @@ MANIFESTS = ("pyproject.toml", "app/package.json", "app/src-tauri/tauri.conf.jso
 BINARY = "app/src-tauri/target/release/whisper-ditado-app"
 REMOTE, BRANCH = "origin", "main"
 # Mudanças nesses caminhos exigem os testes com modelos reais na GPU antes da versão.
-GPU_SENSITIVE = ("ditado.py", "src/whisper_ditado/audio/", "src/whisper_ditado/meeting/",
-                 "src/whisper_ditado/transcriber.py")
+GPU_SENSITIVE = ("ditado.py", "pyproject.toml", "run-backend.sh", "uv.lock",
+                 "src/whisper_ditado/audio/", "src/whisper_ditado/meeting/",
+                 "src/whisper_ditado/memory.py", "src/whisper_ditado/transcriber.py")
 
 
 def _command(name: str, cmd: list[str], cwd: str = "."):
@@ -161,13 +162,28 @@ def gpu_sensitive_changes(root: Path) -> list[str] | None:
     return [path for path in changed if path.startswith(GPU_SENSITIVE)]
 
 
+def _gpu_warning(root: Path) -> str | None:
+    sensitive = gpu_sensitive_changes(root)
+    if sensitive is not None and not sensitive:
+        return None
+    detail = "primeira versão" if sensitive is None else ", ".join(sensitive)
+    return f"Atenção: rode os testes com modelos reais na GPU antes de publicar ({detail})."
+
+
 def publish(root: Path, part: str, checks=CHECKS, lock_check=LOCK_CHECK,
-            remote: str = REMOTE, branch: str = BRANCH) -> str:
+            remote: str = REMOTE, branch: str = BRANCH, allow_untracked: bool = False) -> str:
     """Verifica, sobe a versão, commita, cria a tag anotada e envia main e tag de uma vez."""
     if _git(root, "rev-parse", "--abbrev-ref", "HEAD") != branch:
         raise ValueError(f"Publique a partir da branch {branch}")
     if _git(root, "status", "--porcelain", "--untracked-files=no"):
         raise ValueError("Faça commit ou descarte as alterações antes de publicar")
+    # As verificações rodam na pasta, mas só o commit sobe: um arquivo esquecido fora do
+    # git passaria nos testes daqui e quebraria a versão publicada.
+    untracked = _git(root, "ls-files", "--others", "--exclude-standard").splitlines()
+    if untracked and not allow_untracked:
+        listed = "\n  ".join(untracked[:20]) + ("\n  ..." if len(untracked) > 20 else "")
+        raise ValueError("Há arquivos fora do git que os testes enxergariam mas não seriam publicados:"
+                         f"\n  {listed}\nFaça commit, ignore ou remova; ou use --allow-untracked")
     _git(root, "fetch", "-q", remote, branch)
     upstream = f"{remote}/{branch}"
     ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", upstream, "HEAD"],
@@ -181,28 +197,36 @@ def publish(root: Path, part: str, checks=CHECKS, lock_check=LOCK_CHECK,
     if local_tag.returncode == 0 or _git(root, "ls-remote", "--tags", remote, tag):
         raise ValueError(f"A tag {tag} já existe")
 
-    sensitive = gpu_sensitive_changes(root)
-    if sensitive is None or sensitive:
-        detail = "primeira versão" if sensitive is None else ", ".join(sensitive)
-        print(f"Atenção: rode os testes com modelos reais na GPU antes de publicar ({detail}).",
-              flush=True)
-
+    warning = _gpu_warning(root)
+    if warning:
+        print(warning, flush=True)
     for name, step in checks:
         _run_step(root, name, step)
+
+    committed = False
     try:
         bump(root, part)
         _run_step(root, *lock_check)
-        _git(root, "add", "--", *MANIFESTS)
-        _git(root, "commit", "-q", "-m", f"[Release] Publicar versão {new}")
-    except Exception:
-        _git(root, "reset", "-q", "HEAD", "--", *MANIFESTS)
-        _git(root, "checkout", "--", *MANIFESTS)
+        # --only grava só os manifestos, mesmo que algo tenha entrado no índice durante os testes.
+        _git(root, "commit", "-q", "--only", "-m", f"[Release] Publicar versão {new}", "--", *MANIFESTS)
+        committed = True
+        _git(root, "tag", "-a", tag, "-m", f"TARS {tag}")
+    except BaseException:  # inclui Ctrl-C: nada fica pela metade antes do push
+        if committed:
+            _git(root, "reset", "-q", "--keep", "HEAD~1")
+        else:
+            _git(root, "checkout", "HEAD", "--", *MANIFESTS)
         raise
-    _git(root, "tag", "-a", tag, "-m", f"TARS {tag}")
-    print(f"==> git push {remote} {branch} {tag}", flush=True)
+    if warning:
+        print(warning, flush=True)  # repetido aqui porque a saída dos testes o empurra para cima
+    print(f"==> git push --atomic {remote} {branch} {tag}", flush=True)
     pushed = subprocess.run(["git", "push", "--atomic", remote, branch, tag], cwd=root, check=False)
     if pushed.returncode:
-        raise ValueError(f"O push falhou; commit e tag ficaram locais. Tente: git push --atomic {remote} {branch} {tag}")
+        raise ValueError(
+            f"O push falhou; o commit e a tag {tag} ficaram só aqui. Se foi falha de rede, repita: "
+            f"git push --atomic {remote} {branch} {tag}. Se o {upstream} avançou, desfaça com "
+            f"git tag -d {tag} && git reset --keep HEAD~1, atualize a {branch} e publique de novo."
+        )
     return tag
 
 
@@ -215,6 +239,8 @@ def main() -> None:
     update.add_argument("part", choices=("major", "minor", "patch"))
     release = commands.add_parser("publish", help="testa, sobe a versão, cria a tag e envia")
     release.add_argument("part", choices=("major", "minor", "patch"))
+    release.add_argument("--allow-untracked", action="store_true",
+                         help="publica mesmo com arquivos fora do git na pasta")
     build = commands.add_parser("package")
     build.add_argument("--binary", type=Path, default=ROOT / BINARY)
     build.add_argument("--output", type=Path, default=ROOT / "dist-release")
@@ -225,7 +251,7 @@ def main() -> None:
         elif args.command == "bump":
             print(bump(ROOT, args.part))
         elif args.command == "publish":
-            tag = publish(ROOT, args.part)
+            tag = publish(ROOT, args.part, allow_untracked=args.allow_untracked)
             print(f"{tag} enviada; o workflow Release vai compilar e publicar o pacote.")
         else:
             print(package(ROOT, args.binary, args.output))
