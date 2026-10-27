@@ -470,3 +470,12 @@ def test_print_mode_env_is_validated(settings, monkeypatch):
     assert settings.get("print_mode") == "native"
     monkeypatch.setenv("DITADO_PRINT_MODE", "invalido")
     assert settings.get("print_mode") == "off"
+
+
+def test_print_key_env_is_validated(settings, monkeypatch):
+    monkeypatch.setenv("DITADO_PRINT_KEY", "ctrl+KEY_F8")
+    assert settings.get("print_key") == "ctrl+KEY_F8"
+    monkeypatch.setenv("DITADO_PRINT_KEY", "ctrl+TECLA_QUE_NAO_EXISTE")
+    assert settings.get("print_key") == "ctrl+alt+KEY_P"
+    # o atalho inválido do ambiente não chega ao parse_hotkey (que encerraria o processo)
+    assert settings.update({"key": "ctrl+super"})["key"] == "ctrl+super"

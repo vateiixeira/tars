@@ -265,7 +265,7 @@ def _from_env(key: str, raw: str) -> Any:
         return float(raw)
     if isinstance(default, list):
         return [s.strip() for s in raw.split(",") if s.strip()]
-    if key in MODEL_KEYS or key in EFFORT_KEYS or key in ("issues_mcp_name", "print_mode"):
+    if key in MODEL_KEYS or key in EFFORT_KEYS or key in ("issues_mcp_name", "print_mode", "print_key"):
         return _validate(key, raw)  # inválido levanta ValueError: `get` loga e usa o padrão
     if key == "prompt":
         return raw or None
