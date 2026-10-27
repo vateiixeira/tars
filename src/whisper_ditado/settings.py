@@ -67,7 +67,12 @@ DEFAULTS: dict[str, Any] = {
     "issues_mcp_url": ISSUES_DEFAULT_URL,
     "issues_mcp_name": "issues",
     "tasks_prompt": DEFAULT_TASKS_PROMPT,
+    "print_mode": "off",
+    "print_folder": None,
+    "print_key": "ctrl+alt+KEY_P",
 }
+
+PRINT_MODES = ("off", "flameshot", "native")
 
 MODEL_KEYS = ("claude_model", "tasks_model")
 EFFORT_KEYS = ("claude_effort", "tasks_effort")
@@ -180,6 +185,27 @@ def _validate(key: str, value: Any) -> Any:
         if not root.is_dir():
             raise ValueError(f"Pasta raiz não encontrada: {root}")
         return str(root)
+    if key == "print_mode":
+        if value not in PRINT_MODES:
+            raise ValueError(f"Modo de prints inválido: {value!r} (use off, flameshot ou native)")
+        return value
+    if key == "print_folder":
+        raw = _text(value, "Pasta de prints", nullable=True)
+        if raw is None:
+            return None
+        root = Path(raw.strip()).expanduser()
+        if not root.is_absolute():
+            raise ValueError("Pasta de prints: informe um caminho absoluto")
+        if not root.is_dir():
+            raise ValueError(f"Pasta de prints não encontrada: {root}")
+        return str(root)
+    if key == "print_key":
+        spec = _text(value, "Atalho do print", nullable=False)
+        try:
+            parse_hotkey(spec)
+        except SystemExit:
+            raise ValueError(f"Atalho do print inválido: {spec!r} (ex.: ctrl+alt+KEY_P)") from None
+        return spec
     if key == "issues_mcp_name":
         name = _text(value, "Nome do servidor MCP", nullable=False).strip()
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
@@ -216,6 +242,13 @@ def _resolve_tasks_prompt(value: str | None) -> str:
     return DEFAULT_TASKS_PROMPT if _is_default_tasks_prompt(value) else value
 
 
+def _hotkeys_collide(a: str, b: str) -> bool:
+    """Dois atalhos colidem quando cada grupo de um deles tem tecla em comum com o outro."""
+    first, second = parse_hotkey(a), parse_hotkey(b)
+    common = frozenset().union(*first) & frozenset().union(*second)
+    return all(group & common for group in (*first, *second))
+
+
 def _from_env(key: str, raw: str) -> Any:
     """Converte o texto de `DITADO_<CHAVE>` para o tipo do padrão."""
     default = DEFAULTS[key]
@@ -232,7 +265,7 @@ def _from_env(key: str, raw: str) -> Any:
         return float(raw)
     if isinstance(default, list):
         return [s.strip() for s in raw.split(",") if s.strip()]
-    if key in MODEL_KEYS or key in EFFORT_KEYS or key == "issues_mcp_name":
+    if key in MODEL_KEYS or key in EFFORT_KEYS or key in ("issues_mcp_name", "print_mode"):
         return _validate(key, raw)  # inválido levanta ValueError: `get` loga e usa o padrão
     if key == "prompt":
         return raw or None
@@ -283,11 +316,16 @@ class Settings:
                     raise ValueError("Duração mínima deve ser menor que a máxima")
             if "key" in clean or "output_key" in clean:
                 current = self.store.all_settings()
-                mic = parse_hotkey(clean.get("key", self._resolve("key", current)))
-                pc = parse_hotkey(clean.get("output_key", self._resolve("output_key", current)))
-                common = frozenset().union(*mic) & frozenset().union(*pc)
-                if all(group & common for group in (*mic, *pc)):
+                mic = clean.get("key", self._resolve("key", current))
+                pc = clean.get("output_key", self._resolve("output_key", current))
+                if _hotkeys_collide(mic, pc):
                     raise ValueError("Os atalhos do microfone e do áudio do PC devem ser diferentes")
+            if {"key", "output_key", "print_key"} & clean.keys():
+                current = self.store.all_settings()
+                shot = clean.get("print_key", self._resolve("print_key", current))
+                for name in ("key", "output_key"):
+                    if _hotkeys_collide(shot, clean.get(name, self._resolve(name, current))):
+                        raise ValueError("O atalho do print deve ser diferente dos atalhos de ditado")
             self.store.set_settings(clean)
             return self.as_dict()
 
