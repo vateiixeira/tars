@@ -1,4 +1,4 @@
-// Bandeja: ícone com o estado da reunião e o menu (reunião, abrir, ditado, sair). O estado vem
+// Bandeja: ícone com o estado da reunião e o menu (reunião, print, abrir, ditado, sair). O estado vem
 // do `Backend` (WebSocket do processo principal); as ações viram chamadas HTTP em thread própria
 // para não travar o laço de eventos.
 use std::sync::Arc;
@@ -18,6 +18,7 @@ pub const STOP_BEFORE_EXIT: &str = "Pare a gravação antes de sair";
 
 const ID_STATUS: &str = "status";
 const ID_MEETING: &str = "meeting";
+const ID_PRINT: &str = "print";
 const ID_OPEN: &str = "open";
 const ID_DICTATION: &str = "dictation";
 const ID_QUIT: &str = "quit";
@@ -41,6 +42,8 @@ pub struct TrayView {
     pub status_text: &'static str,
     pub meeting_text: &'static str,
     pub meeting_enabled: bool,
+    /// "Tirar print": só gravando e com o print nativo ligado.
+    pub print_enabled: bool,
     pub dictation_text: &'static str,
     pub dictation_enabled: bool,
 }
@@ -52,6 +55,7 @@ pub fn tray_view(status: Option<BackendStatus>) -> TrayView {
             status_text: NOT_RUNNING,
             meeting_text: "Iniciar reunião",
             meeting_enabled: false,
+            print_enabled: false,
             dictation_text: "Pausar ditado",
             dictation_enabled: false,
         };
@@ -68,6 +72,7 @@ pub fn tray_view(status: Option<BackendStatus>) -> TrayView {
         status_text,
         meeting_text,
         meeting_enabled,
+        print_enabled: print_allowed(Some(s)),
         dictation_text: if s.dictation_enabled { "Pausar ditado" } else { "Retomar ditado" },
         dictation_enabled: true,
     }
@@ -85,6 +90,11 @@ pub fn meeting_action(status: Option<BackendStatus>) -> Option<MeetingAction> {
         MeetingState::Idle | MeetingState::Processing => Some(MeetingAction::Start),
         MeetingState::Recording => Some(MeetingAction::Stop),
     }
+}
+
+/// O item "Tirar print" só vale gravando com o print nativo (o backend recusa fora disso).
+pub fn print_allowed(status: Option<BackendStatus>) -> bool {
+    status.is_some_and(|s| s.meeting == MeetingState::Recording && s.print_native)
 }
 
 /// Novo valor de `dictation_enabled` ao clicar em pausar/retomar.
@@ -112,6 +122,7 @@ pub struct Tray {
     icon: TrayIcon<Wry>,
     status: MenuItem<Wry>,
     meeting: MenuItem<Wry>,
+    print: MenuItem<Wry>,
     dictation: MenuItem<Wry>,
 }
 
@@ -120,6 +131,7 @@ impl Tray {
         let view = tray_view(None);
         let status = MenuItem::with_id(app, ID_STATUS, view.status_text, false, None::<&str>)?;
         let meeting = MenuItem::with_id(app, ID_MEETING, view.meeting_text, view.meeting_enabled, None::<&str>)?;
+        let print = MenuItem::with_id(app, ID_PRINT, "Tirar print", view.print_enabled, None::<&str>)?;
         let open = MenuItem::with_id(app, ID_OPEN, "Abrir", true, None::<&str>)?;
         let dictation =
             MenuItem::with_id(app, ID_DICTATION, view.dictation_text, view.dictation_enabled, None::<&str>)?;
@@ -130,6 +142,7 @@ impl Tray {
                 &status,
                 &PredefinedMenuItem::separator(app)?,
                 &meeting,
+                &print,
                 &open,
                 &dictation,
                 &PredefinedMenuItem::separator(app)?,
@@ -143,7 +156,7 @@ impl Tray {
             .show_menu_on_left_click(true)
             .on_menu_event(move |app, event| on_menu(app, &backend, event))
             .build(app)?;
-        Ok(Tray { icon, status, meeting, dictation })
+        Ok(Tray { icon, status, meeting, print, dictation })
     }
 
     pub fn apply(&self, view: &TrayView) {
@@ -152,6 +165,7 @@ impl Tray {
             self.status.set_text(view.status_text),
             self.meeting.set_text(view.meeting_text),
             self.meeting.set_enabled(view.meeting_enabled),
+            self.print.set_enabled(view.print_enabled),
             self.dictation.set_text(view.dictation_text),
             self.dictation.set_enabled(view.dictation_enabled),
         ];
@@ -174,6 +188,11 @@ fn on_menu(app: &AppHandle, backend: &Arc<Backend>, event: MenuEvent) {
             Some(MeetingAction::Stop) => report(&app, "parar a reunião", backend::request(Method::Post, "/meetings/stop", None, None)),
             None => {}
         },
+        ID_PRINT => {
+            if print_allowed(backend.current()) {
+                report(&app, "tirar o print", backend::request(Method::Post, "/meetings/print", None, None));
+            }
+        }
         ID_DICTATION => {
             if let Some(enabled) = dictation_toggle(backend.current()) {
                 let body = json!({ "dictation_enabled": enabled });
@@ -216,7 +235,11 @@ mod tests {
     use super::*;
 
     fn st(meeting: MeetingState, dictation_enabled: bool) -> Option<BackendStatus> {
-        Some(BackendStatus { meeting, dictation_enabled })
+        Some(BackendStatus { meeting, dictation_enabled, print_native: false })
+    }
+
+    fn st_print(meeting: MeetingState, print_native: bool) -> Option<BackendStatus> {
+        Some(BackendStatus { meeting, dictation_enabled: true, print_native })
     }
 
     #[test]
@@ -255,6 +278,16 @@ mod tests {
         assert_eq!(meeting_action(st(MeetingState::Idle, true)), Some(MeetingAction::Start));
         assert_eq!(meeting_action(st(MeetingState::Recording, true)), Some(MeetingAction::Stop));
         assert_eq!(meeting_action(st(MeetingState::Processing, true)), Some(MeetingAction::Start));
+    }
+
+    #[test]
+    fn print_item_enabled_only_recording_native() {
+        let enabled = |s| (tray_view(s).print_enabled, print_allowed(s));
+        assert_eq!(enabled(st_print(MeetingState::Recording, true)), (true, true));
+        assert_eq!(enabled(st_print(MeetingState::Idle, true)), (false, false));
+        assert_eq!(enabled(st_print(MeetingState::Processing, true)), (false, false));
+        assert_eq!(enabled(st_print(MeetingState::Recording, false)), (false, false));
+        assert_eq!(enabled(None), (false, false));
     }
 
     #[test]

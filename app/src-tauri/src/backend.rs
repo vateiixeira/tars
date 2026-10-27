@@ -31,6 +31,8 @@ pub enum MeetingState {
 pub struct BackendStatus {
     pub meeting: MeetingState,
     pub dictation_enabled: bool,
+    /// `meeting.print_mode == "native"`: o print é tirado pelo próprio app (ausente vale false).
+    pub print_native: bool,
 }
 
 #[derive(Deserialize)]
@@ -47,11 +49,17 @@ struct DictationPart {
 #[derive(Deserialize)]
 struct MeetingPart {
     state: MeetingState,
+    #[serde(default)]
+    print_mode: Option<String>,
 }
 
 impl From<StatusPayload> for BackendStatus {
     fn from(p: StatusPayload) -> Self {
-        BackendStatus { meeting: p.meeting.state, dictation_enabled: p.dictation.enabled }
+        BackendStatus {
+            meeting: p.meeting.state,
+            dictation_enabled: p.dictation.enabled,
+            print_native: p.meeting.print_mode.as_deref() == Some("native"),
+        }
     }
 }
 
@@ -204,19 +212,36 @@ mod tests {
             "followed_app": null, "alerts": ["mic_silent"]}}"#;
         assert_eq!(
             parse_event(status),
-            Some(BackendStatus { meeting: MeetingState::Recording, dictation_enabled: true })
+            Some(BackendStatus { meeting: MeetingState::Recording, dictation_enabled: true, print_native: false })
         );
         let processing = r#"{"type": "status", "dictation": {"enabled": false, "active": false, "key": "k"},
             "meeting": {"state": "processing", "meeting_id": null, "started_at": null, "followed_app": null, "alerts": []}}"#;
         assert_eq!(
             parse_event(processing),
-            Some(BackendStatus { meeting: MeetingState::Processing, dictation_enabled: false })
+            Some(BackendStatus { meeting: MeetingState::Processing, dictation_enabled: false, print_native: false })
         );
         assert_eq!(parse_event(r#"{"type": "levels", "mic_db": -20, "pc_db": -30}"#), None);
         assert_eq!(parse_event(r#"{"type": "dictation", "active": true}"#), None);
         // estado desconhecido ou lixo: ignora em vez de chutar
         assert_eq!(parse_event(r#"{"type": "status", "dictation": {"enabled": true}, "meeting": {"state": "x"}}"#), None);
         assert_eq!(parse_event("não é json"), None);
+    }
+
+    #[test]
+    fn parses_print_mode_native_and_missing() {
+        let with_mode = |mode: &str| {
+            format!(
+                r#"{{"type": "status", "dictation": {{"enabled": true}},
+                "meeting": {{"state": "recording", "print_mode": {mode}}}}}"#
+            )
+        };
+        assert!(parse_event(&with_mode(r#""native""#)).unwrap().print_native);
+        assert!(!parse_event(&with_mode(r#""flameshot""#)).unwrap().print_native);
+        assert!(!parse_event(&with_mode(r#""off""#)).unwrap().print_native);
+        assert!(!parse_event(&with_mode("null")).unwrap().print_native);
+        // backend antigo, sem o campo
+        let old = r#"{"type": "status", "dictation": {"enabled": true}, "meeting": {"state": "recording"}}"#;
+        assert!(!parse_event(old).unwrap().print_native);
     }
 
     #[test]
