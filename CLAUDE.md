@@ -4,6 +4,19 @@ Aplicativo Linux de ditado, transcrição de áudio e reuniões, com backend Pyt
 interface Vue/Tauri. Consulte [README.md](README.md) para instalação e arquitetura
 e [CONTRIBUTING.md](CONTRIBUTING.md) para desenvolvimento e validação.
 
+## Worktrees
+
+É recomendável desenvolver features novas num git worktree separado, numa branch
+própria, para não mexer no checkout da `main`. Siga o padrão de diretório irmão
+`../whisper-ditado-<nome>`:
+
+```bash
+git worktree add ../whisper-ditado-<nome> -b <branch>
+```
+
+Correções pequenas e ajustes pontuais podem ser feitos direto no checkout atual.
+Remova o worktree com `git worktree remove` depois do merge.
+
 ## Versionamento e releases
 
 O fluxo completo está em [docs/RELEASING.md](docs/RELEASING.md).
