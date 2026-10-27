@@ -643,7 +643,7 @@ git commit -m "[Feat] Tornar manual o levantamento e incluir prints no resumo"
   - `ATTACH_PROMPT` em `prompts.py`.
   - JSON da sugestão na API: `print_ids`, `attach_state`, `attach_error`. O `PATCH /tasks/{id}` aceita `print_ids: list[str]`.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```python
 # test_attach_guard.py (rode o script como subprocess, como em test_create_guard.py)
@@ -668,12 +668,12 @@ def test_attach_failure_keeps_issue_created(...): ...  # attach levanta -> creat
 def test_patch_task_print_ids_and_json_fields(...): ... # remove um id -> 200 com print_ids atualizado; id estranho -> 400; travada -> 409
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/issues tests/test_api_tasks.py -q`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - `attach_guard.py` usa só a biblioteca padrão, como o `create_guard.py`. Uso: `attach_guard.py <map.json> <tool_create>`.
   - Bloqueia `tool_create` com exit 2 e a mensagem `"Não crie issues nesta etapa"`.
@@ -703,12 +703,12 @@ Ao terminar, responda só OK.
   - Grava o estado final. Qualquer exceção vira `failed` sem tocar em `create_state`.
 - `api_tasks.py`: o JSON da sugestão ganha os três campos. O `PATCH` aceita `print_ids` (`ValueError` → 400, `TaskLocked` → 409).
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/issues tests/test_api_tasks.py -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/whisper_ditado/issues src/whisper_ditado/api_tasks.py tests/issues tests/test_api_tasks.py
@@ -736,7 +736,7 @@ git commit -m "[Feat] Anexar prints à issue quando o MCP aceitar imagens"
   - `export.markdown_with_prints(meeting, speakers, segments, summary, prints, labels) -> str`
   - `export.build_zip(markdown: str, files: list[tuple[str, Path]]) -> bytes`
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```python
 # test_export.py
@@ -755,23 +755,23 @@ def test_summarize_sends_prints(...): ...                 # ctx.claude.summarize
 def test_export_zip_contains_md_and_prints(...): ...      # zipfile: reuniao.md + prints/P01-00-30.png
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/test_api.py tests/prints/test_export.py -q`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - O nome de cada print no zip é `prints/P{n:02d}-{mm}-{ss}{ext}`. O `.md` é igual ao `export.md` atual, com a transcrição gerada linha a linha, no mesmo formato de `transcript_text`, e uma linha de imagem depois do último segmento com `start_s <= at_s`.
 - O nome do arquivo baixado segue o `.md`: `reuniao-%Y%m%d-%H%M.zip`.
 - A miniatura usa `jpeg_bytes(path, THUMB_EDGE)` em `run_in_threadpool`. `OSError` ou `UnidentifiedImageError` viram 404 `"Print ilegível"`.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest -q`
 Expected: PASS (suíte completa)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/whisper_ditado/api.py src/whisper_ditado/prints/export.py tests/test_api.py tests/prints/test_export.py
