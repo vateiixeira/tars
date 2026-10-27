@@ -24,10 +24,11 @@ from whisper_ditado.meeting.timeline import Turn
 log = logging.getLogger("ditado")
 
 ENGINE = "local"
-# Valores provisórios: a calibração com reuniões reais acontece depois.
-DEFAULT_EMBEDDING = "wespeaker_en_voxceleb_resnet34_LM"
-DEFAULT_CLUSTER_THRESHOLD = 0.9
-MIN_SPEAKER_S = 8.0  # clusters com menos fala que isso são fundidos num falante maior
+# Calibrados com as reuniões gravadas (ver docs/superpowers/specs/
+# 2026-10-27-diarizacao-local-sherpa-calibracao.md e scripts/eval_diarization.py).
+DEFAULT_EMBEDDING = "nemo_en_titanet_small"
+DEFAULT_CLUSTER_THRESHOLD = 1.0  # distância do clustering do sherpa: maior junta mais
+MIN_SPEAKER_S = 12.0  # clusters com menos fala que isso são fundidos num falante maior
 RETRY_AFTER_S = 300.0
 
 

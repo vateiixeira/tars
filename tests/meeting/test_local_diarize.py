@@ -60,9 +60,9 @@ def _diarizer(backend, **kwargs) -> tuple[LocalDiarizer, list[int]]:
 
 
 def test_defaults():
-    assert DEFAULT_EMBEDDING == "wespeaker_en_voxceleb_resnet34_LM"
-    assert DEFAULT_CLUSTER_THRESHOLD == 0.9
-    assert MIN_SPEAKER_S == 8.0
+    assert DEFAULT_EMBEDDING == "nemo_en_titanet_small"
+    assert DEFAULT_CLUSTER_THRESHOLD == 1.0
+    assert MIN_SPEAKER_S == 12.0
     assert RETRY_AFTER_S == 300.0
     assert LocalDiarizer.engine == "local"
     assert 1 <= default_threads() <= 8
@@ -80,7 +80,7 @@ def test_run_labels_by_first_appearance_and_tags_model():
         (20.0, 30.0, "SPEAKER_00"),
         (30.0, 40.0, "SPEAKER_01"),
     ]
-    assert result.model == "sherpa-wespeaker_en_voxceleb_resnet34_LM"
+    assert result.model == "sherpa-nemo_en_titanet_small"
     assert diarizer.model_id == result.model
     assert result.engine == "local"
     assert result.embed is not None
@@ -120,7 +120,7 @@ def test_run_single_voice_split_into_tiny_clusters_becomes_one_speaker():
 
 
 def test_run_without_embeddings_merges_into_longest():
-    segs = [(0.0, 10.0, 0), (10.0, 22.0, 1), (22.0, 24.0, 2)]
+    segs = [(0.0, 14.0, 0), (14.0, 30.0, 1), (30.0, 32.0, 2)]
     backend = FakeBackend(segs, {})  # nenhum vetor utilizável
     diarizer, _ = _diarizer(backend)
     result = diarizer.run(_audio(segs, {0: 0.2, 1: 0.4, 2: 0.6}))
@@ -133,7 +133,7 @@ def test_run_empty_audio_and_unavailable():
     diarizer, _ = _diarizer(FakeBackend([]))
     result = diarizer.run(np.zeros(0, dtype=np.float32))
     assert result.turns == []
-    assert result.model == "sherpa-wespeaker_en_voxceleb_resnet34_LM"
+    assert result.model == "sherpa-nemo_en_titanet_small"
     assert result.engine == "local"
     assert result.embed is not None
 

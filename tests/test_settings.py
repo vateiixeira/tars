@@ -138,7 +138,7 @@ def test_update_returns_dict_and_persists(settings, store):
 
 def test_diarizer_and_threshold_per_engine(settings, store, monkeypatch):
     assert settings.get("diarizer") == "local"
-    assert settings.get("voice_match_threshold_local") == 0.5
+    assert settings.get("voice_match_threshold_local") == 0.62
     assert settings.get("voice_match_threshold_pyannote") == 0.6
     for engine in ("local", "pyannote"):
         settings.update({"diarizer": engine})

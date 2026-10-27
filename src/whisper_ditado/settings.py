@@ -34,7 +34,7 @@ DEFAULT_SUMMARY_PROMPT = (
 
 # Motores de separação de falantes. O local roda na CPU; o pyannote exige token do Hugging Face.
 DIARIZERS = ("local", "pyannote")
-DEFAULT_LOCAL_VOICE_THRESHOLD = 0.5  # provisório: calibrado com áudio real na Task 11
+DEFAULT_LOCAL_VOICE_THRESHOLD = 0.62  # calibrado com as vozes ligadas nas reuniões gravadas
 
 DEFAULTS: dict[str, Any] = {
     "dictation_enabled": True,
