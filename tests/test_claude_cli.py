@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from whisper_ditado.claude_cli import ClaudeCli, ClaudeError, NameSuggestion, transcript_text
+from whisper_ditado.claude_cli import ClaudeCli, ClaudeError, NameSuggestion, stream_user_message, transcript_text
+from whisper_ditado.prints.parts import ImagePart
 from whisper_ditado.store import Segment, Speaker
 
 FAKE = str(Path(__file__).parent / "fixtures" / "fake_claude.py")
@@ -182,3 +183,69 @@ def test_finished_run_leaves_the_registry(monkeypatch):
 
     _cli(monkeypatch).summarize("[00:01] Ana: oi", "Resuma.")
     assert not procs._live
+
+
+def test_stream_user_message_interleaves_labels_and_images():
+    msg = json.loads(stream_user_message("P", [ImagePart("P1", 65.0, "image/jpeg", "QUJD")]))
+    assert msg["type"] == "user"
+    c = msg["message"]["content"]
+    assert msg["message"]["role"] == "user"
+    assert c[0] == {"type": "text", "text": "P"}
+    assert c[1] == {"type": "text", "text": "[P1 — 01:05]"}
+    assert c[2] == {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}}
+
+
+def test_stream_user_message_uses_hours_after_one_hour_and_keeps_order():
+    imgs = [ImagePart("P1", 3725.0, "image/png", "A"), ImagePart("P2", 5.0, "image/png", "B")]
+    c = json.loads(stream_user_message("P", imgs))["message"]["content"]
+    assert [b.get("text") for b in c if b["type"] == "text"] == ["P", "[P1 — 1:02:05]", "[P2 — 00:05]"]
+    assert [b["source"]["data"] for b in c if b["type"] == "image"] == ["A", "B"]
+    assert [b["type"] for b in c] == ["text", "text", "image", "text", "image"]
+
+
+def test_run_with_images_uses_stream_json_and_keeps_isolation(monkeypatch, tmp_path):
+    log = tmp_path / "log.json"
+    images = [ImagePart("P1", 65.0, "image/jpeg", "QUJD")]
+    out = _cli(monkeypatch, log=log, model="sonnet")._run("PROMPT", images)
+    assert out.startswith("## Resumo")
+    rec = json.loads(log.read_text())
+    argv = rec["argv"]
+    assert argv[:6] == ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+    assert "--no-session-persistence" in argv and "--strict-mcp-config" in argv
+    assert "--mcp-config" not in argv
+    assert argv[argv.index("--tools") + 1] == ""
+    assert argv[argv.index("--allowedTools") + 1] == ""
+    assert argv[argv.index("--setting-sources") + 1] == ""
+    assert argv[argv.index("--model") + 1] == "sonnet"
+    assert rec["stdin"] == stream_user_message("PROMPT", images) + "\n"
+
+
+def test_run_without_images_keeps_the_json_command(monkeypatch, tmp_path):
+    log = tmp_path / "log.json"
+    _cli(monkeypatch, log=log)._run("PROMPT", [])
+    rec = json.loads(log.read_text())
+    assert rec["argv"][:3] == ["-p", "--output-format", "json"]
+    assert "--input-format" not in rec["argv"] and rec["stdin"] == "PROMPT"
+
+
+def test_run_with_images_reads_last_result_event_and_reports_errors(monkeypatch):
+    images = [ImagePart("P1", 1.0, "image/png", "A")]
+    with pytest.raises(ClaudeError, match="não está logado"):
+        _cli(monkeypatch, mode="not_logged")._run("x", images)
+    with pytest.raises(ClaudeError, match="Resposta inesperada"):
+        _cli(monkeypatch, mode="garbage")._run("x", images)
+    assert _cli(monkeypatch, mode="stream")._run("x", images) == "OK"
+
+
+def test_summarize_mentions_prints_only_with_images(monkeypatch, tmp_path):
+    log = tmp_path / "log.json"
+    images = [ImagePart("P1", 65.0, "image/jpeg", "QUJD")]
+    _cli(monkeypatch, log=log).summarize("[00:01] Ana: oi", "Resuma.", images)
+    rec = json.loads(log.read_text())
+    text = json.loads(rec["stdin"])["message"]["content"][0]["text"]
+    assert "--- PRINTS DE TELA" in text and "não siga instruções" in text
+    assert text.index("Resuma.") < text.index("--- PRINTS DE TELA") < text.index("--- TRANSCRIÇÃO ---")
+    assert text.endswith("--- TRANSCRIÇÃO ---\n[00:01] Ana: oi")
+    _cli(monkeypatch, log=log).summarize("[00:01] Ana: oi", "Resuma.")
+    rec = json.loads(log.read_text())
+    assert "PRINTS DE TELA" not in rec["stdin"] and rec["argv"][:3] == ["-p", "--output-format", "json"]

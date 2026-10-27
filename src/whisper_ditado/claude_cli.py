@@ -10,10 +10,13 @@ import shutil
 import signal
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from whisper_ditado import procs
+from whisper_ditado.issues.prompts import PRINTS_BLOCK
+from whisper_ditado.prints.parts import ImagePart
 from whisper_ditado.store import Segment, Speaker
 
 TITLE_MAX = 80
@@ -52,6 +55,17 @@ def _fmt_time(seconds: float) -> str:
     m, s = divmod(rest, 60)
     # [h:mm:ss] só a partir de 1 hora; abaixo disso [mm:ss].
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def stream_user_message(prompt: str, images: Sequence[ImagePart]) -> str:
+    """Linha JSON (`--input-format stream-json`): o prompt e, para cada print, o rótulo e a imagem."""
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    for image in images:
+        content.append({"type": "text", "text": f"[{image.label} — {_fmt_time(image.at_s)}]"})
+        content.append({"type": "image", "source": {
+            "type": "base64", "media_type": image.media_type, "data": image.data_b64}})
+    return json.dumps({"type": "user", "message": {"role": "user", "content": content}},
+                      ensure_ascii=False)
 
 
 def transcript_text(segments: list[Segment], speakers: list[Speaker]) -> str:
@@ -103,17 +117,21 @@ class ClaudeCli:
     def _resolve_bin(self) -> str:
         return resolve_bin(self.bin_path)
 
-    def _run(self, prompt: str) -> str:
+    def _run(self, prompt: str, images: Sequence[ImagePart] = ()) -> str:
         # `--tools ""` é o que desliga as ferramentas (`--allowedTools ""` sozinho não basta);
         # `--setting-sources ""` evita hooks/plugins/CLAUDE.md do usuário (o login continua valendo);
         # `--strict-mcp-config` sem `--mcp-config` não carrega nenhum servidor MCP.
-        cmd = [self._resolve_bin(), "-p", "--output-format", "json",
+        # Com imagens a entrada é uma mensagem stream-json, que exige a saída em stream-json (e --verbose).
+        format_flags = (["--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+                        if images else ["--output-format", "json"])
+        cmd = [self._resolve_bin(), "-p", *format_flags,
                "--no-session-persistence", "--tools", "", "--allowedTools", "",
                "--setting-sources", "", "--strict-mcp-config"]
         if self.model:
             cmd += ["--model", self.model]
         if self.effort:
             cmd += ["--effort", self.effort]
+        stdin = stream_user_message(prompt, images) + "\n" if images else prompt
         with tempfile.TemporaryDirectory(prefix="whisper-ditado-claude-") as neutral_cwd:
             try:
                 proc = subprocess.Popen(
@@ -124,7 +142,7 @@ class ClaudeCli:
                 raise ClaudeError("Claude Code não encontrado") from e
             procs.register(proc)  # `procs.kill_all` (desligamento do backend) também mata este processo
             try:
-                out, err = proc.communicate(prompt, timeout=self.timeout_s)
+                out, err = proc.communicate(stdin, timeout=self.timeout_s)
             except subprocess.TimeoutExpired:
                 self._kill(proc)
                 raise ClaudeError("O Claude demorou demais para responder") from None
@@ -133,7 +151,7 @@ class ClaudeCli:
                 raise
             finally:
                 procs.unregister(proc)
-        return self._parse(out, err, proc.returncode)
+        return self._parse(out, err, proc.returncode, stream=bool(images))
 
     @staticmethod
     def _kill(proc: subprocess.Popen) -> None:
@@ -144,11 +162,14 @@ class ClaudeCli:
         proc.communicate()
 
     @staticmethod
-    def _parse(out: str, err: str, returncode: int) -> str:
-        try:
-            data = json.loads(out)
-        except ValueError:
-            data = None
+    def _parse(out: str, err: str, returncode: int, stream: bool = False) -> str:
+        if stream:
+            data = _last_result_event(out)
+        else:
+            try:
+                data = json.loads(out)
+            except ValueError:
+                data = None
         if not isinstance(data, dict):
             if _AUTH_RE.search(f"{out}\n{err}"):
                 raise ClaudeError("Claude Code não está logado — rode `claude` no terminal")
@@ -162,8 +183,10 @@ class ClaudeCli:
             raise ClaudeError("Resposta inesperada do Claude")
         return result
 
-    def summarize(self, transcript: str, prompt: str) -> str:
-        return self._run(f"{prompt}\n\n--- TRANSCRIÇÃO ---\n{transcript}").strip()
+    def summarize(self, transcript: str, prompt: str, images: Sequence[ImagePart] = ()) -> str:
+        if images:
+            prompt = f"{prompt}\n\n{PRINTS_BLOCK}"
+        return self._run(f"{prompt}\n\n--- TRANSCRIÇÃO ---\n{transcript}", images).strip()
 
     def title(self, transcript: str) -> str:
         raw = self._run(f"{TITLE_PROMPT}\n\n--- TRANSCRIÇÃO ---\n{transcript}")
@@ -189,6 +212,22 @@ class ClaudeCli:
             evidence = item.get("evidence")
             suggestions.append(NameSuggestion(label, name.strip(), evidence if isinstance(evidence, str) else ""))
         return suggestions
+
+
+def _last_result_event(out: str) -> dict | None:
+    """Último evento `result` da saída stream-json (uma linha JSON por evento)."""
+    found = None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            found = event
+    return found
 
 
 def _first_json_array(text: str) -> list:
