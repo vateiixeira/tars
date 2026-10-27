@@ -5,37 +5,32 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
 
+from whisper_ditado.meeting.speech import usable
 from whisper_ditado.meeting.timeline import Turn
 
 log = logging.getLogger("ditado")
 
 PIPELINE_ID = "pyannote/speaker-diarization-community-1"
+PYANNOTE_MODEL = "pyannote-community-1"
 SAMPLE_RATE = 16000
+
+# (áudio, trechos de fala em segundos) -> embedding médio dos trechos, ou None se não houver fala suficiente
+Embed = Callable[[np.ndarray, Sequence[tuple[float, float]]], np.ndarray | None]
 
 
 @dataclass
 class DiarizationResult:
     turns: list[Turn] = field(default_factory=list)
     embeddings: dict[str, np.ndarray] = field(default_factory=dict)
-
-
-def _usable(emb) -> np.ndarray | None:
-    """Embedding em float32, ou None se for nulo/não finito.
-
-    O pyannote preenche com zeros os centróides de rótulos sem cluster (mais rótulos que
-    clusters); um vetor assim não identifica ninguém e não pode virar voz salva.
-    """
-    if emb is None:
-        return None
-    vec = np.asarray(emb, dtype=np.float32).reshape(-1)
-    if vec.size == 0 or not np.all(np.isfinite(vec)) or not np.any(vec):
-        return None
-    return vec
+    model: str = ""  # id do modelo dos embeddings ("" = desconhecido: não grava nem casa)
+    engine: str = ""  # "local" | "pyannote" | ""
+    fallback: str | None = None  # tipo do alerta de fallback
+    embed: Embed | None = field(default=None, compare=False, repr=False)
 
 
 class Diarizer:
@@ -129,7 +124,7 @@ class Diarizer:
             labels = output.speaker_diarization.labels()
             used = {t.speaker for t in turns}
             for label, emb in zip(labels, output.speaker_embeddings):
-                vec = _usable(emb)
+                vec = usable(emb)
                 if str(label) in used and vec is not None:
                     embeddings[str(label)] = vec
         return DiarizationResult(turns, embeddings)

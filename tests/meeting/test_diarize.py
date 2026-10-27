@@ -46,3 +46,8 @@ class FakePipeline:
     def __call__(self, file):
         self.calls.append(file)
         return self.output
+
+
+def test_result_defaults_and_embed_not_compared():
+    assert DiarizationResult([], {}) == DiarizationResult([], {}, embed=lambda a, s: None)
+    assert DiarizationResult().model == ""
