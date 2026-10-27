@@ -940,3 +940,17 @@ def test_tick_records_clock_marks(store, settings):
     assert [rel for rel, _ in marks] == [0.0, 10.0, 20.0]
     assert [wall for _, wall in marks] == [
         t0_wall, t0_wall + timedelta(seconds=10), t0_wall + timedelta(seconds=20)]
+
+
+def test_tick_marks_clock_right_after_resume(store, settings):
+    clock, suspended = FakeClock(), [0.0]
+    t0_wall = datetime(2026, 10, 27, 9, 0, 0)
+    rig = Rig(store, settings, clock=clock,
+              now=lambda: t0_wall + timedelta(seconds=clock.t - 1000.0 + suspended[0]))
+    rig.start()
+    rig.advance(25.0)  # marcas em 10 e 20 s
+    suspended[0] = 3600.0  # 1 h suspenso: o relógio monotônico parou, o de parede não
+    rig.advance(0.5)  # primeira rodada após retomar
+    marks = rig.manager._session.clock
+    # print do Flameshot 2 s após retomar (rel. 27 s), antes da próxima marca regular
+    assert marks.to_rel(t0_wall + timedelta(seconds=25.0 + 3600.0 + 2.0)) == 27.0

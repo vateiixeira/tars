@@ -71,6 +71,7 @@ TICK_S = 0.1
 GRAPH_EVERY_S = 2.0
 FEED_EVERY_S = 10.0
 CLOCK_MARK_S = 10.0  # par (relógio da reunião, relógio de parede) para datar prints do Flameshot
+CLOCK_JUMP_S = 1.0  # salto do relógio de parede (suspensão) que antecipa a próxima marca
 DEAD_AFTER_S = 1.0  # sem processo de captura por mais que isso = trilha parou
 MONITOR_MAX_S = 60.0
 LEVEL_FLOOR_DB = -100.0  # -inf não é JSON válido
@@ -102,7 +103,8 @@ class _Session:
     aec_enabled: bool
     health: HealthMonitor
     clock: ClockMarks
-    last_clock_mark: float
+    last_clock_mark: float  # relógio monotônico da última marca
+    last_clock_wall: datetime  # relógio de parede da última marca
     mic_device: str | None = None  # microfone em uso (sem o AEC)
     mic_target: str | None = None  # alvo atual da trilha do microfone (dispositivo ou AEC)
     pc_sink: str | None = None
@@ -272,7 +274,7 @@ class MeetingManager:
                 follow=bool(self._settings.get("follow_call_app")),
                 aec_enabled=bool(self._settings.get("aec_enabled")),
                 health=HealthMonitor(lambda: self._clock() - t0),
-                clock=ClockMarks(started_at), last_clock_mark=t0,
+                clock=ClockMarks(started_at), last_clock_mark=t0, last_clock_wall=started_at,
             )
             self._session = s
             monitor, self._monitor = self._monitor, None
@@ -320,9 +322,13 @@ class MeetingManager:
         if now - s.last_feed >= FEED_EVERY_S and (s.feed is None or s.feed.done()):
             s.last_feed = now
             s.feed = self._gpu.submit(self._feed, s)
-        if now - s.last_clock_mark >= CLOCK_MARK_S:
-            s.last_clock_mark = now
-            s.clock.mark(now - s.t0, self._now())
+        wall = self._now()
+        mono_delta = now - s.last_clock_mark
+        # parede andou mais que o monotônico: o sistema retomou da suspensão, marca já
+        if mono_delta >= CLOCK_MARK_S or (
+                (wall - s.last_clock_wall).total_seconds() - mono_delta > CLOCK_JUMP_S):
+            s.last_clock_mark, s.last_clock_wall = now, wall
+            s.clock.mark(now - s.t0, wall)
         self._update_health(s, now)
 
     # -- prints de tela ----------------------------------------------------------

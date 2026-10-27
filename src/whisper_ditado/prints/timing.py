@@ -10,7 +10,8 @@ class ClockMarks:
 
     O relógio da reunião é monotônico e para durante a suspensão; o de parede (mtime dos
     arquivos) não. Cada marca registra os dois, e `to_rel` extrapola a partir da marca
-    anterior ao instante pedido.
+    anterior ao instante pedido, sem passar da marca seguinte: um instante logo após retomar
+    da suspensão, antes da primeira marca nova, não vira o tempo todo que o sistema dormiu.
     """
 
     def __init__(self, started_at: datetime) -> None:
@@ -21,11 +22,17 @@ class ClockMarks:
         self._marks.sort(key=lambda m: m[1])
 
     def to_rel(self, wall: datetime) -> float:
-        base = self._marks[0]
-        for rel_k, wall_k in self._marks:
-            if wall_k <= wall:
-                base = (rel_k, wall_k)
+        base, nxt = self._marks[0], None
+        for m in self._marks:
+            if m[1] <= wall:
+                base = m
             else:
+                nxt = m
                 break
         rel_k, wall_k = base
-        return max(0.0, rel_k + (wall - wall_k).total_seconds())
+        rel = rel_k + (wall - wall_k).total_seconds()
+        if nxt is not None:
+            rel = min(rel, nxt[0])
+        if wall_k <= wall:
+            rel = max(rel, rel_k)
+        return max(0.0, rel)
