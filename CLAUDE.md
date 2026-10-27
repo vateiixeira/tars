@@ -7,11 +7,11 @@ e [CONTRIBUTING.md](CONTRIBUTING.md) para desenvolvimento e validação.
 ## Worktrees
 
 É recomendável desenvolver features novas num git worktree separado, numa branch
-própria, para não mexer no checkout da `main`. Siga o padrão de diretório irmão
-`../whisper-ditado-<nome>`:
+própria, para não mexer no checkout da `main`. Crie o worktree dentro do projeto, na
+pasta `.worktrees/` (ignorada pelo git), e não em diretórios irmãos:
 
 ```bash
-git worktree add ../whisper-ditado-<nome> -b <branch>
+git worktree add .worktrees/<nome> -b <branch>
 ```
 
 Correções pequenas e ajustes pontuais podem ser feitos direto no checkout atual.
