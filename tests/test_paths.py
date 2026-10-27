@@ -29,3 +29,10 @@ def test_repo_config_dir_points_to_repo_config():
     d = paths.repo_config_dir()
     assert d.name == "config"
     assert (d / "vocabulario.txt").is_file()
+
+
+def test_models_dir_is_private(data_home):
+    d = paths.models_dir()
+    assert d == data_home / "whisper-ditado" / "models" / "sherpa-onnx"
+    assert d.is_dir()
+    assert d.stat().st_mode & 0o777 == 0o700

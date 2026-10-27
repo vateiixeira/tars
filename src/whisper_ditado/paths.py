@@ -19,6 +19,13 @@ def meeting_dir(meeting_id: str) -> Path:
     return d
 
 
+def models_dir() -> Path:
+    """Cache dos modelos ONNX do sherpa-onnx, criado com 0700."""
+    d = data_dir() / "models" / "sherpa-onnx"
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return d
+
+
 def db_path() -> Path:
     return data_dir() / "ditado.db"
 
