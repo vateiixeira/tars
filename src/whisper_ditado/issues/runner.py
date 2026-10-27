@@ -42,12 +42,20 @@ class StreamRun:
 
     def tool_calls(self, name: str) -> list[ToolCall]:
         """Chamadas da ferramenta `name`, na ordem, já pareadas com o `tool_result` (se chegou)."""
+        return self._calls(lambda n: n == name)
+
+    def calls_with_prefix(self, prefix: str) -> list[ToolCall]:
+        """Chamadas de qualquer ferramenta cujo nome começa com `prefix`, na ordem."""
+        return self._calls(lambda n: n.startswith(prefix))
+
+    def _calls(self, wanted) -> list[ToolCall]:
         results: dict[str, dict] = {}
         for block in self._blocks("user", "tool_result"):
             results[str(block.get("tool_use_id"))] = block
         calls = []
         for block in self._blocks("assistant", "tool_use"):
-            if block.get("name") != name:
+            name = block.get("name")
+            if not isinstance(name, str) or not wanted(name):
                 continue
             got = results.get(str(block.get("id")))
             calls.append(ToolCall(

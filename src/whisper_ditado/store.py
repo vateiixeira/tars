@@ -934,13 +934,16 @@ class Store:
     def set_task_print_ids(self, task_id: str, print_ids: list[str]) -> TaskSuggestion:
         """Troca os prints anexados à sugestão (todos devem ser prints da reunião dela).
 
-        Levanta `TaskLocked` se a sugestão já está sendo criada/foi criada/está incerta,
-        `KeyError` se não existe e `ValueError` se algum id não é print da reunião.
+        Mudar a lista marca `edited` (um novo levantamento preserva a escolha do operador);
+        a mesma lista não grava nada. Levanta `TaskLocked` se a sugestão já está sendo
+        criada/foi criada/está incerta, `KeyError` se não existe e `ValueError` se algum id
+        não é print da reunião.
         """
         ids = list(dict.fromkeys(print_ids))
         with self._tx() as c:
             row = c.execute(
-                "SELECT meeting_id, create_state FROM task_suggestions WHERE id=?", (task_id,)
+                "SELECT meeting_id, create_state, print_ids_json FROM task_suggestions WHERE id=?",
+                (task_id,),
             ).fetchone()
             if row is None:
                 raise KeyError(task_id)
@@ -954,10 +957,11 @@ class Store:
                 ).fetchone()[0]
                 if found != len(ids):
                     raise ValueError("print inexistente nesta reunião")
-            c.execute(
-                "UPDATE task_suggestions SET print_ids_json=?, updated_at=? WHERE id=?",
-                (json.dumps(ids), datetime.now().isoformat(), task_id),
-            )
+            if json.loads(row["print_ids_json"]) != ids:
+                c.execute(
+                    "UPDATE task_suggestions SET print_ids_json=?, edited=1, updated_at=? WHERE id=?",
+                    (json.dumps(ids), datetime.now().isoformat(), task_id),
+                )
         return self.get_task(task_id)
 
     def set_attach_state(self, task_id: str, state: str, error: str | None = None) -> None:

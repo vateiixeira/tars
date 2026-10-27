@@ -260,3 +260,20 @@ def test_cancelled_scope_does_not_start_process(env):
     with pytest.raises(ProcessCancelled), cancellation_scope(cancellation):
         run_stream(ClaudeCli(FAKE, None), "P", cwd=None, tools="", allowed=[], timeout_s=60)
     assert not log.path.exists()
+
+
+def test_calls_with_prefix_keeps_order_and_names():
+    def use(i, name):
+        return {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"u{i}", "name": name, "input": {"i": i}}]}}
+
+    def res(i, text, err=False):
+        return {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"u{i}", "content": text, "is_error": err}]}}
+
+    run = StreamRun(events=[use(0, "mcp__issues__a"), res(0, "ok"), use(1, "outra"), res(1, "x"),
+                            use(2, "mcp__issues__b"), res(2, "falhou", True)],
+                    result=None, is_error=False, timed_out=False, returncode=0, stderr="")
+    assert run.calls_with_prefix("mcp__issues__") == [
+        ToolCall("mcp__issues__a", {"i": 0}, "ok", False), ToolCall("mcp__issues__b", {"i": 2}, "falhou", True)]
+    assert run.calls_with_prefix("nada") == []

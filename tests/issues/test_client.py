@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from whisper_ditado.issues.client import (
-    SERVER, TOOL_CREATE, TOOL_OPTIONS, CreateOutcome, IssueFields, IssueClient, IssueError, IssueOptions,
+    SERVER, TOOL_CREATE, TOOL_OPTIONS, AttachOutcome, CreateOutcome, IssueFields, IssueClient, IssueError, IssueOptions,
     Option, OptionsCache, issue_fields_from,
 )
 from whisper_ditado.claude_cli import ClaudeCli
@@ -562,3 +562,90 @@ def test_options_cache_is_invalidated_when_server_name_changes(env):
     assert cache.peek() is None
     env.scenario(calls=[{**options_call(), "name": "mcp__another-tracker__listar_opcoes"}])
     assert cache.get().username == "vi"
+
+
+# ----- anexo dos prints -----
+
+ATTACH_TOOL = "mcp__issues__anexar_arquivo"
+
+
+@pytest.fixture
+def jpgs(tmp_path):
+    files = []
+    for label in ("P1", "P3"):
+        path = tmp_path / f"print-{label}.jpg"
+        path.write_bytes(b"\xff\xd8 jpeg " + label.encode())
+        files.append((label, path))
+    return files
+
+
+def attach_call(label="P1", **kw):
+    base = {"name": ATTACH_TOOL, "input": {"issue": 217, "content": f"@@PRINT_B64:{label}@@"}, "result": "ok"}
+    base.update(kw)
+    return base
+
+
+def test_attach_unsupported_when_no_calls_and_sem_suporte(env, jpgs):
+    env.scenario(final="SEM_SUPORTE")
+    out = env.client.attach_prints(217, "https://issues.example.test/217", jpgs)
+    assert out == AttachOutcome("unsupported", "O MCP de issues não aceita imagens")
+
+
+def test_attach_sent_when_all_calls_ok(env, jpgs):
+    env.scenario(calls=[options_call(), attach_call("P1"), attach_call("P3")])
+    assert env.client.attach_prints(217, "https://issues.example.test/217", jpgs) == AttachOutcome("sent", None)
+    stdin = env.log()["stdin"]
+    assert "A issue 217 (https://issues.example.test/217)" in stdin
+    assert "- P1: print-P1.jpg\n- P3: print-P3.jpg" in stdin and "@@PRINT_B64:<rótulo>@@" in stdin
+
+
+def test_attach_failed_when_some_call_errors(env, jpgs):
+    env.scenario(calls=[attach_call("P1"), attach_call("P3", result="HTTP 413", is_error=True)])
+    out = env.client.attach_prints(217, None, jpgs)
+    assert out == AttachOutcome("failed", "Alguns prints não foram enviados ao MCP de issues")
+
+
+def test_attach_failed_when_marker_label_is_unknown(env, jpgs):
+    env.scenario(calls=[attach_call("P9")])  # o hook bloqueia: rótulo fora do mapa
+    assert env.client.attach_prints(217, None, jpgs).state == "failed"
+
+
+def test_attach_blocks_create_tool(env, jpgs):
+    env.scenario(calls=[create_call()])
+    out = env.client.attach_prints(217, None, jpgs)
+    assert out.state == "failed"
+
+
+def test_attach_runs_with_server_tools_and_guard_hook(env, jpgs):
+    env.scenario(calls=[attach_call()])
+    env.client.attach_prints(217, None, jpgs)
+    assert env.argv_after("--allowedTools") == "mcp__issues" and env.argv_after("--tools") == ""
+    [entry] = json.loads(env.argv_after("--settings"))["hooks"]["PreToolUse"]
+    assert entry["matcher"] == "mcp__issues__.*"
+    command = entry["hooks"][0]["command"]
+    assert command.startswith(f"{sys.executable} -I ") and command.endswith(" || exit 2")
+    assert "attach_guard.py" in command and TOOL_CREATE in command
+    assert json.loads(env.argv_after("--mcp-config"))["mcpServers"][SERVER]["url"] == URL
+
+
+def test_attach_uses_custom_server_name(env, jpgs):
+    env.client.server_fn = lambda: "tracker"
+    env.scenario(calls=[{**attach_call(), "name": "mcp__tracker__anexar"}])
+    assert env.client.attach_prints(1, None, jpgs).state == "sent"
+    assert env.argv_after("--allowedTools") == "mcp__tracker"
+    entry = json.loads(env.argv_after("--settings"))["hooks"]["PreToolUse"][0]
+    assert entry["matcher"] == "mcp__tracker__.*" and "mcp__tracker__criar_issue" in entry["hooks"][0]["command"]
+    assert "no tracker" in env.log()["stdin"]
+
+
+def test_attach_not_logged_in_is_failed(env, jpgs):
+    env.scenario(mcp_status="needs-auth")
+    out = env.client.attach_prints(217, None, jpgs)
+    assert out.state == "failed" and "Sem login" in out.error
+
+
+def test_attach_never_raises(tmp_path, jpgs):
+    client = IssueClient(ClaudeCli(str(tmp_path / "nao-existe"), None), lambda: URL)
+    out = client.attach_prints(217, None, jpgs)
+    assert out.state == "failed" and "Claude Code não encontrado" in out.error
+    assert IssueClient(ClaudeCli(FAKE, None), lambda: None).attach_prints(1, None, jpgs).state == "failed"

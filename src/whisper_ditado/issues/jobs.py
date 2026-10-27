@@ -12,18 +12,22 @@ Cada passo grava o estado em `meeting_jobs` e publica `meeting_job` (`running` e
 quando as sugestões mudam, publica `tasks_changed`. Reunião excluída no meio do caminho: o trabalho
 termina em silêncio (o banco devolve `False`/`[]`). Nenhum erro escapa das threads, e nenhuma
 sugestão fica em `creating`: toda saída da criação grava `created`, `failed` ou `uncertain`.
+Depois de uma criação `created`, os prints da sugestão são anexados à issue (melhor esforço):
+o resultado vai só para `attach_state` e nunca muda `create_state`.
 """
 
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 from pathlib import Path
 
 from whisper_ditado.issues import runner
 from whisper_ditado.issues.client import IssueClient, IssueError, OptionsCache, issue_fields_from
 from whisper_ditado.issues.scan import run_scan
-from whisper_ditado.prints.images import ClaudeImages, load_for_claude
+from whisper_ditado.prints.files import print_path
+from whisper_ditado.prints.images import MAX_EDGE, ClaudeImages, jpeg_bytes, load_for_claude, print_labels
 from whisper_ditado.claude_cli import ClaudeCli, ClaudeError, sync_summary_cli, sync_tasks_cli, transcript_text
 from whisper_ditado.settings import Settings
 from whisper_ditado.procs import Cancellation, ProcessCancelled, cancellation_scope
@@ -39,6 +43,7 @@ SCAN_UNEXPECTED = "Erro inesperado no levantamento"
 CREATE_UNEXPECTED = "Erro inesperado na criação — confira no MCP de issues"
 NO_TRANSCRIPT_SCAN = "A reunião não tem transcrição para levantar tarefas"
 SHUTDOWN_NOT_SENT = "Interrompido: o serviço está encerrando — nada foi criado"
+ATTACH_UNEXPECTED = "Erro inesperado ao anexar os prints"
 
 
 class JobBusy(Exception):
@@ -248,7 +253,52 @@ class PostMeetingJobs:
             # `create_issue` não levanta; se levantou (ou o estado era inválido), a issue pode existir.
             log.exception("Falha ao criar a sugestão %s", task_id)
             self._store.finish_create(task_id, "uncertain", error=CREATE_UNEXPECTED)
+            return task.meeting_id
+        if outcome.state == "created" and outcome.number is not None:
+            self._attach(task_id, outcome.number, outcome.url)
         return task.meeting_id
+
+    def _attach(self, task_id: str, number: int, url: str | None) -> None:
+        """Anexa à issue criada os prints da sugestão que ainda existem em disco (melhor esforço)."""
+        try:
+            task = self._store.get_task(task_id)
+            if task is None or not task.print_ids or self._stopping.is_set():
+                return
+            label_of = {pid: label for label, pid in print_labels(self._store.list_prints(task.meeting_id)).items()}
+            found = []
+            for print_id in task.print_ids:
+                p = self._store.get_print(print_id)
+                if p is None or print_id not in label_of:
+                    continue
+                path = print_path(p)
+                if path.is_file():
+                    found.append((label_of[print_id], path))
+            if not found:
+                return
+        except Exception:
+            log.exception("Não foi possível preparar os prints da sugestão %s", task_id)
+            self._set_attach(task_id, "failed", ATTACH_UNEXPECTED)
+            return
+        self._set_attach(task_id, "sending")
+        self._bus.publish({"type": "tasks_changed", "meeting_id": task.meeting_id})  # a issue já aparece criada
+        try:
+            with tempfile.TemporaryDirectory(prefix="whisper-ditado-prints-", ignore_cleanup_errors=True) as tmp:
+                files = []
+                for label, path in found:
+                    jpg = Path(tmp) / f"print-{label}.jpg"
+                    jpg.write_bytes(jpeg_bytes(path, MAX_EDGE))
+                    files.append((label, jpg))
+                result = self._issues_client.attach_prints(number, url, files)
+            self._store.set_attach_state(task_id, result.state, result.error)  # estado inválido cai no except
+        except Exception:
+            log.exception("Falha ao anexar os prints da sugestão %s", task_id)
+            self._set_attach(task_id, "failed", ATTACH_UNEXPECTED)
+
+    def _set_attach(self, task_id: str, state: str, error: str | None = None) -> None:
+        try:
+            self._store.set_attach_state(task_id, state, error)
+        except Exception:
+            log.exception("Não foi possível gravar o estado do anexo de %s", task_id)
 
     def _finish_create(self, task_id: str, state: str, *, error: str) -> str | None:
         try:

@@ -324,6 +324,20 @@ def test_set_task_print_ids_validates_and_locks(store, mid):
         store.set_task_print_ids(t.id, ["p1"])
 
 
+def test_set_task_print_ids_marks_edited_only_on_change(store, mid):
+    store.add_print(mid, print_id="p1", at_s=1.0, source="native", file_name="p1.png")
+    store.add_print(mid, print_id="p2", at_s=2.0, source="native", file_name="p2.png")
+    [t] = store.replace_scan_tasks(mid, [{"fields": {"title": "x"}, "print_ids": ["p1", "p2"]}])
+    same = store.set_task_print_ids(t.id, ["p1", "p2"])
+    assert same.edited is False and same.updated_at == t.updated_at
+    changed = store.set_task_print_ids(t.id, ["p2"])
+    assert changed.edited is True and changed.print_ids == ["p2"] and changed.updated_at >= t.updated_at
+    # um novo levantamento preserva a escolha do operador
+    store.replace_scan_tasks(mid, [{"fields": {"title": "y"}, "print_ids": ["p1"]}])
+    kept = store.get_task(t.id)
+    assert kept is not None and kept.print_ids == ["p2"]
+
+
 def test_scan_items_keep_print_ids_and_attach_defaults(store, mid):
     store.add_print(mid, print_id="p1", at_s=1.0, source="native", file_name="p1.png")
     [t] = store.replace_scan_tasks(mid, [{"fields": {"title": "x"}, "print_ids": ["p1"]}])

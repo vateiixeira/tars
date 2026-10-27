@@ -5,7 +5,7 @@ import pytest
 
 from whisper_ditado.issues import jobs as jobs_mod
 from whisper_ditado.issues.jobs import JobBusy, PostMeetingJobs
-from whisper_ditado.issues.client import CreateOutcome, IssueError, IssueOptions, Option
+from whisper_ditado.issues.client import AttachOutcome, CreateOutcome, IssueError, IssueOptions, Option
 from whisper_ditado.issues.scan import ScanItem
 from whisper_ditado.claude_cli import ClaudeError
 from whisper_ditado.settings import Settings
@@ -69,6 +69,14 @@ class FakeIssue:
     def __init__(self):
         self.outcomes = []
         self.sent = []
+        self.attached = []
+        self.attach_outcome = AttachOutcome("sent", None)
+
+    def attach_prints(self, number, url, files):
+        self.attached.append((number, url, [(label, path.name, path.read_bytes()) for label, path in files]))
+        if isinstance(self.attach_outcome, Exception):
+            raise self.attach_outcome
+        return self.attach_outcome
 
     def create_issue(self, fields):
         self.sent.append(fields)
@@ -694,6 +702,109 @@ def test_create_does_not_wait_for_the_claude_worker(rig, store, mid):
     assert store.get_task(ids[0]).create_state == "created"
     release.set()
     rig.wait_idle()
+
+
+# -- anexo dos prints --------------------------------------------------------------
+
+
+def _task_with_prints(store, mid, tmp_path, n_prints=2, attach=(1,)):
+    """Cria prints na reunião e uma sugestão (reservada) que anexa os de índice em `attach` (0-based)."""
+    from whisper_ditado.prints.files import store_print
+
+    prints = [store_print(store, mid, _png(tmp_path / f"a{i}.png", "red"), at_s=float(i), source="native",
+                          move=False) for i in range(n_prints)]
+    t = store.add_task(mid, {"kind": "tarefa", "title": "T", "product_id": 4, "assignee_id": 9, "team_id": 3,
+                             "stage_id": 2}, origin="claude", print_ids=[prints[i].id for i in attach])
+    store.claim_tasks_for_create([t.id])
+    return t.id, prints
+
+
+def test_create_then_attach_records_state(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints import images
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, attach=(1,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "https://k/7", None)]
+    seen = []
+    rig.issues_client.attach_outcome = AttachOutcome("sent", None)
+    real_attach = rig.issues_client.attach_prints
+
+    def attach(number, url, files):
+        seen.append((store.get_task(task_id).create_state, store.get_task(task_id).attach_state))
+        return real_attach(number, url, files)
+
+    rig.issues_client.attach_prints = attach
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(number, url, files)] = rig.issues_client.attached
+    from whisper_ditado.prints.files import print_path
+    assert (number, url) == (7, "https://k/7")
+    assert files == [("P2", "print-P2.jpg", images.jpeg_bytes(print_path(prints[1]), images.MAX_EDGE))]
+    assert seen == [("created", "sending")]
+    t = store.get_task(task_id)
+    assert (t.create_state, t.issue_number, t.attach_state, t.attach_error) == ("created", 7, "sent", None)
+    assert {"type": "tasks_changed", "meeting_id": mid} in rig.events("tasks_changed")
+
+
+def test_attach_records_unsupported(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.issues_client.attach_outcome = AttachOutcome("unsupported", "O MCP de issues não aceita imagens")
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert (t.attach_state, t.attach_error) == ("unsupported", "O MCP de issues não aceita imagens")
+
+
+def test_attach_skips_missing_files(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import print_path
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, n_prints=2, attach=(0, 1))
+    print_path(prints[0]).unlink()
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(_, _, files)] = rig.issues_client.attached
+    assert [(label, name) for label, name, _ in files] == [("P2", "print-P2.jpg")]
+
+    other_id, others = _task_with_prints(store, mid, tmp_path, n_prints=1, attach=(0,))
+    print_path(others[0]).unlink()
+    rig.issues_client.outcomes = [CreateOutcome("created", 8, "u", None)]
+    rig.jobs.create([other_id])
+    rig.wait_idle()
+    assert len(rig.issues_client.attached) == 1  # sem arquivos: o anexo nem é tentado
+    t = store.get_task(other_id)
+    assert (t.create_state, t.attach_state) == ("created", "none")
+
+
+def test_attach_not_called_when_not_created_or_without_prints(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    plain = make_tasks(store, mid, 1)
+    rig.issues_client.outcomes = [CreateOutcome("failed", None, None, "recusado"),
+                                  CreateOutcome("created", 9, "u", None)]
+    rig.jobs.create([task_id, *plain])
+    rig.wait_idle()
+    assert rig.issues_client.attached == []
+    assert store.get_task(task_id).attach_state == "none" and store.get_task(plain[0]).attach_state == "none"
+
+
+def test_attach_failure_keeps_issue_created(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.issues_client.attach_outcome = RuntimeError("bug")
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert (t.create_state, t.issue_number, t.attach_state) == ("created", 7, "failed")
+    assert t.attach_error
+
+
+def test_attach_invalid_outcome_state_is_failed_not_stuck_sending(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.issues_client.attach_outcome = AttachOutcome("nope", None)
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    assert store.get_task(task_id).attach_state == "failed"
 
 
 # -- encerramento ----------------------------------------------------------------

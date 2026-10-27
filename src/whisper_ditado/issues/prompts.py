@@ -43,3 +43,11 @@ OPTIONS_PROMPT = "Chame a ferramenta listar_opcoes do issues uma vez, sem argume
 CREATE_PROMPT = """Chame a ferramenta criar_issue do issues exatamente uma vez, com exatamente estes argumentos (JSON), sem mudar nenhum caractere e sem acrescentar campos:
 {fields}
 Depois responda só com o número da issue criada."""
+
+ATTACH_PROMPT = """A issue {number} ({url}) acabou de ser criada no {server}. Veja se alguma ferramenta do {server} permite anexar imagens a uma issue existente.
+- Se existir, anexe a essa issue cada print listado abaixo. Onde a ferramenta pedir o conteúdo do arquivo, passe exatamente o marcador indicado, sem alterá-lo: @@PRINT_B64:<rótulo>@@ para base64 puro ou @@PRINT_DATAURL:<rótulo>@@ para data URL. Os arquivos são JPEG (image/jpeg).
+- Nunca chame criar_issue nem altere outros campos da issue.
+- Se não houver ferramenta para anexar imagens, não chame nenhuma ferramenta e responda só SEM_SUPORTE.
+Prints:
+{prints}
+Ao terminar, responda só OK."""

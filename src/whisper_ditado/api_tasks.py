@@ -53,9 +53,11 @@ class TaskFieldsBody(BaseModel):
 
 class TaskPatchBody(TaskFieldsBody):
     discarded: bool | None = None
+    print_ids: list[str] | None = None
 
     def changes(self) -> dict:
         changes = self.sent()
+        changes.pop("print_ids", None)
         if changes.get("discarded") is None:
             changes.pop("discarded", None)
         return changes
@@ -109,6 +111,7 @@ def task_json(t: TaskSuggestion) -> dict:
         "create_state": t.create_state, "create_error": t.create_error,
         "issue_number": t.issue_number, "issue_url": t.issue_url,
         "repeats_number": t.repeats_number, "created_at": t.created_at, "updated_at": t.updated_at,
+        "print_ids": t.print_ids, "attach_state": t.attach_state, "attach_error": t.attach_error,
     }
 
 
@@ -193,6 +196,9 @@ def tasks_router(ctx, get_meeting: Callable[[str], object]) -> APIRouter:
     @router.patch("/tasks/{task_id}")
     def patch_task(task_id: str, body: TaskPatchBody) -> dict:
         try:
+            # Os prints primeiro: um id estranho (400) recusa o pedido antes de gravar o conteúdo.
+            if body.print_ids is not None:
+                store.set_task_print_ids(task_id, body.print_ids)
             task = store.update_task(task_id, body.changes())
         except KeyError:
             raise HTTPException(404, NOT_FOUND) from None

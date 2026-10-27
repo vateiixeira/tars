@@ -516,3 +516,27 @@ def test_create_stored_fields_equal_request_even_after_concurrent_patch(client, 
     assert {k: getattr(saved, k) for k in sent} == sent and saved.create_state == "creating"
     late = client.patch(f"/api/tasks/{t.id}", json={"title": "Tarde demais"})
     assert late.status_code == 409 and ctx.store.get_task(t.id).title == "Da tela"
+
+
+def test_patch_task_print_ids_and_json_fields(client, ctx, mid):
+    for pid in ("p1", "p2"):
+        ctx.store.add_print(mid, print_id=pid, at_s=1.0, source="native", file_name=f"{pid}.png")
+    t = ctx.store.add_task(mid, FULL, origin="claude", print_ids=["p1", "p2"])
+    data = client.get(f"/api/meetings/{mid}/tasks").json()["items"][0]
+    assert (data["print_ids"], data["attach_state"], data["attach_error"]) == (["p1", "p2"], "none", None)
+
+    r = client.patch(f"/api/tasks/{t.id}", json={"print_ids": ["p2"]})
+    assert r.status_code == 200 and r.json()["print_ids"] == ["p2"] and r.json()["edited"] is True
+    assert r.json()["title"] == "Pedido"
+    assert len(changed(ctx, mid)) == 1
+
+    r = client.patch(f"/api/tasks/{t.id}", json={"print_ids": ["p2", "estranho"]})
+    assert r.status_code == 400 and ctx.store.get_task(t.id).print_ids == ["p2"]
+
+    r = client.patch(f"/api/tasks/{t.id}", json={"title": "Junto", "print_ids": []})
+    assert r.status_code == 200 and (r.json()["title"], r.json()["print_ids"]) == ("Junto", [])
+
+    ctx.store.claim_tasks_for_create([t.id])
+    r = client.patch(f"/api/tasks/{t.id}", json={"print_ids": ["p1"]})
+    assert r.status_code == 409 and r.json() == {"detail": BUSY_MSG}
+    assert ctx.store.get_task(t.id).print_ids == []
