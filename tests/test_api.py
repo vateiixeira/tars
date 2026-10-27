@@ -1,14 +1,17 @@
+import io
 import json
 import os
 import shutil
 import stat
 import subprocess
 import time
+import zipfile
 from datetime import datetime
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from PIL import Image
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -17,6 +20,8 @@ from whisper_ditado.audio import pwgraph
 from whisper_ditado.claude_cli import ClaudeError, NameSuggestion
 from whisper_ditado.events import EventBus
 from whisper_ditado.meeting.session import MeetingStateError
+from whisper_ditado.prints import files as print_files
+from whisper_ditado.prints import images as print_images
 from whisper_ditado.settings import Settings
 from whisper_ditado.store import Alert, Segment, Speaker, Store
 
@@ -37,6 +42,12 @@ class FakeMeetings:
         self.active_alerts = []
         self.monitor_calls = []
         self.reprocessed = []
+        self.print_result = False
+        self.print_calls = 0
+
+    def capture_print(self):
+        self.print_calls += 1
+        return self.print_result
 
     def start(self):
         if self.state == "recording":
@@ -79,9 +90,11 @@ class FakeClaude:
         self.effort = None
         self.error = None
         self.calls = []
+        self.summarize_images = []
 
-    def summarize(self, transcript, prompt):
+    def summarize(self, transcript, prompt, images=()):
         self.calls.append(("summarize", transcript, prompt))
+        self.summarize_images.append(list(images))
         if self.error:
             raise self.error
         return "## Pontos principais\n- tudo certo"
@@ -182,7 +195,7 @@ def test_status_without_dictation(ctx):
     assert body["dictation"]["enabled"] is False
     assert body["dictation"]["active"] is False
     assert body["meeting"] == {"state": "idle", "meeting_id": None, "started_at": None,
-                               "followed_app": None, "alerts": []}
+                               "followed_app": None, "print_mode": "off", "alerts": []}
 
 
 def test_start_stop_conflicts(client, ctx):
@@ -224,7 +237,7 @@ def test_meeting_detail_shape(client, ctx):
     body = client.get(f"/api/meetings/{mid}").json()
     assert set(body) == {"id", "title", "started_at", "ended_at", "status", "error",
                          "followed_app", "speakers", "segments", "summary", "alerts",
-                         "summary_job"}
+                         "summary_job", "prints"}
     assert body["title"] == "Planejamento"
     assert body["followed_app"] == "Zoom"
     assert body["summary"] == "resumo aqui"
@@ -485,6 +498,168 @@ def test_export_markdown(client, ctx):
     other = ctx.store.create_meeting(datetime(2026, 10, 1, 8, 0))
     assert "## Resumo" not in client.get(f"/api/meetings/{other.id}/export.md").text
     assert client.get("/api/meetings/zzz/export.md").status_code == 404
+
+
+# -- prints de tela ---------------------------------------------------------------------
+
+
+def add_print(ctx, mid, at_s, size=(1200, 600), name="p.png", fmt="PNG"):
+    src = paths.data_dir() / "src" / name
+    src.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size, (10, 120, 200)).save(src, fmt)
+    return print_files.store_print(ctx.store, mid, src, at_s=at_s, source="native", move=True)
+
+
+def test_meeting_detail_lists_prints_with_labels(client, ctx):
+    mid = make_meeting(ctx)
+    p1, p2 = add_print(ctx, mid, 2.0, name="a.png"), add_print(ctx, mid, 30.0, name="b.png")
+    body = client.get(f"/api/meetings/{mid}").json()
+    assert [(p["id"], p["label"], p["at_s"], p["source"], p["sent_to_claude"])
+            for p in body["prints"]] == [(p1.id, "P1", 2.0, "native", True),
+                                         (p2.id, "P2", 30.0, "native", True)]
+    assert body["prints"][0]["created_at"] == p1.created_at
+    other = ctx.store.create_meeting(datetime(2026, 10, 1, 8, 0))
+    assert client.get(f"/api/meetings/{other.id}").json()["prints"] == []
+
+
+def test_meeting_detail_flags_prints_beyond_the_claude_limit(client, ctx, monkeypatch):
+    mid = make_meeting(ctx)
+    monkeypatch.setattr(print_images, "MAX_IMAGES", 2)
+    for i in range(3):
+        add_print(ctx, mid, float(i), name=f"{i}.png")
+    sent = [p["sent_to_claude"] for p in client.get(f"/api/meetings/{mid}").json()["prints"]]
+    assert sent == [True, True, False]
+
+
+def test_meeting_detail_does_not_decode_images(client, ctx, monkeypatch):
+    mid = make_meeting(ctx)
+    add_print(ctx, mid, 1.0)
+
+    def boom(*a, **k):
+        raise AssertionError("não deve decodificar imagens no GET")
+    monkeypatch.setattr(print_images, "load_for_claude", boom)
+    monkeypatch.setattr(print_images, "jpeg_bytes", boom)
+    assert client.get(f"/api/meetings/{mid}").status_code == 200
+
+
+def test_print_image_thumb_and_full(client, ctx):
+    mid = make_meeting(ctx)
+    p = add_print(ctx, mid, 1.0, size=(2000, 1000))
+    thumb = client.get(f"/api/meetings/{mid}/prints/{p.id}?size=thumb")
+    assert thumb.status_code == 200 and thumb.headers["content-type"] == "image/jpeg"
+    img = Image.open(io.BytesIO(thumb.content))
+    assert img.format == "JPEG" and max(img.size) == 480
+    assert client.get(f"/api/meetings/{mid}/prints/{p.id}").content == img_bytes(p)  # padrão: miniatura
+    full = client.get(f"/api/meetings/{mid}/prints/{p.id}?size=full")
+    assert full.status_code == 200 and full.headers["content-type"] == "image/png"
+    assert full.content == print_files.print_path(p).read_bytes()
+    assert client.get(f"/api/meetings/{mid}/prints/{p.id}?size=huge").status_code == 422
+
+
+def img_bytes(p):
+    return print_images.jpeg_bytes(print_files.print_path(p), print_images.THUMB_EDGE)
+
+
+def test_print_image_jpeg_full_media_type(client, ctx):
+    mid = make_meeting(ctx)
+    p = add_print(ctx, mid, 1.0, name="a.jpg", fmt="JPEG")
+    assert client.get(f"/api/meetings/{mid}/prints/{p.id}?size=full").headers[
+        "content-type"] == "image/jpeg"
+
+
+def test_print_image_404s(client, ctx):
+    mid = make_meeting(ctx)
+    p = add_print(ctx, mid, 1.0)
+    other = ctx.store.create_meeting(datetime(2026, 10, 1, 8, 0))
+    assert client.get(f"/api/meetings/{other.id}/prints/{p.id}").status_code == 404
+    assert client.get(f"/api/meetings/{mid}/prints/zzz").status_code == 404
+    assert client.get(f"/api/meetings/zzz/prints/{p.id}").status_code == 404
+    print_files.print_path(p).unlink()
+    for size in ("thumb", "full"):
+        assert client.get(f"/api/meetings/{mid}/prints/{p.id}?size={size}").status_code == 404
+
+
+def test_print_image_corrupt_returns_404(client, ctx):
+    mid = make_meeting(ctx)
+    p = add_print(ctx, mid, 1.0)
+    print_files.print_path(p).write_bytes(b"isto nao e uma imagem")
+    r = client.get(f"/api/meetings/{mid}/prints/{p.id}?size=thumb")
+    assert r.status_code == 404 and r.json()["detail"] == "Print ilegível"
+
+
+def test_delete_print_removes_file_and_publishes(client, ctx):
+    mid = make_meeting(ctx)
+    p = add_print(ctx, mid, 1.0)
+    path = print_files.print_path(p)
+    events = []
+    ctx.bus.publish = events.append
+    r = client.delete(f"/api/meetings/{mid}/prints/{p.id}")
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert not path.exists() and ctx.store.get_print(p.id) is None
+    assert {"type": "tasks_changed", "meeting_id": mid} in events
+    assert {"type": "meeting_updated", "meeting_id": mid, "status": "ready"} in events
+    assert client.delete(f"/api/meetings/{mid}/prints/{p.id}").status_code == 404
+
+
+def test_delete_print_of_another_meeting_is_404(client, ctx):
+    mid = make_meeting(ctx)
+    p = add_print(ctx, mid, 1.0)
+    other = ctx.store.create_meeting(datetime(2026, 10, 1, 8, 0))
+    assert client.delete(f"/api/meetings/{other.id}/prints/{p.id}").status_code == 404
+    assert ctx.store.get_print(p.id) is not None
+
+
+def test_take_print_route(client, ctx):
+    r = client.post("/api/meetings/print")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "Nenhuma reunião gravando com o print nativo ligado"
+    ctx.meetings.print_result = True
+    r = client.post("/api/meetings/print")
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    assert ctx.meetings.print_calls == 2
+
+
+def test_status_has_print_mode(client, ctx):
+    assert client.get("/api/status").json()["meeting"]["print_mode"] == "off"
+    ctx.settings.update({"print_mode": "native"})
+    assert client.get("/api/status").json()["meeting"]["print_mode"] == "native"
+
+
+def test_summarize_sends_prints(client, ctx):
+    mid = make_meeting(ctx)
+    add_print(ctx, mid, 2.0)
+    assert client.post(f"/api/meetings/{mid}/summary").status_code == 200
+    (images,) = ctx.claude.summarize_images
+    assert [(i.label, i.at_s, i.media_type) for i in images] == [("P1", 2.0, "image/jpeg")]
+
+
+def test_summarize_without_prints_sends_no_images(client, ctx):
+    mid = make_meeting(ctx)
+    assert client.post(f"/api/meetings/{mid}/summary").status_code == 200
+    assert ctx.claude.summarize_images == [[]]
+
+
+def test_export_zip_contains_md_and_prints(client, ctx):
+    mid = make_meeting(ctx)
+    p = add_print(ctx, mid, 2.0)
+    broken = add_print(ctx, mid, 4.0, name="b.png")
+    print_files.print_path(broken).unlink()  # arquivo sumiu: fica fora do zip
+    r = client.get(f"/api/meetings/{mid}/export.zip")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    assert r.headers["content-disposition"] == 'attachment; filename="reuniao-20261019-1430.zip"'
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert zf.namelist() == ["reuniao.md", "prints/P01-00-02.png"]
+    md = zf.read("reuniao.md").decode()
+    assert "[00:01] Eu: Bom dia, pessoal\n![P1 — 00:02](prints/P01-00-02.png)\n[00:03]" in md
+    assert "P02" not in md
+    assert zf.read("prints/P01-00-02.png") == print_files.print_path(p).read_bytes()
+    assert client.get("/api/meetings/zzz/export.zip").status_code == 404
+
+
+def test_export_markdown_unchanged_by_prints(client, ctx):
+    mid = make_meeting(ctx)
+    add_print(ctx, mid, 2.0)
+    assert "![P1" not in client.get(f"/api/meetings/{mid}/export.md").text
 
 
 def _tone(path, freq, seconds=2.0, fmt="opus"):
