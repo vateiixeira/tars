@@ -181,7 +181,7 @@ async function removeToken(): Promise<void> {
           type="range"
           min="0.1"
           max="0.95"
-          step="0.05"
+          step="0.01"
           :value="threshold"
           @input="form.clearError(thresholdKey)"
           @change="saveThreshold"

@@ -12,7 +12,9 @@ const base = {
   auto_title: true,
   auto_summary: true,
   summary_prompt: "Resuma.",
-  voice_match_threshold: 0.6,
+  diarizer: "local",
+  voice_match_threshold_local: 0.62,
+  voice_match_threshold_pyannote: 0.6,
   meeting_model_idle_sec: 120,
   hf_token_set: false,
   print_mode: "off",
@@ -84,5 +86,19 @@ describe("MeetingsSection prints", () => {
     await w.get("#meet-print-folder").trigger("change");
     await flushPromises();
     expect(w.text()).toContain("A pasta precisa existir");
+  });
+});
+
+describe("MeetingsSection limiar de voz", () => {
+  it("usa passo de 0,01 para o padrão calibrado cair num passo do slider", async () => {
+    const { w, putSettings } = await mountSection();
+    const range = w.get<HTMLInputElement>("#meet-threshold");
+    expect(range.attributes("step")).toBe("0.01");
+    expect(range.element.value).toBe("0.62");
+    expect(w.get('[data-test="threshold-value"]').text()).toBe("0,62");
+    await range.setValue("0.63");
+    await range.trigger("change");
+    await flushPromises();
+    expect(putSettings).toHaveBeenLastCalledWith({ voice_match_threshold_local: 0.63 });
   });
 });
