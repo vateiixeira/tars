@@ -510,7 +510,7 @@ Algoritmo de `run(audio)`:
   `DiarizerRouter(settings, LocalDiarizer(), _SettingsDiarizer(settings))`; `serve()` passa a usá-lo.
   Atualizar a docstring do módulo (o CTranslate2/pyannote/sherpa-onnx em thread daemon).
 
-- [ ] **Step 1: Testes que falham** em `tests/meeting/test_engines.py`, com fakes de motor (`available`,
+- [x] **Step 1: Testes que falham** em `tests/meeting/test_engines.py`, com fakes de motor (`available`,
   `unavailable_reason`, `run`, `model_id`, `engine`, contador de chamadas e de `unload`):
   - `test_local_chosen_runs_local_only`: o pyannote nem é consultado e `fallback is None`.
   - `test_pyannote_chosen_and_available_runs_pyannote`.
@@ -529,12 +529,12 @@ Algoritmo de `run(audio)`:
   - Em `tests/test_main.py`: `test_build_diarizer_follows_settings`: `build_diarizer(settings).chosen() == "local"`;
     depois de `settings.update({"diarizer": "pyannote"})`, vale `"pyannote"`. `chosen_model()` é
     `"pyannote-community-1"` com o pyannote e começa com `"sherpa-"` com o local.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_engines.py tests/meeting/test_finalize.py tests/test_main.py`. Expected: FAIL.
-- [ ] **Step 3:** Implementar `engines.py`, os alertas no `finalize` e `build_diarizer`.
-- [ ] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS.
-- [ ] **Step 5: Smoke manual.** Run: `uv run --frozen python -c "from whisper_ditado.meeting.local_diarize import LocalDiarizer; d=LocalDiarizer(); print(d.available, d.model_id)"`.
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_engines.py tests/meeting/test_finalize.py tests/test_main.py`. Expected: FAIL.
+- [x] **Step 3:** Implementar `engines.py`, os alertas no `finalize` e `build_diarizer`.
+- [x] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS.
+- [x] **Step 5: Smoke manual.** Run: `uv run --frozen python -c "from whisper_ditado.meeting.local_diarize import LocalDiarizer; d=LocalDiarizer(); print(d.available, d.model_id)"`.
   Expected: `True sherpa-wespeaker_en_voxceleb_resnet34_LM` (o cache vai para `~/.local/share/whisper-ditado/models/sherpa-onnx`).
-- [ ] **Step 6: Commit** `[Feat] Escolher o motor de separação com fallback para o local`
+- [x] **Step 6: Commit** `[Feat] Escolher o motor de separação com fallback para o local`
 
 ---
 

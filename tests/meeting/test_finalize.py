@@ -177,8 +177,8 @@ def test_finalize_builds_transcript_with_me_and_people(store, settings):
     assert not list(d.glob("*.part"))
 
 
-def _two_speaker_case(store):
-    mid, _ = new_meeting(store)
+def _two_speaker_case(store, pc_s=20.0):
+    mid, _ = new_meeting(store, pc_s=pc_s)
     e1, e2 = np.eye(3, dtype=np.float32)[0], np.eye(3, dtype=np.float32)[1]
     store.upsert_voice(Voice(id="v-ana", name="Ana", embeddings={"fake-model": VoiceEmbedding(e1)}))
     words = {"mic": [w(0.5, "oi")], "pc": [w(3.0, "bom"), w(6.0, "dia")]}
@@ -244,6 +244,53 @@ def test_finalize_uses_threshold_of_the_engine(store, settings, engine, local, p
 
     voice_ids = {sp.voice_id for sp in store.get_speakers(mid)} - {None}
     assert voice_ids == ({"v-ana"} if matched else set())
+
+
+def test_fallback_alert_replaces_previous_diarization_alerts(store, settings):
+    mid, words, result = _two_speaker_case(store, pc_s=30.0)
+    store.add_alert(mid, "no_diarization", 0.0, 30.0)
+    store.add_alert(mid, "mic_silent", 5.0, 9.0)
+    fallback = dataclasses.replace(result, fallback="pyannote_no_token")
+
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=words["pc"]),
+                  FakeDiarizer(fallback), None)
+    alerts = {(a.kind, a.start_s, a.end_s) for a in store.get_alerts(mid)}
+    assert alerts == {("pyannote_no_token", 0.0, 30.0), ("mic_silent", 5.0, 9.0)}
+
+    # troca do alerta de fallback por outro, sem acumular
+    other = dataclasses.replace(result, fallback="pyannote_failed")
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=words["pc"]), FakeDiarizer(other), None)
+    assert sorted(a.kind for a in store.get_alerts(mid)) == ["mic_silent", "pyannote_failed"]
+
+    # reprocessar sem fallback não deixa alerta de diarização
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=words["pc"]), FakeDiarizer(result), None)
+    assert [a.kind for a in store.get_alerts(mid)] == ["mic_silent"]
+
+
+def test_failed_diarization_replaces_fallback_alert_with_no_diarization(store, settings):
+    mid, words, _ = _two_speaker_case(store)
+    store.add_alert(mid, "pyannote_no_token", 0.0, 20.0)
+
+    fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(available=False), words, None)
+
+    assert [a.kind for a in store.get_alerts(mid)] == ["no_diarization"]
+
+
+def test_fallback_uses_local_threshold_and_model(store, settings):
+    mid, words, result = _two_speaker_case(store)
+    # A fica com cosseno ~0.707 em relação à Ana
+    result = dataclasses.replace(
+        result, embeddings={"A": np.array([1, 0, 1], np.float32), "B": np.eye(3, dtype=np.float32)[1]},
+        model="sherpa-modelo", engine="local", fallback="pyannote_failed")
+    store.upsert_voice(Voice(id="v-ana2", name="Ana2", embeddings={
+        "sherpa-modelo": VoiceEmbedding(np.eye(3, dtype=np.float32)[0])}))
+    settings.update({"voice_match_threshold_local": 0.9, "voice_match_threshold_pyannote": 0.1})
+
+    fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(result), words, None)
+
+    speakers = [sp for sp in store.get_speakers(mid) if not sp.is_me]
+    assert all(sp.voice_id is None for sp in speakers)
+    assert all(sp.embedding_model == "sherpa-modelo" for sp in speakers)
 
 
 def test_finalize_words_without_turn_go_to_nearest_speaker(store, settings):

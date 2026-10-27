@@ -12,9 +12,10 @@ diarização, Claude) e a API local (uvicorn em 127.0.0.1).
   no prazo roda no próximo início (`recover`).
 - O uvicorn não instala handlers de sinal (`capture_signals` desligado): os handlers são do loop.
 - A saída é por `os._exit` depois da limpeza: a finalização que passou do prazo (ou uma recarga do
-  modelo do ditado) pode estar dentro do CTranslate2/pyannote numa thread daemon, e a finalização
-  normal do interpretador abortaria o processo (código 134 + core dump). O banco já está fechado e
-  a reunião interrompida continua `processing`, que o `recover` refaz no próximo início.
+  modelo do ditado) pode estar dentro do CTranslate2/pyannote/sherpa-onnx numa thread daemon, e a
+  finalização normal do interpretador abortaria o processo (código 134 + core dump). O banco já
+  está fechado e a reunião interrompida continua `processing`, que o `recover` refaz no próximo
+  início.
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ from whisper_ditado.claude_models import ClaudeModels
 from whisper_ditado.events import EventBus
 from whisper_ditado.dictation_samples import DictationSamples
 from whisper_ditado.meeting.diarize import Diarizer
+from whisper_ditado.meeting.engines import DiarizerRouter
+from whisper_ditado.meeting.local_diarize import LocalDiarizer
 from whisper_ditado.meeting.session import MeetingManager
 from whisper_ditado.priority import DictationBusy
 from whisper_ditado.settings import Settings
@@ -75,6 +78,11 @@ class _SettingsDiarizer(Diarizer):
         if self._pipeline is None:
             self.hf_token = self._token()
         return super()._ensure_loaded()
+
+
+def build_diarizer(settings: Settings) -> DiarizerRouter:
+    """Roteador que escolhe, a cada separação, o motor da configuração `diarizer`."""
+    return DiarizerRouter(settings, LocalDiarizer(), _SettingsDiarizer(settings))
 
 
 def _meeting_options(settings: Settings):
@@ -182,7 +190,7 @@ async def serve(args: argparse.Namespace) -> int:
     def meeting_transcriber():  # segunda instância, carregada ao iniciar a primeira reunião
         return dictation.make_transcriber(_meeting_options(settings), dictation.build_vocabulary(settings))
 
-    diarizer = _SettingsDiarizer(settings)
+    diarizer = build_diarizer(settings)
     # Ditado tem prioridade na GPU (spec §8.2): a reunião espera enquanto alguém dita.
     busy = None if args.no_dictation else DictationBusy()
     gate = _dictation_gate(busy, settings) if busy is not None else None

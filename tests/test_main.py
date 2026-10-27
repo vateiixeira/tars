@@ -42,6 +42,18 @@ def test_settings_diarizer_reads_token_lazily(tmp_path, monkeypatch):
     assert diarizer._token() == "das-configuracoes"  # a configuração tem prioridade
 
 
+def test_build_diarizer_follows_settings(tmp_path, monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    settings = Settings(Store(tmp_path / "x.db"))
+    router = main.build_diarizer(settings)
+
+    assert router.chosen() == "local"
+    assert router.chosen_model().startswith("sherpa-")
+    settings.update({"diarizer": "pyannote"})
+    assert router.chosen() == "pyannote"
+    assert router.chosen_model() == "pyannote-community-1"
+
+
 def test_run_server_converts_system_exit(monkeypatch):
     import asyncio
 

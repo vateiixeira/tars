@@ -24,6 +24,7 @@ import numpy as np
 from whisper_ditado import paths
 from whisper_ditado.claude_cli import transcript_text
 from whisper_ditado.meeting.diarize import DiarizationResult
+from whisper_ditado.meeting.engines import FALLBACK_ALERTS
 from whisper_ditado.meeting.timeline import (
     DraftSegment,
     Turn,
@@ -49,6 +50,7 @@ OPUS_BITRATE = "16k"
 ME_LABEL = "Você"
 PARTICIPANTS_LABEL = "Participantes"
 NO_DIARIZATION = "no_diarization"
+DIARIZATION_ALERTS = (NO_DIARIZATION, *FALLBACK_ALERTS.values())
 FAIL_PREFIX = "Falha ao processar a reunião"
 NO_AUDIO = "áudio da reunião não encontrado"
 
@@ -274,10 +276,16 @@ def finalize(
         # 2. separação das vozes do PC
         progress(STAGE_DIARIZING)
         result = _diarize(audio["pc"], pc_words, diarizer)
-        if result is not None:  # reprocessamento com token: o aviso de uma rodada anterior não vale mais
-            store.delete_alerts(meeting_id, NO_DIARIZATION)
-        elif not any(a.kind == NO_DIARIZATION for a in store.get_alerts(meeting_id)):
-            store.add_alert(meeting_id, NO_DIARIZATION, 0.0, duration)
+        if result is not None:  # reprocessamento: os avisos de uma rodada anterior não valem mais
+            for kind in DIARIZATION_ALERTS:
+                store.delete_alerts(meeting_id, kind)
+            if result.fallback:
+                store.add_alert(meeting_id, result.fallback, 0.0, duration)
+        else:
+            for kind in FALLBACK_ALERTS.values():
+                store.delete_alerts(meeting_id, kind)
+            if not any(a.kind == NO_DIARIZATION for a in store.get_alerts(meeting_id)):
+                store.add_alert(meeting_id, NO_DIARIZATION, 0.0, duration)
 
         # 3-4. falantes e linha do tempo
         progress(STAGE_FINISHING)
