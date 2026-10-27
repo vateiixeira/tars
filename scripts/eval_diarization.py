@@ -27,10 +27,13 @@ from whisper_ditado import paths
 from whisper_ditado.meeting.calibration import (
     agreement,
     auc,
+    from_model,
     leave_one_meeting_out_matches,
     leave_one_out_scores,
+    meetings_with_other_model,
     pick_threshold,
 )
+from whisper_ditado.meeting.diarize import PYANNOTE_MODEL
 from whisper_ditado.meeting.finalize import decode_opus
 from whisper_ditado.meeting.local_diarize import LocalDiarizer, load_backend
 from whisper_ditado.meeting.sherpa_models import EMBEDDINGS, SEGMENTATION, ensure_model
@@ -59,7 +62,20 @@ def log(msg: str) -> None:
 def connect(db: Path) -> sqlite3.Connection:
     if not db.exists():
         raise SystemExit(f"banco não encontrado: {db}")
-    return sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    return sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+
+
+def has_embedding_model(conn: sqlite3.Connection) -> bool:
+    """A coluna `speakers.embedding_model` existe a partir da migração V6."""
+    return any(r[1] == "embedding_model" for r in conn.execute("PRAGMA table_info(speakers)"))
+
+
+def reran_meetings(conn: sqlite3.Connection) -> set[str]:
+    """Reuniões cujos falantes já não são (só) do pyannote, por reprocessamento com o motor local."""
+    if not has_embedding_model(conn):
+        return set()
+    rows = conn.execute("SELECT meeting_id, embedding_model FROM speakers").fetchall()
+    return meetings_with_other_model(rows, PYANNOTE_MODEL)
 
 
 def meetings(conn: sqlite3.Connection, root: Path) -> list[Meeting]:
@@ -74,11 +90,12 @@ def linked_speakers(conn: sqlite3.Connection) -> list[LinkedSpeaker]:
     ]
     voice_name = {vid: f"voz {i}" for i, vid in enumerate(voice_order, 1)}
     out: list[LinkedSpeaker] = []
+    model_col = "embedding_model" if has_embedding_model(conn) else "NULL"
     rows = conn.execute(
-        "SELECT id, meeting_id, voice_id, embedding FROM speakers"
+        f"SELECT id, meeting_id, voice_id, embedding, {model_col} FROM speakers"
         " WHERE voice_id IS NOT NULL ORDER BY meeting_id, id"
     ).fetchall()
-    for sid, mid, vid, blob in rows:
+    for sid, mid, vid, blob, emb_model in rows:
         spans = [
             (float(s), float(e))
             for s, e in conn.execute(
@@ -87,7 +104,11 @@ def linked_speakers(conn: sqlite3.Connection) -> list[LinkedSpeaker]:
                 (sid,),
             )
         ]
-        emb = usable(np.frombuffer(blob, dtype=np.float32)) if blob else None
+        # só embeddings do pyannote: depois de reprocessar com o motor local há vetores de outro
+        # modelo (e de outra dimensão) na mesma coluna
+        emb = None
+        if blob and from_model(emb_model, PYANNOTE_MODEL):
+            emb = usable(np.frombuffer(blob, dtype=np.float32))
         out.append(LinkedSpeaker(sid, mid, voice_name.get(vid, "voz ?"), spans, emb))
     return out
 
@@ -241,7 +262,13 @@ def cmd_clusters(args: argparse.Namespace) -> None:
     print(f"\nmodelo {args.embedding}, primeiros {args.max_minutes:g} min de cada reunião")
     print("\n| reunião | falantes ref | limiar | mínimo (s) | falantes | clusters sherpa | agreement |")
     print("|---|---|---|---|---|---|---|")
+    reran = reran_meetings(conn)
+    skipped = 0
     for m in meetings(conn, root):
+        if m.id in reran:
+            log(f"{m.name}: reprocessada com outro motor; a referência não é do pyannote; pulada")
+            skipped += 1
+            continue
         ref = reference(conn, m.id, max_s)
         if not ref:
             log(f"{m.name}: sem segmentos pc com falante no trecho; pulada")
@@ -275,6 +302,7 @@ def cmd_clusters(args: argparse.Namespace) -> None:
             log(f"  limiar {t:g}: {time.perf_counter() - t0:.0f} s")
         del audio
 
+    print(f"\nreuniões puladas por não terem mais a referência do pyannote: {skipped}")
     print("\n| limiar | mínimo (s) | agreement médio | agreement ponderado | erro médio nº falantes |")
     print("|---|---|---|---|---|")
     ranked = []

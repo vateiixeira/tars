@@ -122,7 +122,7 @@ def test_run_single_voice_split_into_tiny_clusters_becomes_one_speaker():
 def test_run_without_embeddings_merges_into_longest():
     segs = [(0.0, 14.0, 0), (14.0, 30.0, 1), (30.0, 32.0, 2)]
     backend = FakeBackend(segs, {})  # nenhum vetor utilizável
-    diarizer, _ = _diarizer(backend)
+    diarizer, _ = _diarizer(backend, min_speaker_s=12.0)
     result = diarizer.run(_audio(segs, {0: 0.2, 1: 0.4, 2: 0.6}))
 
     assert [t.speaker for t in result.turns] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_01"]

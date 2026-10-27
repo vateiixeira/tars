@@ -4,8 +4,10 @@ import pytest
 from whisper_ditado.meeting.calibration import (
     agreement,
     auc,
+    from_model,
     leave_one_meeting_out_matches,
     leave_one_out_scores,
+    meetings_with_other_model,
     pick_threshold,
 )
 
@@ -75,3 +77,21 @@ def test_leave_one_meeting_out_matches_counts_outcomes():
     # (certos, errados, sem voz), comparando cada reunião com as vozes das outras
     assert leave_one_meeting_out_matches(samples, threshold=0.8) == (2, 1, 1)
     assert leave_one_meeting_out_matches(samples, threshold=0.9999) == (0, 0, 4)
+
+
+def test_from_model_accepts_unset_and_same_model_only():
+    assert from_model(None, "pyannote-community-1")
+    assert from_model("pyannote-community-1", "pyannote-community-1")
+    assert not from_model("sherpa-nemo_en_titanet_small", "pyannote-community-1")
+
+
+def test_meetings_with_other_model_flags_reprocessed_meetings():
+    rows = [
+        ("m1", "pyannote-community-1"),
+        ("m1", None),  # falante sem embedding
+        ("m2", "pyannote-community-1"),
+        ("m2", "sherpa-nemo_en_titanet_small"),  # reprocessada com o motor local
+        ("m3", None),
+    ]
+    assert meetings_with_other_model(rows, "pyannote-community-1") == {"m2"}
+    assert meetings_with_other_model([], "pyannote-community-1") == set()

@@ -6,7 +6,7 @@ ligações falante→voz feitas pelo usuário.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -154,3 +154,21 @@ def leave_one_meeting_out_matches(
             else:
                 wrong += 1
     return right, wrong, none
+
+
+def from_model(embedding_model: str | None, model: str) -> bool:
+    """Se um embedding gravado vale como sendo do `model`.
+
+    Linhas sem modelo (bancos anteriores à coluna `embedding_model`) ficam: a migração marca como
+    pyannote todo embedding que já existia.
+    """
+    return embedding_model is None or embedding_model == model
+
+
+def meetings_with_other_model(rows: Iterable[tuple[str, str | None]], model: str) -> set[str]:
+    """Reuniões com algum falante cujo `embedding_model` preenchido não é o `model`.
+
+    `rows` traz `(id da reunião, embedding_model do falante)`. Uma reunião reprocessada com outro
+    motor tem falantes de outro modelo e deixa de servir de referência do pyannote.
+    """
+    return {mid for mid, m in rows if not from_model(m, model)}

@@ -133,8 +133,8 @@ escolha foi feita pelo `agreement` do clustering, que é o que o usuário sente 
 - Entre os mais rápidos: 28 s para extrair os embeddings, contra 53 s do resnet34 e 200 s do eres2netv2.
   Como o motor roda na CPU, isso pesa.
 
-**Limiar de cluster e fala mínima.** 1,0/12 s e 1,0/8 s ficam a menos de 0,001 de `agreement` uma da
-outra (0,754 contra 0,753). Ficou 12 s por ter o maior `agreement` e porque a extensão mostrou platô acima
+**Limiar de cluster e fala mínima.** 1,0/12 s e 1,0/8 s diferem em 0,001 de `agreement`
+(0,754 contra 0,753). Ficou 12 s por ter o maior `agreement` e porque a extensão mostrou platô acima
 disso, então o valor não é uma borda frágil. O limiar 1,0 também é o centro do melhor trecho da grade
 (1,1 dá 0,752 e 1,2 cai para 0,731).
 
@@ -166,3 +166,8 @@ dos 18 falantes sem voz reconhecida, o que é intencional: o usuário vê "falan
 - **Reproduzir:** `uv run --frozen python scripts/eval_diarization.py voices` e
   `... clusters --embedding <nome>`. Ambos exigem o banco e as gravações locais e levam de dezenas de
   segundos (`voices`) a dezenas de minutos (`clusters`).
+- **Reuniões reprocessadas:** o script só usa como referência do pyannote os embeddings com
+  `embedding_model` vazio ou igual a `pyannote-community-1`, e `clusters` pula (e informa quantas) as
+  reuniões que já foram reprocessadas com o motor local, porque os segmentos `pc` delas deixaram de ser do
+  pyannote. Os números acima vieram de um banco sem a coluna `embedding_model` (ainda sem reprocessamentos
+  locais), então nenhuma reunião foi pulada.
