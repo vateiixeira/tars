@@ -50,7 +50,7 @@ para quem já tem o token ou prefere a qualidade dele.
 
 ## 5. Situação atual (para quem vai construir)
 
-> Revalidado em 2026-10-27 contra o `main` (`/home/vi/dev/whisper-ditado`, commit `9acb7fd`).
+> Revalidado em 2026-10-27 contra o `main` (`/home/vi/dev/whisper-ditado`, commit `ee69dbc`).
 > O primeiro levantamento foi feito no branch `fluxo-angulare`, que não tem ancestral comum com o
 > `main`; o que segue vale para o `main`.
 

@@ -94,7 +94,7 @@ jobs:
           if [[ "$draft" != "true" ]]; then
             gh release create "$RELEASE_TAG" --draft --verify-tag --generate-notes \
               --title "TARS $RELEASE_TAG" \
-              --notes 'Pacote Linux x86_64 com app e backend Python. Veja docs/INSTALL_RELEASE.md dentro do pacote. Requer Python, uv, GPU NVIDIA e dependências Linux; modelos são baixados no primeiro uso.'
+              --notes 'Pacote Linux x86_64 com app e backend Python. Veja docs/INSTALL_RELEASE.md dentro do pacote. Requer Python, uv, GPU NVIDIA e dependências Linux; modelos são baixados no primeiro uso. Separação de falantes local por padrão; pyannote opcional (extra).'
           fi
           gh release upload "$RELEASE_TAG" ./*.tar.gz SHA256SUMS --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest

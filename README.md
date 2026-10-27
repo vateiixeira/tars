@@ -59,7 +59,7 @@ Clone e compile o projeto:
 ```bash
 git clone https://github.com/vateiixeira/tars.git
 cd tars
-uv sync --frozen --group dev
+uv sync --frozen --group dev --extra pyannote
 cd app
 pnpm install --frozen-lockfile
 pnpm tauri build --no-bundle
@@ -81,7 +81,8 @@ e `.desktop` da raiz são modelos; o instalador substitui `@PROJECT_ROOT@` pelo 
 A pasta do clone deve permanecer no mesmo lugar depois da instalação.
 
 Resumos e criação de issues exigem o [Claude Code](https://code.claude.com/docs/en/setup)
-instalado e autenticado. A separação de falantes é opcional e usa o token explicado abaixo.
+instalado e autenticado. A separação de falantes funciona sem configuração; o pyannote, com token do
+Hugging Face, é opcional (veja abaixo).
 
 ## Desenvolvimento
 
@@ -273,26 +274,49 @@ ao lado do serviço, use `--no-dictation` e outra porta.
 - **Excluir uma reunião** fica bloqueado enquanto houver tarefas sendo criadas ou aguardando
   conferência no MCP de issues. Confira as tarefas incertas antes de excluir, para preservar o resultado
   de uma criação que pode já ter sido enviada.
-- **Reprocessar** recria a transcrição e os falantes, incluindo nomes editados e mesclagens.
-  O app pede confirmação quando já existem falantes. Vozes cadastradas, título editado, resumo e
-  sugestões de tarefas são mantidos; resumo e levantamento só são refeitos pelos seus botões.
+- **Reprocessar** recria a transcrição e os falantes. Os vínculos com vozes cadastradas são
+  mantidos; nomes editados sem voz e mesclagens são refeitos. O app pede confirmação quando já
+  existem falantes. Vozes cadastradas, título editado, resumo e sugestões de tarefas são mantidos;
+  resumo e levantamento só são refeitos pelos seus botões.
 - **Configurações** pela API (`GET/PUT /api/settings`); as variáveis `DITADO_*` acima continuam
   valendo como padrão.
 
-### Separação de falantes (token do Hugging Face)
+### Separação de falantes
 
-A separação de falantes usa o `pyannote/speaker-diarization-community-1`, um modelo com acesso
-restrito. Sem token a reunião é transcrita normalmente, mas com um único falante ("Participantes") e
-um alerta `no_diarization`. Para ativar:
+Dois motores separam os falantes de uma reunião:
 
-1. Entre em <https://huggingface.co/pyannote/speaker-diarization-community-1> logado e aceite os termos de uso.
-2. Em <https://huggingface.co/settings/tokens> crie um token do tipo **Read**.
-3. Cole o token no app, em Configurações → Reuniões (vale a partir da próxima reunião, sem
+- **Local (padrão).** Usa o sherpa-onnx na CPU, de graça e sem token. Não precisa de GPU nem de conta.
+  Os modelos (segmentação e voz) são baixados uma vez das releases do sherpa-onnx no GitHub, com
+  SHA-256 conferido, para `~/.local/share/whisper-ditado/models/sherpa-onnx`. Esse motor nunca baixa
+  nada do Hugging Face.
+- **pyannote (opcional).** Usa o `pyannote/speaker-diarization-community-1`, um modelo com acesso
+  restrito. Exige o extra `pyannote` e um token do Hugging Face.
+
+Para escolher o motor, use o seletor em Configurações → Reuniões (vale a partir da próxima reunião
+ou reprocessamento) ou `PUT /api/settings` com `{"diarizer": "local"}` ou `{"diarizer": "pyannote"}`.
+Cada motor tem seu próprio limiar de reconhecimento de voz nessa mesma tela.
+
+Para usar o pyannote:
+
+1. Instale o extra: `uv sync --frozen --extra pyannote` (num clone de desenvolvimento, acrescente
+   `--group dev`). Ele traz `pyannote.audio`, `torch` e `torchaudio`.
+2. Entre em <https://huggingface.co/pyannote/speaker-diarization-community-1> logado e aceite os termos de uso.
+3. Em <https://huggingface.co/settings/tokens> crie um token do tipo **Read**.
+4. Cole o token no app, em Configurações → Reuniões (vale a partir da próxima reunião, sem
    reiniciar). Também dá por `PUT /api/settings` com `{"hf_token": "hf_..."}` ou pela variável de
-   ambiente `HF_TOKEN` ao iniciar o backend. Depois
-   do primeiro download o modelo carrega do cache local, sem rede. Se o carregamento falhar (por
-   exemplo, termos não aceitos), um token novo é tentado já na próxima reunião; com o mesmo token,
-   o backend tenta de novo nas reuniões seguintes a cada 5 minutos, sem reiniciar.
+   ambiente `HF_TOKEN` ao iniciar o backend. Depois do primeiro download o modelo carrega do cache
+   local, sem rede. Se o carregamento falhar (por exemplo, termos não aceitos), um token novo é
+   tentado já na próxima reunião; com o mesmo token, o backend tenta de novo nas reuniões seguintes
+   a cada 5 minutos, sem reiniciar.
+
+Com o pyannote escolhido, se faltar o token, o extra ou o carregamento falhar, a reunião não fica
+sem falantes: o motor local assume e a reunião recebe um alerta (`pyannote_no_token`,
+`pyannote_missing_extra` ou `pyannote_failed`). Só quando nenhum motor funciona a reunião fica com um
+único falante ("Participantes") e o alerta `no_diarization`.
+
+As vozes cadastradas valem para os dois motores, sem recadastro. Cada voz guarda um embedding por
+modelo, e o backend nunca compara embeddings de modelos diferentes: ao usar um motor pela primeira
+vez, os embeddings dele são recalculados a partir do áudio das reuniões em que a voz foi vinculada.
 
 ## App
 

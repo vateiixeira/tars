@@ -28,10 +28,12 @@ python3 scripts/install_user.py --enable --start
 Os atalhos e a colagem também exigem as permissões de `/dev/input` e `/dev/uinput` e o daemon
 `ydotoold` em execução, conforme a seção de instalação do [README](../README.md).
 Abra **TARS** pelo menu. Mantenha a pasta extraída no mesmo lugar após instalar os lançadores.
-Os modelos são baixados no primeiro uso. Claude Code e o token do Hugging Face são opcionais,
-conforme as funcionalidades descritas no README.
+Os modelos são baixados no primeiro uso. Claude Code é opcional, conforme as funcionalidades descritas no README.
+A separação de falantes funciona sem token, com o motor local. Para usar o pyannote, instale
+`uv sync --frozen --no-dev --extra pyannote` no lugar do `uv sync --frozen --no-dev` acima e
+configure o token do Hugging Face (veja o README).
 
-Para atualizar, extraia a nova versão em outra pasta e prepare suas dependências com `uv sync --frozen --no-dev`.
+Para atualizar, extraia a nova versão em outra pasta e prepare suas dependências com `uv sync --frozen --no-dev` (acrescente `--extra pyannote` se você usa o pyannote).
 Encerre o app e pare o backend quando não houver reunião ou ditado em andamento. Execute o
 instalador da nova pasta e inicie o app novamente. Reuniões, vozes e configurações ficam na
 mesma pasta de dados do usuário. Não edite ou substitua os arquivos do programa enquanto ele grava.
