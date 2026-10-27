@@ -788,6 +788,28 @@ def test_attach_skips_missing_files(rig, store, mid, data_home, tmp_path):
     assert (t.create_state, t.attach_state) == ("created", "none")
 
 
+def test_attach_skips_unreadable_files(rig, store, mid, data_home, tmp_path):
+    from whisper_ditado.prints.files import print_path
+
+    task_id, prints = _task_with_prints(store, mid, tmp_path, n_prints=2, attach=(0, 1))
+    print_path(prints[0]).write_bytes(b"nao e imagem")
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    [(_, _, files)] = rig.issues_client.attached
+    assert [(label, name) for label, name, _ in files] == [("P2", "print-P2.jpg")]
+    assert store.get_task(task_id).attach_state == "sent"
+
+    other_id, others = _task_with_prints(store, mid, tmp_path, n_prints=1, attach=(0,))
+    print_path(others[0]).write_bytes(b"nao e imagem")
+    rig.issues_client.outcomes = [CreateOutcome("created", 8, "u", None)]
+    rig.jobs.create([other_id])
+    rig.wait_idle()
+    assert len(rig.issues_client.attached) == 1  # nenhum legível: o anexo nem é tentado
+    t = store.get_task(other_id)
+    assert (t.create_state, t.attach_state, t.attach_error) == ("created", "none", None)
+
+
 def test_attach_not_called_when_not_created_or_without_prints(rig, store, mid, data_home, tmp_path):
     task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
     plain = make_tasks(store, mid, 1)

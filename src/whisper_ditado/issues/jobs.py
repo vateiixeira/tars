@@ -284,18 +284,25 @@ class PostMeetingJobs:
             log.exception("Não foi possível preparar os prints da sugestão %s", task_id)
             self._set_attach(task_id, "failed", ATTACH_UNEXPECTED)
             return
-        self._set_attach(task_id, "sending")
-        try:
-            self._bus.publish({"type": "tasks_changed", "meeting_id": task.meeting_id})  # a issue já aparece criada
-        except Exception:
-            log.exception("Não foi possível avisar a mudança da sugestão %s", task_id)
         try:
             with tempfile.TemporaryDirectory(prefix="whisper-ditado-prints-", ignore_cleanup_errors=True) as tmp:
                 files = []
                 for label, path in found:
+                    try:
+                        data = jpeg_bytes(path, MAX_EDGE)
+                    except Exception as exc:  # um arquivo ruim não impede o anexo dos outros
+                        log.warning("print %s ilegível, fica fora do anexo da sugestão %s: %s", label, task_id, exc)
+                        continue
                     jpg = Path(tmp) / f"print-{label}.jpg"
-                    jpg.write_bytes(jpeg_bytes(path, MAX_EDGE))
+                    jpg.write_bytes(data)
                     files.append((label, jpg))
+                if not files:
+                    return  # nenhum legível: como se a sugestão não tivesse prints
+                self._set_attach(task_id, "sending")
+                try:
+                    self._bus.publish({"type": "tasks_changed", "meeting_id": task.meeting_id})  # a issue já aparece criada
+                except Exception:
+                    log.exception("Não foi possível avisar a mudança da sugestão %s", task_id)
                 result = self._issues_client.attach_prints(number, url, files)
             self._store.set_attach_state(task_id, result.state, result.error)  # estado inválido cai no except
         except Exception:
