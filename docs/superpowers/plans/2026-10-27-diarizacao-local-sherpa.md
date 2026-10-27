@@ -572,7 +572,7 @@ Algoritmo de `run(audio)`:
   - O `FakeDiarizer` de `test_finalize.py` ganha o parâmetro `embed: Embed | None = None`, copiado para o
     resultado.
 
-- [ ] **Step 1: Testes que falham** em `tests/meeting/test_voice_sync.py` (store real em `data_home`; `load_pc`
+- [x] **Step 1: Testes que falham** em `tests/meeting/test_voice_sync.py` (store real em `data_home`; `load_pc`
   e `embed` fakes):
   - `test_ensure_builds_missing_model_from_linked_speakers`: voz com só `"pyannote-community-1"`, ligada a
     falantes de duas reuniões. `embed` devolve `[1,0]` e `[0,1]` → `embeddings["m-local"]` é
@@ -591,10 +591,10 @@ Algoritmo de `run(audio)`:
   - Em `test_session.py`: `test_voice_embedding_recompute_waits_for_dictation`. Com `gpu_gate` registrando
     `"gate"` e um diarizer cujo resultado tem `embed` registrando `"embed"`, cada `"embed"` vem logo depois
     de um `"gate"`.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_voice_sync.py tests/meeting/test_finalize.py tests/meeting/test_session.py`. Expected: FAIL.
-- [ ] **Step 3:** Implementar.
-- [ ] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS.
-- [ ] **Step 5: Commit** `[Feat] Recalcular embeddings de voz a partir do áudio das reuniões`
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_voice_sync.py tests/meeting/test_finalize.py tests/meeting/test_session.py`. Expected: FAIL.
+- [x] **Step 3:** Implementar.
+- [x] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS.
+- [x] **Step 5: Commit** `[Feat] Recalcular embeddings de voz a partir do áudio das reuniões`
 
 ---
 
@@ -616,7 +616,7 @@ Algoritmo de `run(audio)`:
     e `label = nome da voz` (se a voz ainda existir). O casamento automático só considera as chaves não
     herdadas e as vozes não herdadas. Na finalização normal não há falantes antigos, então nada muda.
 
-- [ ] **Step 1: Testes que falham.**
+- [x] **Step 1: Testes que falham.**
   - `test_voices.py`: `test_inherit_links_picks_largest_overlap`: `new = {"A": [(0,10)], "B": [(10,20)]}`,
     `old = {"v1": [(8,20)]}` → `{"B": "v1"}`. `test_inherit_links_is_one_to_one`: um cluster antigo `v1`
     `[(0,20)]` virou `A [(0,12)]` e `B [(12,20)]` → só `A` herda. `test_inherit_links_ignores_no_overlap`.
@@ -626,10 +626,10 @@ Algoritmo de `run(audio)`:
     (limiar 0.99). Resultado: o falante novo em 2–4 s tem `voice_id == "v-ana"` e rótulo "Ana", e o de 6–7 s
     é "Pessoa 1" sem voz. `test_reprocess_without_diarization_does_not_inherit`: com o diarizer
     indisponível, só existe "Participantes", sem `voice_id`.
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_voices.py tests/meeting/test_finalize.py`. Expected: FAIL.
-- [ ] **Step 3:** Implementar.
-- [ ] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS.
-- [ ] **Step 5: Commit** `[Feat] Preservar vínculos de voz ao reprocessar a reunião`
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_voices.py tests/meeting/test_finalize.py`. Expected: FAIL.
+- [x] **Step 3:** Implementar.
+- [x] **Step 4:** Run: `uv run --frozen pytest -q`. Expected: PASS.
+- [x] **Step 5: Commit** `[Feat] Preservar vínculos de voz ao reprocessar a reunião`
 
 ---
 
@@ -669,7 +669,7 @@ Algoritmo de `run(audio)`:
     - O bloco do token e o link do modelo só aparecem (`v-if`) com `diarizer === 'pyannote'`. A dica do
       token também diz: "Exige o extra pyannote instalado (uv sync --extra pyannote)."
 
-- [ ] **Step 1: Testes que falham.**
+- [x] **Step 1: Testes que falham.**
   - `SettingsView.test.ts`: a fixture de configurações troca `voice_match_threshold` por
     `diarizer: "local", voice_match_threshold_local: 0.5, voice_match_threshold_pyannote: 0.6`.
     Os testes de token passam a começar com `diarizer: "pyannote"`. Novos:
@@ -682,10 +682,10 @@ Algoritmo de `run(audio)`:
     `{ voice_match_threshold: 0.75 }` é substituída.
   - `meeting.test.ts`: `it("labels diarization alerts without a time range")`: um alerta
     `pyannote_no_token` em `(0, 1800)` gera exatamente o texto do rótulo.
-- [ ] **Step 2:** Run: `cd app && pnpm test`. Expected: FAIL.
-- [ ] **Step 3:** Implementar.
-- [ ] **Step 4:** Run: `cd app && pnpm test && pnpm build`. Expected: PASS (o `vue-tsc` também passa).
-- [ ] **Step 5: Commit** `[UI] Adicionar seletor de motor de separação de falantes`
+- [x] **Step 2:** Run: `cd app && pnpm test`. Expected: FAIL.
+- [x] **Step 3:** Implementar.
+- [x] **Step 4:** Run: `cd app && pnpm test && pnpm build`. Expected: PASS (o `vue-tsc` também passa).
+- [x] **Step 5: Commit** `[UI] Adicionar seletor de motor de separação de falantes`
 
 ---
 
@@ -729,28 +729,28 @@ achou 3. Com o `wespeaker resnet34`, uma reunião de 16 min deu 19 clusters com 
 dominante). Uma reunião de 31 min levou ~150 s com 4 threads. Por isso a busca vai até 1.2 e usa
 `min_speaker`.
 
-- [ ] **Step 1: Testes que falham** em `tests/meeting/test_calibration.py`:
+- [x] **Step 1: Testes que falham** em `tests/meeting/test_calibration.py`:
   `test_agreement_maps_labels_one_to_one` (`ref [(0,10,"a"),(10,20,"b")]`, `hyp [(0,10,"x"),(10,20,"x")]` → `0.5`;
   `hyp` com rótulos trocados `y`/`x` correspondentes → `1.0`),
   `test_pick_threshold_separable_midpoint` (`[0.8, 0.9]`, `[0.2, 0.4]` → `0.6`),
   `test_pick_threshold_overlap_maximizes_youden`, e
   `test_leave_one_out_scores_skips_single_sample_voices` (voz com 1 amostra não gera positivo, mas gera negativos).
-- [ ] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_calibration.py`. Expected: FAIL.
-- [ ] **Step 3:** Implementar `calibration.py` e `scripts/eval_diarization.py`. Run: `uv run --frozen pytest -q tests/meeting/test_calibration.py` → PASS.
-- [ ] **Step 4: Rodar `voices`** (rodar em segundo plano; baixa os 6 modelos, ~250 MB):
+- [x] **Step 2:** Run: `uv run --frozen pytest -q tests/meeting/test_calibration.py`. Expected: FAIL.
+- [x] **Step 3:** Implementar `calibration.py` e `scripts/eval_diarization.py`. Run: `uv run --frozen pytest -q tests/meeting/test_calibration.py` → PASS.
+- [x] **Step 4: Rodar `voices`** (rodar em segundo plano; baixa os 6 modelos, ~250 MB):
   `uv run --frozen python scripts/eval_diarization.py voices`. Escolher o modelo pela maior separação. Em
   empate técnico (diferença < 0.02), ficar com o mais rápido.
-- [ ] **Step 5: Rodar `clusters`** com o modelo escolhido (dezenas de minutos de CPU) e escolher a
+- [x] **Step 5: Rodar `clusters`** com o modelo escolhido (dezenas de minutos de CPU) e escolher a
   combinação de maior `agreement`; em empate, a de menor erro no número de falantes.
-- [ ] **Step 6: Gravar os padrões.** Em `local_diarize.py`: `DEFAULT_EMBEDDING`, `DEFAULT_CLUSTER_THRESHOLD`
+- [x] **Step 6: Gravar os padrões.** Em `local_diarize.py`: `DEFAULT_EMBEDDING`, `DEFAULT_CLUSTER_THRESHOLD`
   e `MIN_SPEAKER_S`. Em `settings.py`: `DEFAULT_LOCAL_VOICE_THRESHOLD` = limiar do `pick_threshold` do modelo
   escolhido. Valor gravado pelo usuário continua prevalecendo, porque o padrão só vale sem linha no banco.
   Ajustar os testes que comparam com os valores provisórios (`test_settings.py`,
   `test_run_labels_by_first_appearance_and_tags_model`, `test_build_diarizer_follows_settings`).
-- [ ] **Step 7: Registrar** em `docs/superpowers/specs/2026-10-27-diarizacao-local-sherpa-calibracao.md` as
+- [x] **Step 7: Registrar** em `docs/superpowers/specs/2026-10-27-diarizacao-local-sherpa-calibracao.md` as
   tabelas das duas rodadas (anônimas), a escolha e o porquê.
-- [ ] **Step 8:** Run: `uv run --frozen pytest -q` → PASS; `uv run --frozen pytest -q -m models` → PASS.
-- [ ] **Step 9: Commit** `[Feat] Calibrar o motor local com as reuniões existentes`
+- [x] **Step 8:** Run: `uv run --frozen pytest -q` → PASS; `uv run --frozen pytest -q -m models` → PASS.
+- [x] **Step 9: Commit** `[Feat] Calibrar o motor local com as reuniões existentes`
 
 ---
 
