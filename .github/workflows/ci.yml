@@ -1,10 +1,9 @@
 name: CI
+# Roda nos pull requests de contribuidores e sob demanda. O dono trabalha direto na main e
+# roda estas verificações localmente com `python3 scripts/release.py publish`.
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
-  workflow_call:
 permissions:
   contents: read
 concurrency:
@@ -17,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dependências de teste
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg libespeak-ng1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libespeak-ng1
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
         with:
           version: "0.11.29"
