@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+from whisper_ditado.issues.attach_guard import MARKER
 from whisper_ditado.issues.create_guard import canon
 from whisper_ditado.issues.prompts import ATTACH_PROMPT, CREATE_PROMPT, KIND_LABELS, OPTIONS_PROMPT, PRIORITIES
 from whisper_ditado.issues.runner import StreamRun, run_stream
@@ -41,6 +42,8 @@ LOGIN_MESSAGE = ("Sem login no MCP de issues. Abra o Claude Code na pasta raiz, 
 CLAUDE_LOGIN_MESSAGE = "Claude Code não está logado — rode `claude` no terminal"
 ATTACH_UNSUPPORTED = "O MCP de issues não aceita imagens"
 ATTACH_PARTIAL = "Alguns prints não foram enviados ao MCP de issues"
+ATTACH_NOT_DONE = "O Claude não anexou os prints; nenhum print foi enviado"
+ATTACH_INTERRUPTED = "O Claude não concluiu o anexo dos prints; nenhum print foi enviado"
 _KINDS = ("people", "teams", "products", "stages")
 
 
@@ -324,26 +327,42 @@ class IssueClient:
                 run = run_stream(self.cli, prompt, cwd=None, tools="", allowed=[f"mcp__{server}"],
                                  mcp_url=mcp_url, mcp_server=server, settings=settings,
                                  timeout_s=CREATE_TIMEOUT_S)
-            return self._attach_outcome(run, server)
+            return self._attach_outcome(run, server, [label for label, _ in files])
         except ClaudeError as e:
             return AttachOutcome("failed", str(e))
         except Exception as e:
             return AttachOutcome("failed", f"Erro inesperado ao anexar os prints ({type(e).__name__}: {e})")
 
     @staticmethod
-    def _attach_outcome(run: StreamRun, server: str) -> AttachOutcome:
-        calls = [c for c in run.calls_with_prefix(f"mcp__{server}__")
-                 if c.name != f"mcp__{server}__listar_opcoes"]
-        if not calls:
-            problem = _connection_error(run, server) or _auth_text_error(run, [], server)
-            if problem:
-                return AttachOutcome("failed", problem)
-            if run.timed_out:
-                return AttachOutcome("failed", "O MCP de issues demorou demais para responder")
+    def _attach_outcome(run: StreamRun, server: str, labels: list[str]) -> AttachOutcome:
+        """Classifica o anexo só pelas chamadas que levaram prints (marcadores na entrada original).
+
+        `sent` só quando todo rótulo saiu numa chamada bem-sucedida; qualquer print que não chegou
+        vira `failed`, para o operador ver o aviso. `unsupported` exige SEM_SUPORTE numa execução limpa.
+        """
+        covered: set[str] = set()
+        marker_calls = 0
+        for call in run.calls_with_prefix(f"mcp__{server}__"):
+            used = set(MARKER.findall(json.dumps(call.input, ensure_ascii=False)))
+            if not used:
+                continue
+            marker_calls += 1
+            if not call.is_error and call.result is not None:
+                covered |= {label for _, label in used}
+        if marker_calls:
+            if set(labels) <= covered:
+                return AttachOutcome("sent", None)
+            return AttachOutcome("failed", ATTACH_PARTIAL)
+        problem = _connection_error(run, server) or _auth_text_error(run, [], server)
+        if problem:
+            return AttachOutcome("failed", problem)
+        if run.timed_out:
+            return AttachOutcome("failed", "O MCP de issues demorou demais para responder; nenhum print foi enviado")
+        if run.is_error or run.returncode != 0:
+            return AttachOutcome("failed", ATTACH_INTERRUPTED)
+        if "SEM_SUPORTE" in (run.result or ""):
             return AttachOutcome("unsupported", ATTACH_UNSUPPORTED)
-        if all(not c.is_error and c.result is not None for c in calls):
-            return AttachOutcome("sent", None)
-        return AttachOutcome("failed", ATTACH_PARTIAL)
+        return AttachOutcome("failed", ATTACH_NOT_DONE)
 
     @staticmethod
     def _sent(marker: Path) -> bool | None:

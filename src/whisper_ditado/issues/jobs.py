@@ -255,7 +255,12 @@ class PostMeetingJobs:
             self._store.finish_create(task_id, "uncertain", error=CREATE_UNEXPECTED)
             return task.meeting_id
         if outcome.state == "created" and outcome.number is not None:
-            self._attach(task_id, outcome.number, outcome.url)
+            try:
+                self._attach(task_id, outcome.number, outcome.url)
+            except Exception:
+                # Nada do anexo pode chegar ao `_create_all`, que regravaria `create_state`.
+                log.exception("Falha inesperada no anexo dos prints da sugestão %s", task_id)
+                self._fail_sending_attach(task_id)
         return task.meeting_id
 
     def _attach(self, task_id: str, number: int, url: str | None) -> None:
@@ -280,7 +285,10 @@ class PostMeetingJobs:
             self._set_attach(task_id, "failed", ATTACH_UNEXPECTED)
             return
         self._set_attach(task_id, "sending")
-        self._bus.publish({"type": "tasks_changed", "meeting_id": task.meeting_id})  # a issue já aparece criada
+        try:
+            self._bus.publish({"type": "tasks_changed", "meeting_id": task.meeting_id})  # a issue já aparece criada
+        except Exception:
+            log.exception("Não foi possível avisar a mudança da sugestão %s", task_id)
         try:
             with tempfile.TemporaryDirectory(prefix="whisper-ditado-prints-", ignore_cleanup_errors=True) as tmp:
                 files = []
@@ -293,6 +301,15 @@ class PostMeetingJobs:
         except Exception:
             log.exception("Falha ao anexar os prints da sugestão %s", task_id)
             self._set_attach(task_id, "failed", ATTACH_UNEXPECTED)
+
+    def _fail_sending_attach(self, task_id: str) -> None:
+        """Garante um estado final: um anexo que ficou em `sending` vira `failed`."""
+        try:
+            task = self._store.get_task(task_id)
+            if task is not None and task.attach_state == "sending":
+                self._store.set_attach_state(task_id, "failed", ATTACH_UNEXPECTED)
+        except Exception:
+            log.exception("Não foi possível gravar o estado do anexo de %s", task_id)
 
     def _set_attach(self, task_id: str, state: str, error: str | None = None) -> None:
         try:

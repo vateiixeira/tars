@@ -630,7 +630,7 @@ def test_attach_runs_with_server_tools_and_guard_hook(env, jpgs):
 
 def test_attach_uses_custom_server_name(env, jpgs):
     env.client.server_fn = lambda: "tracker"
-    env.scenario(calls=[{**attach_call(), "name": "mcp__tracker__anexar"}])
+    env.scenario(calls=[{**attach_call(label), "name": "mcp__tracker__anexar"} for label in ("P1", "P3")])
     assert env.client.attach_prints(1, None, jpgs).state == "sent"
     assert env.argv_after("--allowedTools") == "mcp__tracker"
     entry = json.loads(env.argv_after("--settings"))["hooks"]["PreToolUse"][0]
@@ -649,3 +649,39 @@ def test_attach_never_raises(tmp_path, jpgs):
     out = client.attach_prints(217, None, jpgs)
     assert out.state == "failed" and "Claude Code não encontrado" in out.error
     assert IssueClient(ClaudeCli(FAKE, None), lambda: None).attach_prints(1, None, jpgs).state == "failed"
+
+
+def test_attach_read_call_without_markers_and_sem_suporte_is_unsupported(env, jpgs):
+    env.scenario(calls=[{"name": "mcp__issues__buscar_issue", "input": {"number": 217}, "result": "{}"}],
+                 final="SEM_SUPORTE")
+    assert env.client.attach_prints(217, None, jpgs) == AttachOutcome("unsupported", "O MCP de issues não aceita imagens")
+
+
+def test_attach_read_call_without_markers_and_no_sem_suporte_is_failed(env, jpgs):
+    env.scenario(calls=[{"name": "mcp__issues__buscar_issue", "input": {"number": 217}, "result": "{}"}])
+    out = env.client.attach_prints(217, None, jpgs)
+    assert out.state == "failed" and "não anexou" in out.error
+
+
+def test_attach_partial_marker_coverage_is_failed(env, jpgs):
+    env.scenario(calls=[attach_call("P1")], final="OK")  # P3 nunca foi enviado
+    assert env.client.attach_prints(217, None, jpgs) == AttachOutcome(
+        "failed", "Alguns prints não foram enviados ao MCP de issues")
+
+
+def test_attach_retry_after_failure_counts_as_sent(env, jpgs):
+    env.scenario(calls=[attach_call("P1", result="HTTP 500", is_error=True), attach_call("P1"), attach_call("P3")])
+    assert env.client.attach_prints(217, None, jpgs) == AttachOutcome("sent", None)
+
+
+def test_attach_marker_inside_data_url_counts(env, jpgs):
+    calls = [{"name": ATTACH_TOOL, "input": {"files": [{"url": f"@@PRINT_DATAURL:{label}@@"}]}, "result": "ok"}
+             for label in ("P1", "P3")]
+    env.scenario(calls=calls)
+    assert env.client.attach_prints(217, None, jpgs).state == "sent"
+
+
+def test_attach_no_calls_and_claude_error_is_failed(env, jpgs):
+    env.scenario(final="SEM_SUPORTE", final_is_error=True)
+    out = env.client.attach_prints(217, None, jpgs)
+    assert out.state == "failed" and "não concluiu" in out.error

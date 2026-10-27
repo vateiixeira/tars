@@ -807,6 +807,41 @@ def test_attach_invalid_outcome_state_is_failed_not_stuck_sending(rig, store, mi
     assert store.get_task(task_id).attach_state == "failed"
 
 
+def test_attach_publish_error_never_touches_create_state(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+    real_publish, raised = rig.bus.publish, []
+
+    def publish(event):
+        if not raised and event.get("type") == "tasks_changed":
+            raised.append(event)
+            raise RuntimeError("bus")
+        real_publish(event)
+
+    rig.bus.publish = publish
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert raised and (t.create_state, t.issue_number, t.attach_state) == ("created", 7, "sent")
+
+
+def test_attach_raising_never_touches_create_state(rig, store, mid, data_home, tmp_path):
+    task_id, _ = _task_with_prints(store, mid, tmp_path, attach=(0,))
+    rig.issues_client.outcomes = [CreateOutcome("created", 7, "u", None)]
+
+    def boom(tid, number, url):
+        store.set_attach_state(tid, "sending")
+        raise RuntimeError("bug no anexo")
+
+    rig.jobs._attach = boom
+    rig.jobs.create([task_id])
+    rig.wait_idle()
+    t = store.get_task(task_id)
+    assert (t.create_state, t.issue_number, t.create_error) == ("created", 7, None)
+    assert t.attach_state == "failed"
+    assert rig.events("tasks_changed") == [{"type": "tasks_changed", "meeting_id": mid}]
+
+
 # -- encerramento ----------------------------------------------------------------
 
 
