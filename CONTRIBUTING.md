@@ -27,5 +27,12 @@ cd src-tauri
 cargo test --locked --lib
 ```
 
+O CI do GitHub roda essas mesmas verificações em cada pull request.
 Descreva o problema, a mudança e as verificações no pull request. Preserve as configurações,
 reuniões e vozes existentes ao mudar formatos de dados. A licença das contribuições é MIT.
+
+## Mantenedores
+
+Mantenedores fazem push direto na `main` e publicam versões com
+`python3 scripts/release.py publish patch` (ou `minor` / `major`), que roda as verificações acima
+localmente antes de criar a tag. Veja [docs/RELEASING.md](docs/RELEASING.md).
