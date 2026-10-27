@@ -4,6 +4,7 @@ from datetime import datetime
 
 from PIL import Image
 
+from tests.helpers.images import png_with_broken_chunk
 from whisper_ditado.prints import files, images
 from whisper_ditado.prints.parts import ImagePart
 
@@ -47,6 +48,29 @@ def test_claude_images_skips_unreadable(data_home, store, tmp_path):
     assert [p.label for p in out.parts] == ["P1", "P3"]
     assert out.omitted == [bad.id]
     assert out.labels == {"P1": a.id, "P2": bad.id, "P3": c.id}
+
+
+def test_claude_images_skips_png_with_broken_chunk(data_home, store, tmp_path):
+    m = store.create_meeting(T0)
+    a = _add(store, m, tmp_path, 1, (100, 50))
+    bad = _add(store, m, tmp_path, 2, (100, 50))
+    c = _add(store, m, tmp_path, 3, (100, 50))
+    png_with_broken_chunk(files.print_path(bad))
+    out = images.load_for_claude(store, m.id)
+    assert [p.label for p in out.parts] == ["P1", "P3"]
+    assert out.omitted == [bad.id]
+    assert out.labels == {"P1": a.id, "P2": bad.id, "P3": c.id}
+
+
+def test_claude_images_skips_decompression_bomb(data_home, store, tmp_path, monkeypatch):
+    m = store.create_meeting(T0)
+    small = _add(store, m, tmp_path, 1, (10, 10))
+    big = _add(store, m, tmp_path, 2, (300, 300))
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)  # 300x300 passa de 2x o limite
+    out = images.load_for_claude(store, m.id)
+    assert [p.label for p in out.parts] == ["P1"]
+    assert out.omitted == [big.id]
+    assert out.labels == {"P1": small.id, "P2": big.id}
 
 
 def test_jpeg_bytes_small_image_not_upscaled_and_rgba(tmp_path):

@@ -37,7 +37,6 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from PIL import UnidentifiedImageError
 from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
@@ -484,7 +483,7 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
                 ".jpg", ".jpeg") else "image/png")
         try:
             data = await run_in_threadpool(print_images.jpeg_bytes, path, print_images.THUMB_EDGE)
-        except (OSError, ValueError, UnidentifiedImageError) as exc:
+        except Exception as exc:  # o Pillow levanta de SyntaxError a DecompressionBombError
             log.warning("print %s ilegível: %s", print_id, exc)
             raise HTTPException(404, "Print ilegível") from exc
         return Response(data, media_type="image/jpeg")

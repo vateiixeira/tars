@@ -36,7 +36,8 @@ def print_labels(prints: list[MeetingPrint]) -> dict[str, str]:
 def jpeg_bytes(path: Path, max_edge: int) -> bytes:
     """JPEG com o lado maior limitado a `max_edge`.
 
-    Levanta OSError/PIL.UnidentifiedImageError se a imagem for ilegível.
+    Imagem ilegível levanta exceções variadas do Pillow: OSError/UnidentifiedImageError,
+    SyntaxError (chunk PNG quebrado), DecompressionBombError... quem chama trata `Exception`.
     """
     with Image.open(path) as img:
         img = ImageOps.exif_transpose(img)
@@ -61,7 +62,7 @@ def load_for_claude(store: Store, meeting_id: str) -> ClaudeImages:
             continue
         try:
             data = jpeg_bytes(files.print_path(p), MAX_EDGE)
-        except (OSError, ValueError, Image.DecompressionBombError) as exc:
+        except Exception as exc:  # um arquivo ruim não tira os outros do envio
             log.warning("print %s ilegível, fica fora do envio ao Claude: %s", p.id, exc)
             out.omitted.append(p.id)
             continue

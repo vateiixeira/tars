@@ -15,6 +15,7 @@ from PIL import Image
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from tests.helpers.images import png_with_broken_chunk
 from whisper_ditado import api, paths
 from whisper_ditado.audio import pwgraph
 from whisper_ditado.claude_cli import ClaudeError, NameSuggestion
@@ -587,6 +588,17 @@ def test_print_image_corrupt_returns_404(client, ctx):
     assert r.status_code == 404 and r.json()["detail"] == "Print ilegível"
 
 
+def test_print_image_broken_chunk_or_bomb_returns_404(client, ctx, monkeypatch):
+    mid = make_meeting(ctx)
+    broken, big = add_print(ctx, mid, 1.0, name="a.png"), add_print(ctx, mid, 2.0, name="b.png")
+    png_with_broken_chunk(print_files.print_path(broken))
+    r = client.get(f"/api/meetings/{mid}/prints/{broken.id}?size=thumb")
+    assert r.status_code == 404 and r.json()["detail"] == "Print ilegível"
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)
+    r = client.get(f"/api/meetings/{mid}/prints/{big.id}?size=thumb")
+    assert r.status_code == 404 and r.json()["detail"] == "Print ilegível"
+
+
 def test_delete_print_removes_file_and_publishes(client, ctx):
     mid = make_meeting(ctx)
     p = add_print(ctx, mid, 1.0)
@@ -631,6 +643,18 @@ def test_summarize_sends_prints(client, ctx):
     assert client.post(f"/api/meetings/{mid}/summary").status_code == 200
     (images,) = ctx.claude.summarize_images
     assert [(i.label, i.at_s, i.media_type) for i in images] == [("P1", 2.0, "image/jpeg")]
+
+
+def test_summarize_skips_corrupt_print(client, ctx, monkeypatch):
+    mid = make_meeting(ctx)
+    broken = add_print(ctx, mid, 2.0, name="a.png")
+    add_print(ctx, mid, 5.0, name="b.png", size=(20, 20))
+    add_print(ctx, mid, 9.0, name="c.png")
+    png_with_broken_chunk(print_files.print_path(broken))
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 200_000)  # só o 1200x600 passa de 2x o limite
+    assert client.post(f"/api/meetings/{mid}/summary").status_code == 200
+    (images,) = ctx.claude.summarize_images
+    assert [i.label for i in images] == ["P2"]  # P1 quebrado e P3 bomba ficam de fora
 
 
 def test_summarize_without_prints_sends_no_images(client, ctx):
