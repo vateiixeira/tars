@@ -47,12 +47,15 @@ que foi mostrado**. Os prints chegam a três lugares:
 9. No levantamento, o Claude recebe os prints com horário e pode **citá-los como evidência**
    em cada sugestão, do mesmo jeito que já cita trechos da transcrição. A aba Tarefas mostra
    os prints citados em cada sugestão.
-10. **Anexo na issue, só se o MCP permitir.** O MCP de issues é genérico: pode ser do
-    usuário ou de qualquer outro fornecedor. Se o MCP configurado oferecer uma forma de enviar
-    imagem (por exemplo, um parâmetro de anexo no `criar_issue` ou uma ferramenta de upload),
-    os prints citados na sugestão seguem com a issue. Se não oferecer, a issue é criada
-    normalmente sem eles, e a sugestão mostra um aviso discreto de que o MCP não aceita
-    imagens.
+10. **Anexo na issue: tentativa que nunca trava a criação.** O MCP de issues é genérico:
+    pode ser do usuário ou de qualquer outro fornecedor, e é ele quem define como (e se)
+    recebe imagens. O TARS não impõe uma convenção. Primeiro a issue é criada exatamente
+    como hoje. Em seguida, se o MCP configurado oferecer alguma forma de receber imagem, o
+    TARS tenta enviar os prints da sugestão do jeito que o MCP define. Se o MCP não oferecer
+    essa forma ou se o envio falhar, a issue continua criada e a sugestão mostra uma nota
+    discreta (por exemplo, "prints não enviados: o MCP não aceita imagens").
+    - Cada sugestão mostra os prints que vão junto, com um "x" para tirar um print só
+      daquela sugestão sem apagá-lo da reunião.
 11. **Export.** Uma reunião sem prints continua sendo exportada como `.md`, como hoje. Com
     prints, o export vira um `.zip` com o `.md` e uma pasta de imagens referenciadas no texto
     no ponto certo.
@@ -87,11 +90,23 @@ que foi mostrado**. Os prints chegam a três lugares:
 
 ## 5. Restrições e contexto
 
-- **Ambiente-alvo:** Ubuntu com GNOME em **Wayland** (ambiente do usuário: Flameshot 13.3). No
-  Wayland, um app não pode capturar a tela por conta própria. A captura nativa tem de passar
-  pelo GNOME, via xdg-desktop-portal Screenshot. O GNOME pode pedir permissão na primeira
-  vez. Validar na implementação se as capturas seguintes ficam silenciosas. O X11 também é
-  suportado pelo app (ver `paste.py`) e deve funcionar, mesmo que por outro caminho.
+- **Ambiente-alvo:** Ubuntu com GNOME 50 em **Wayland** (ambiente do usuário: Flameshot 13.3,
+  dois monitores). No Wayland, um app não pode capturar a tela por conta própria. A captura
+  nativa passa pelo GNOME, via xdg-desktop-portal `Screenshot` com `interactive=false`.
+  O X11 também é suportado pelo app (ver `paste.py`) e deve funcionar, mesmo que por outro
+  caminho.
+  - **Teste feito em 2026-10-27 na máquina do usuário, a partir de um processo do host
+    (`gdbus`):** duas capturas seguidas saíram na hora, sem diálogo. Cada uma gerou um PNG
+    de 6720×2160 (cerca de 1,5–2 MB) com os dois monitores. O portal grava o arquivo na
+    pasta de Imagens do XDG (`Screenshot.png`, `Screenshot-1.png`...).
+  - Se em outra máquina ou versão o GNOME passar a pedir permissão a cada captura, o modo
+    Nativo fica indisponível no Wayland. A tela de configurações explica o motivo e indica
+    o Flameshot. Uma janela a cada print quebra o anti-objetivo de não atrapalhar a reunião.
+    Um diálogo só na primeira vez é aceitável.
+  - O arquivo que o portal grava em Imagens a pedido do TARS é **movido** para a pasta da
+    reunião. Ele não é um print do usuário, então o anti-objetivo da pasta de prints não se
+    aplica. Cuidado: no modo Nativo não há leitura de pasta. Se o usuário também apontar o
+    modo Flameshot para Imagens, os modos são exclusivos, então não há dupla contagem.
 - **Tempo:** os segmentos usam `start_s`, em segundos desde `t0` (`time.monotonic`). A reunião
   guarda `started_at` (relógio de parede local, sem fuso) em `meeting/session.py`.
   - Print nativo: o horário é `monotonic() - t0`, no momento da captura.
@@ -142,6 +157,10 @@ que foi mostrado**. Os prints chegam a três lugares:
   monitores, captura todos.
 - Os prints aparecem numa aba própria "Prints", com o selo 📷 na transcrição (opção C do
   esboço).
+- O anexo na issue é tentado conforme o que o MCP oferecer. Se não der, tudo bem, e a criação
+  da issue nunca é bloqueada.
+- Se o GNOME exigir confirmação a cada captura, o modo Nativo fica indisponível no Wayland
+  (sugestão aceita).
 - Dá para apagar prints depois da finalização.
 - O resumo continua automático e enxerga os prints.
 - O levantamento de issues passa a ser sempre manual, com o campo de contexto disponível
@@ -157,6 +176,11 @@ que foi mostrado**. Os prints chegam a três lugares:
 - Apagar print pede confirmação.
 - Na bandeja, o item "Tirar print" é uma alternativa ao atalho.
 - O Claude cita prints como evidência nas sugestões, e são esses os anexados à issue.
+- Cada sugestão pode tirar um print da lista de anexos sem apagá-lo da reunião.
+- O arquivo gerado pelo portal em Imagens é movido para a pasta da reunião.
+- Prints enviados ao Claude, tanto no resumo quanto no levantamento, têm a resolução
+  reduzida e a quantidade limitada. Se algum ficar de fora, a interface avisa quais foram,
+  sem descartar nada em silêncio. Os valores exatos ficam com o builder.
 - O export com prints vira `.zip`.
 - A aba Prints só aparece quando há prints.
 
@@ -165,8 +189,8 @@ que foi mostrado**. Os prints chegam a três lugares:
 - Formato da tabela e dos arquivos dos prints (nome, formato de gravação, miniaturas).
 - Como mandar imagens ao `claude -p`, tanto no resumo quanto no levantamento, mantendo o
   isolamento atual.
-- Como detectar se o MCP aceita imagens (inspecionar o schema das ferramentas na
-  inicialização) e como enviar o arquivo.
+- Como descobrir o que o MCP oferece para imagens e como enviar o arquivo depois da criação
+  (sem afrouxar o guard que exige que `criar_issue` receba exatamente os campos aprovados).
 - Como o Claude referencia um print na resposta JSON do levantamento (campo novo ao lado de
   `trechos`).
 - Biblioteca e caminho para falar com o portal de Screenshot (D-Bus) e o fallback para X11.
