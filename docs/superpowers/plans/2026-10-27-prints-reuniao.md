@@ -800,7 +800,7 @@ git commit -m "[Feat] Expor prints na API, no status e no export .zip"
   - `PrintsTab` com props `{ meetingId: string; prints: MeetingPrint[]; segments: Segment[]; speakers: Speaker[]; focusId: string | null }` e emits `deleted(id)`, `play(start)`.
   - `TranscriptView` ganha a prop `prints: MeetingPrint[]` e o emit `openPrint(id)`.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```ts
 // PrintsTab.test.ts
@@ -818,12 +818,12 @@ it("mostra a aba Prints (N) entre Transcrição e Tarefas só quando há prints"
 it("exporta .zip quando há prints e .md quando não há", ...)
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `cd app && pnpm test -- PrintsTab TranscriptView MeetingDetail client`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - `detailTabs` passa a ser computado: `Resumo`, `Transcrição` e, quando há prints, `{ id: "prints", label: \`Prints (${n})\` }`. O tipo `MeetingTab` ganha `"prints"`.
 - O selo 📷 fica na fala com o maior `start_s <= at_s` (ou na primeira). Clicar nele leva à aba Prints, com `focusId`.
@@ -833,12 +833,12 @@ Expected: FAIL
 - O export usa `save` com o filtro `zip` e `writeFile` do `@tauri-apps/plugin-fs` quando `meeting.prints.length`. Caso contrário, o fluxo `.md` atual.
 - Rótulo `print_failed`: `"Não foi possível tirar um print"`, em `lib/meeting.ts` e `useStatus.ts`.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `cd app && pnpm test && pnpm build`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src app/src-tauri/capabilities
@@ -922,7 +922,7 @@ git commit -m "[UI] Tornar manual o levantamento e mostrar prints nas tarefas"
   - `TrayView.print_enabled: bool`: gravando e com o print nativo.
   - `pub fn print_allowed(status: Option<BackendStatus>) -> bool`
 
-- [ ] **Step 1: Escrever os testes que falham (módulo `tests` de cada arquivo)**
+- [x] **Step 1: Escrever os testes que falham (módulo `tests` de cada arquivo)**
 
 ```rust
 #[test] fn parses_print_mode_native_and_missing() { /* "native" -> true; sem campo -> false */ }
@@ -931,24 +931,24 @@ git commit -m "[UI] Tornar manual o levantamento e mostrar prints nas tarefas"
 }
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `cd app/src-tauri && cargo test --locked --lib`
 Expected: FAIL
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 - `MeetingPart` ganha `#[serde(default)] print_mode: Option<String>`.
 - O menu ganha `ID_PRINT = "print"`, com o texto "Tirar print", logo abaixo do item de reunião.
 - `set_view` atualiza o `enabled`.
 - `on_menu` chama `report(&app, "tirar o print", backend::request(Method::Post, "/meetings/print", None, None))` quando `print_allowed(backend.current())`.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `cd app/src-tauri && cargo test --locked --lib`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src-tauri/src
