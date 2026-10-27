@@ -269,6 +269,29 @@ def test_unload_stops_the_child_process():
     assert child._pool is None
 
 
+def test_close_kills_a_busy_child_at_once():
+    # o `unload` e o `finally` do script de avaliação não esperam um trabalho longo terminar
+    child = _ChildProcess()
+    pid = child.run(os.getpid)
+    errors: list[BaseException] = []
+
+    def busy():
+        try:
+            child.run(time.sleep, 60)
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=busy)
+    worker.start()
+    time.sleep(0.3)
+
+    child.close()
+    assert _wait_gone(pid, timeout=5.0), "o filho ocupado continuou vivo depois do close"
+    worker.join(10)
+    assert not worker.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], RuntimeError)
+
+
 def test_sigint_does_not_kill_the_child_process():
     # Ctrl+C no terminal manda SIGINT ao grupo todo; o desligamento é decidido pelo pai
     child = _ChildProcess()

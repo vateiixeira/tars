@@ -179,12 +179,14 @@ class _ChildProcess:
             return self._pool
 
     def _discard(self, pool: ProcessPoolExecutor) -> None:
+        # Mata o filho em vez de esperar: no `close`/`unload` ele está ocioso ou deve parar já
+        # (ex.: o `finally` do script de avaliação), e após um `BrokenProcessPool` já morreu.
         with self._lock:
             if self._pool is pool:
                 self._pool = None
         with _live_lock:
             _live_pools.discard(pool)
-        _shutdown(pool, terminate=False)
+        _shutdown(pool, terminate=True)
 
     def run(self, fn: Callable, *args):
         """Roda `fn(*args)` no filho; exceções do filho sobem como vieram."""
