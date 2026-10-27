@@ -70,7 +70,7 @@ Em cada grupo paralelo, os subagents não tocam no plano. O controller marca as 
   - `TaskSuggestion` ganha, no fim e com padrão: `print_ids: list[str]`, `attach_state: str = "none"`, `attach_error: str | None = None`.
   - Os itens de `replace_scan_tasks` e o `add_task(..., print_ids=None)` aceitam a chave `"print_ids"`.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 Em `tests/test_store.py`, atualize `test_migrations_create_schema_and_file_is_private` para `user_version == 6` e `"meeting_prints"` nas tabelas. Adicione:
 
@@ -125,12 +125,12 @@ def test_recover_interrupted_fails_sending_attach(store, meeting):
     assert store.get_task(t.id).attach_state == "failed"
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/test_store.py tests/test_store_tasks.py -q`
 Expected: FAIL (`user_version` 5, `add_print` inexistente).
 
-- [ ] **Step 3: Implementar a migração V6 e os métodos**
+- [x] **Step 3: Implementar a migração V6 e os métodos**
 
 Acrescente `_SCHEMA_V6` em `_MIGRATIONS`:
 
@@ -154,12 +154,12 @@ ALTER TABLE task_suggestions ADD COLUMN attach_error TEXT;
 
 `add_print` captura `sqlite3.IntegrityError`: UNIQUE ou FK devolve None, e outro erro sobe. `delete_print` relê `print_ids_json` das sugestões da reunião e regrava sem o id. `recover_interrupted` também passa `attach_state='sending'` para `failed`, com `_RESTART_JOB_ERROR`.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/test_store.py tests/test_store_tasks.py tests/issues -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/whisper_ditado/store.py tests/test_store.py tests/test_store_tasks.py
@@ -177,7 +177,7 @@ git commit -m "[Feat] Adicionar tabela de prints das reuniões ao banco"
 **Interfaces:**
 - Produces: as chaves `print_mode` (padrão `"off"`), `print_folder` (padrão `None`) e `print_key` (padrão `"ctrl+alt+KEY_P"`) em `DEFAULTS`, já validadas.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```python
 def test_print_settings_defaults_and_validation(settings, tmp_path):
@@ -202,12 +202,12 @@ def test_print_key_must_differ_from_dictation_keys(settings):
         settings.update({"key": "ctrl+alt+KEY_P"})
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/test_settings.py -q`
 Expected: FAIL (`KeyError: 'print_mode'`)
 
-- [ ] **Step 3: Implementar em `_validate`, `_from_env` e `update`**
+- [x] **Step 3: Implementar em `_validate`, `_from_env` e `update`**
 
 - `print_mode`: aceita só os três valores. Mensagem: `f"Modo de prints inválido: {value!r} (use off, flameshot ou native)"`.
 - `print_folder`: nulo ou vazio vira `None`. Fora isso, segue a mesma lógica de `issues_root`, com as mensagens `"Pasta de prints: informe um caminho absoluto"` e `f"Pasta de prints não encontrada: {root}"`.
@@ -215,12 +215,12 @@ Expected: FAIL (`KeyError: 'print_mode'`)
 - Em `update`, se alguma de `key`/`output_key`/`print_key` mudou, use a mesma regra de interseção já existente para comparar o print com os dois atalhos de ditado. Mensagem: `"O atalho do print deve ser diferente dos atalhos de ditado"`.
 - Em `_from_env`, inclua `print_mode` na lista que passa por `_validate`.
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/test_settings.py -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/whisper_ditado/settings.py tests/test_settings.py
@@ -243,7 +243,7 @@ git commit -m "[Feat] Adicionar configurações de prints de tela"
   - `parse_response(code: int, results: dict) -> Path`
   - `capture_screen(timeout_s: float = 10.0) -> Path`: devolve o arquivo gravado pelo portal.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 ```python
 def test_request_path_follows_portal_convention():
@@ -260,12 +260,12 @@ def test_parse_response_ok_and_errors():
         parse_response(0, {"uri": ("s", "https://x/y.png")})
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv add jeepney && uv run --frozen pytest tests/prints/test_portal.py -q`
 Expected: FAIL (módulo inexistente)
 
-- [ ] **Step 3: Implementar `portal.py`**
+- [x] **Step 3: Implementar `portal.py`**
 
 `capture_screen` usa a API bloqueante do jeepney. A ordem importa: a assinatura do sinal tem de existir antes da chamada, senão a resposta se perde.
 
@@ -292,13 +292,13 @@ Mensagens de `parse_response`:
 
 Feche a conexão num `finally`.
 
-- [ ] **Step 4: Rodar e ver passar; validar na máquina real**
+- [x] **Step 4: Rodar e ver passar; validar na máquina real**
 
 Run: `uv run --frozen pytest tests/prints/test_portal.py -q`. Expected: PASS.
 
 Validação manual numa sessão GNOME: rode `uv run --frozen python -c "from whisper_ditado.prints.portal import capture_screen; print(capture_screen())"`. Deve sair um caminho em `~/Imagens`, sem diálogo. Apague esse arquivo depois.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pyproject.toml uv.lock src/whisper_ditado/prints tests/prints
