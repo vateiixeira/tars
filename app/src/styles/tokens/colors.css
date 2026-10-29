@@ -75,8 +75,9 @@
   --success-surface: rgba(4, 105, 75, 0.1);
   --warning: #8a3c0c;
   --warning-surface: rgba(217, 119, 6, 0.12);
-  --danger: #be123c;
-  --danger-surface: rgba(190, 18, 60, 0.1);
+  /* Ligeiramente mais escuro que o design system (#be123c): o selo "Falhou" sobre linha selecionada ficava em 4,35:1. */
+  --danger: #b41037;
+  --danger-surface: rgba(180, 16, 55, 0.1);
   --wave: rgba(91, 33, 182, 0.45);
   --backdrop: rgba(26, 18, 38, 0.36);
   --speaker-0: #6d28d9;
