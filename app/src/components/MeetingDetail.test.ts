@@ -405,7 +405,7 @@ describe("MeetingDetail", () => {
     const { w } = await mountDetail(detail({ summary: "## Pontos" }), { summarize });
     expect(w.get("#tab-summary").attributes("aria-selected")).toBe("true");
     const btn = (label: string) => w.get(".actions").findAll("button").find((b) => b.text().includes(label));
-    expect(w.get(".actions").findAll("button").map((b) => b.text())).toEqual(["Copiar", "Refazer", "Exportar .md", "Ouvir áudio"]);
+    expect(w.get(".actions").findAll("button").map((b) => b.text())).toEqual(["Copiar", "Refazer", "Exportar .md"]);
     await btn("Copiar")!.trigger("click");
     await flushPromises();
     expect(writeText).toHaveBeenCalledWith("## Pontos");
@@ -461,7 +461,7 @@ describe("MeetingDetail", () => {
     const { w } = await mountDetail(detail(), { exportMarkdown, audioBlob });
     const btn = (label: string) => w.findAll("button").find((b) => b.text().includes(label))!;
     await btn("Exportar .md").trigger("click");
-    await btn("Ouvir áudio").trigger("click");
+    await w.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
     await flushPromises();
     expect(w.findAll(".banner.error")).toHaveLength(2);
     expect(warn.mock.calls.flat().join(" ")).not.toContain("Duplicate keys");
@@ -549,11 +549,66 @@ describe("MeetingDetail", () => {
     expect(w.get("audio").attributes("src")).toBe("blob:fake");
   });
 
+  it("o player próprio toca a reunião inteira, pausa, busca e informa o tempo da reunião", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const { w } = await mountDetail(detail(), { audioBlob });
+    const player = w.get(".meeting-player");
+    expect(player.find("audio").exists()).toBe(false);
+    expect(player.text()).toContain("00:00 / 42:00"); // duração da reunião até o áudio chegar
+    expect(player.get('input[type="range"]').attributes("disabled")).toBeDefined();
+
+    await player.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
+    await flushPromises();
+    expect(audioBlob).toHaveBeenCalledWith("m1", undefined, undefined);
+    const audio = w.get("audio.player");
+    expect(audio.attributes("hidden")).toBeDefined();
+    expect(audio.attributes("controls")).toBeUndefined();
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+
+    const el = audio.element as HTMLAudioElement;
+    Object.defineProperty(el, "duration", { configurable: true, value: 120 });
+    await audio.trigger("loadedmetadata");
+    await audio.trigger("play");
+    const pause = player.get('[aria-label="Pausar"]');
+    el.currentTime = 30;
+    await audio.trigger("timeupdate");
+    expect(player.text()).toContain("00:30 / 02:00");
+    const range = player.get('input[type="range"]');
+    expect(range.attributes("aria-valuetext")).toBe("00:30 de 02:00");
+    await pause.trigger("click");
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+
+    await range.setValue("90");
+    expect(el.currentTime).toBe(90);
+    expect(player.text()).toContain("01:30 / 02:00");
+    // o tempo atual fica disponível para a transcrição (Fase 5)
+    expect((w.vm as unknown as { playback: { at: number } | null }).playback?.at).toBe(90);
+  });
+
+  it("tocar uma fala leva o player àquele tempo da reunião e permite voltar à reunião inteira", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const { w } = await mountDetail(detail(), { audioBlob });
+    await w.findAll(".row .play")[1].trigger("click");
+    await flushPromises();
+    expect(audioBlob).toHaveBeenCalledWith("m1", 31, 40);
+    const player = w.get(".meeting-player");
+    expect(player.text()).toContain("00:31 / 00:40");
+    const el = w.get("audio").element as HTMLAudioElement;
+    el.currentTime = 4;
+    await w.get("audio").trigger("timeupdate");
+    expect(player.text()).toContain("00:35 / 00:40");
+    await player.findAll("button").find((b) => b.text() === "Reunião inteira")!.trigger("click");
+    await flushPromises();
+    expect(audioBlob).toHaveBeenLastCalledWith("m1", undefined, undefined);
+    expect(player.text()).toContain("00:00 / 42:00");
+    expect(player.findAll("button").some((b) => b.text() === "Reunião inteira")).toBe(false);
+  });
+
   it("permite ouvir uma pessoa no menu e interrompe o áudio da reunião", async () => {
     const audioBlob = vi.fn(async () => new Blob(["audio"], { type: "audio/ogg" }));
     Object.assign(URL, { createObjectURL: vi.fn(() => "blob:sample"), revokeObjectURL: vi.fn() });
     const { w } = await mountDetail(detail(), { audioBlob });
-    await w.findAll("button").find((b) => b.text().includes("Ouvir áudio"))!.trigger("click");
+    await w.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
     await flushPromises();
     expect(w.find(".player").exists()).toBe(true);
     await w.get('button[data-speaker="s2"]').trigger("click");
@@ -609,7 +664,7 @@ describe("MeetingDetail", () => {
     Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
     const { w, getMeeting } = await mountDetail(detail(), { audioBlob });
     getMeeting.mockImplementation(async () => detail({ id: "m2" }));
-    await w.findAll("button").find((b) => b.text().includes("Ouvir áudio"))!.trigger("click");
+    await w.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
     await w.setProps({ meetingId: "m2" });
     await flushPromises();
     resolveAudio(new Blob(["x"]));

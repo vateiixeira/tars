@@ -34,6 +34,7 @@ import AppDialog from "./ui/AppDialog.vue";
 import SkeletonLines from "./ui/SkeletonLines.vue";
 import StepProgress from "./ui/StepProgress.vue";
 import MeetingRecording from "./MeetingRecording.vue";
+import MeetingPlayer, { type Playback } from "./MeetingPlayer.vue";
 import MeetingHeader, { type MeetingMenuKey } from "./MeetingHeader.vue";
 import NameSuggestionsDialog from "./NameSuggestionsDialog.vue";
 import SpeakerMenu from "./SpeakerMenu.vue";
@@ -368,14 +369,29 @@ function remove(): Promise<void> {
 // -- áudio ----------------------------------------------------------------------------------
 
 const audioUrl = ref<string | null>(null);
-const audioEl = ref<HTMLAudioElement | null>(null);
+// Trecho carregado no player (segundos da reunião); `null` = reunião inteira.
+const audioClip = ref<{ start: number; end: number } | null>(null);
+const player = ref<InstanceType<typeof MeetingPlayer> | null>(null);
+// Tempo atual do player em segundos da reunião (e se está tocando), atualizado a cada
+// `timeupdate`; `null` sem áudio carregado. É o que marca a fala tocando na transcrição.
+const playback = ref<Playback | null>(null);
 let audioSeq = 0;
+
+const meetingLength = computed(() => {
+  const m = meeting.value;
+  if (!m) return 0;
+  const start = Date.parse(m.started_at);
+  const end = m.ended_at ? Date.parse(m.ended_at) : NaN;
+  if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) return (end - start) / 1000;
+  return m.segments[m.segments.length - 1]?.end_s ?? 0;
+});
 
 function stopAudio(): void {
   ++audioSeq;
-  audioEl.value?.pause?.();
+  player.value?.pause();
   if (audioUrl.value) URL.revokeObjectURL(audioUrl.value);
   audioUrl.value = null;
+  audioClip.value = null;
 }
 
 /** Baixa o áudio (reunião inteira ou só o trecho) e toca no player. */
@@ -387,10 +403,10 @@ function playAudio(start?: number, end?: number): Promise<void> {
     if (id !== props.meetingId || seq !== audioSeq) return;
     const previous = audioUrl.value;
     audioUrl.value = URL.createObjectURL(blob);
+    audioClip.value = start !== undefined && end !== undefined ? { start, end } : null;
     if (previous) URL.revokeObjectURL(previous);
     await nextTick();
-    // jsdom não implementa `play`; no app, um autoplay barrado não deve virar erro na tela
-    await audioEl.value?.play?.()?.catch(() => {});
+    await player.value?.play();
   });
 }
 
@@ -560,14 +576,6 @@ onBeforeUnmount(() => {
           <AppButton size="sm" :busy="isBusy('export')" :disabled="!connected" @click="exportMeeting">
             <AppIcon name="export" :size="15" />Exportar {{ exportExtension }}
           </AppButton>
-          <button
-            type="button"
-            class="btn ghost btn-sm audio-action"
-            :disabled="isBusy('audio') || !connected"
-            @click="playAudio()"
-          >
-            <AppIcon name="play" :size="15" />Ouvir áudio
-          </button>
         </div>
         <ul v-if="alerts.length && tab === 'transcript'" class="alerts">
           <li v-for="(line, i) in alerts" :key="i">{{ line }}</li>
@@ -648,13 +656,16 @@ onBeforeUnmount(() => {
             />
           </div>
         </div>
-        <audio
-          v-if="audioUrl"
-          ref="audioEl"
-          class="player"
+        <MeetingPlayer
+          ref="player"
           :src="audioUrl"
-          aria-label="Áudio da reunião"
-          controls
+          :start="audioClip?.start ?? 0"
+          :end="audioClip?.end ?? null"
+          :total="meetingLength"
+          :loading="isBusy('audio')"
+          :disabled="!connected"
+          @load="playAudio()"
+          @progress="playback = $event"
         />
         <span class="sr-only" role="status">{{
           copied === "transcript" ? "Transcrição copiada." : copied === "summary" ? "Resumo copiado." : ""
@@ -746,19 +757,10 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
   padding: var(--space-3) var(--page-gutter) var(--space-2);
 }
-.audio-action {
-  margin-left: auto;
-}
 .section-caption {
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
-}
-.player {
-  width: calc(100% - 2 * var(--page-gutter));
-  margin: 8px var(--page-gutter) 16px;
-  height: 42px;
-  flex-shrink: 0;
 }
 /* Abas (am-tab): sublinhado em gradiente na selecionada e contador em pílula. */
 .tabs {
@@ -928,9 +930,6 @@ onBeforeUnmount(() => {
   }
   .actions {
     padding: var(--space-2) var(--space-5);
-  }
-  .actions .audio-action {
-    margin-left: 0;
   }
 }
 </style>
