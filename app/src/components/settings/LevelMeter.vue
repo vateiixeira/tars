@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// Medidor horizontal de nível em dBFS. A barra cobre de -60 a 0 dB (abaixo disso já é silêncio;
-// o piso do backend é -90).
+// Medidor horizontal de nível em dBFS (am-meter): ícone num círculo, trilha em pílula e o valor
+// em números tabulares. A barra cobre de -60 a 0 dB (abaixo disso já é silêncio; o piso do
+// backend é -90). Usado na conferência de áudio das configurações e na reunião gravando.
 import AppIcon from "../ui/AppIcon.vue";
 import { computed } from "vue";
 
@@ -24,7 +25,7 @@ const text = computed(() => (props.db <= -90 ? "sem sinal" : `${Math.round(props
 
 <template>
   <div class="meter">
-    <AppIcon class="icon" :name="icon" :size="18" />
+    <span class="icon" aria-hidden="true"><AppIcon :name="icon" :size="16" /></span>
     <div
       class="track"
       role="meter"
@@ -43,38 +44,52 @@ const text = computed(() => (props.db <= -90 ? "sem sinal" : `${Math.round(props
 .meter {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .icon {
-  width: 22px;
-  text-align: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--glass-strong);
+  color: var(--text-muted);
 }
 .track {
   flex: 1;
+  min-width: 0;
   height: 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-strong);
   overflow: hidden;
 }
 .bar {
   height: 100%;
-
+  border-radius: var(--radius-pill);
+  transition: width 90ms linear;
 }
 .bar.ok {
   background: var(--success);
 }
 .bar.loud {
-  background: var(--warn);
+  background: var(--warning);
 }
 .bar.hot {
   background: var(--danger);
 }
 .value {
-  width: 76px;
+  width: 72px;
+  flex-shrink: 0;
   text-align: right;
-  color: var(--muted);
-  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    transition: none;
+  }
 }
 </style>
