@@ -25,6 +25,7 @@ import {
   tasksMarkdown,
 } from "../lib/tasks";
 import AppIcon from "./ui/AppIcon.vue";
+import AppSpinner from "./ui/AppSpinner.vue";
 import TaskCard from "./TaskCard.vue";
 
 const props = defineProps<{ meetingId: string; startedAt: string; prints: MeetingPrint[] }>();
@@ -203,6 +204,14 @@ const openMissing = computed(() => {
   if (!t || !isPending(t)) return [];
   return missingFields({ ...t, title: liveTitles.value[t.id] ?? t.title });
 });
+
+// Cartão aberto em criação (no servidor ou neste clique): fica esmaecido, com a mensagem por cima.
+const openCreating = computed(
+  () =>
+    open.value !== null &&
+    !open.value.discarded &&
+    (open.value.create_state === "creating" || isBusy(`create:${open.value.id}`)),
+);
 
 const ROW_STATE: Partial<Record<TaskSuggestion["create_state"], string>> = {
   creating: "criando…",
@@ -445,8 +454,14 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       </button>
     </p>
 
-    <div v-if="running" class="scan-status">
-      <span class="muted" role="status">{{ isBusy('cancel-scan') ? "Cancelando levantamento…" : "Levantando tarefas…" }}</span>
+    <div v-if="running" class="scan-box">
+      <AppSpinner :size="20" />
+      <div class="scan-text" role="status">
+        {{ isBusy('cancel-scan') ? "Cancelando levantamento…" : "Levantando tarefas…" }}
+        <small>O Claude está lendo a transcrição e os prints. Isso pode levar alguns minutos.</small>
+        <div class="scan-bar" aria-hidden="true"><i></i></div>
+      </div>
+      <span class="spacer"></span>
       <button
         type="button"
         class="btn"
@@ -471,6 +486,19 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
         Tentar de novo
       </button>
     </p>
+
+    <div v-if="running && items.length === 0" class="skeleton" aria-hidden="true">
+      <div class="sk-list">
+        <div class="sk" v-for="n in 3" :key="n"></div>
+      </div>
+      <div class="sk-card">
+        <div class="sk sk-title"></div>
+        <div class="sk sk-body"></div>
+        <div class="sk-fields">
+          <div class="sk" v-for="n in 3" :key="n"></div>
+        </div>
+      </div>
+    </div>
 
     <template v-if="items.length === 0 && !running">
       <p v-if="!loaded" class="muted">Carregando…</p>
@@ -546,7 +574,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
                   ok: t.create_state === 'created',
                   warn: t.create_state === 'uncertain',
                 }"
-                >{{ rowState(t) }}</span
+                ><AppSpinner v-if="isBusy(`create:${t.id}`) || t.create_state === 'creating'" :size="10" />{{ rowState(t) }}</span
               ></span
             >
             <span class="rtitle" :class="{ struck: t.discarded }">{{
@@ -558,19 +586,25 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
 
       <section v-if="open" class="detail">
         <p v-if="allReviewed" class="note">Tudo revisado</p>
-        <TaskCard
-          :key="open.id"
-          class="open-card"
-          :task="open"
-          :options="options"
-          :missing="openMissing"
-          :error="cardErrors[open.id] ?? null"
-          :prints="prints"
-          @update="onUpdate"
-          @draft="(id, title) => (liveTitles = { ...liveTitles, [id]: title })"
-          @play="(s, e) => emit('play', s, e)"
-          @resolve="onResolve"
-        />
+        <div class="card-wrap" :class="{ busy: openCreating }">
+          <TaskCard
+            :key="open.id"
+            class="open-card"
+            :task="open"
+            :options="options"
+            :missing="openMissing"
+            :error="cardErrors[open.id] ?? null"
+            :prints="prints"
+            :inert="openCreating ? '' : undefined"
+            @update="onUpdate"
+            @draft="(id, title) => (liveTitles = { ...liveTitles, [id]: title })"
+            @play="(s, e) => emit('play', s, e)"
+            @resolve="onResolve"
+          />
+          <div v-if="openCreating" class="card-overlay" role="status">
+            <AppSpinner :size="20" />Criando a issue no MCP de issues…
+          </div>
+        </div>
         <div v-if="isPending(open)" class="actions">
           <button
             type="button"
@@ -606,7 +640,10 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
             "
             @click="createInIssue(open)"
           >
-            {{ isBusy(`create:${open.id}`) ? "Criando…" : "Criar issue" }}
+            <template v-if="isBusy(`create:${open.id}`)"
+              ><AppSpinner :size="14" /> Criando…</template
+            >
+            <template v-else>Criar issue</template>
           </button>
         </div>
       </section>
@@ -635,13 +672,112 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
 .spacer {
   flex: 1;
 }
-.scan-status {
+.scan-box {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
   margin-bottom: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--surface-raised);
+  color: var(--accent);
   flex-shrink: 0;
+}
+.scan-text {
+  color: var(--text);
+}
+.scan-text small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.scan-bar {
+  width: min(260px, 100%);
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: var(--selected);
+  overflow: hidden;
+}
+.scan-bar i {
+  display: block;
+  width: 35%;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+  animation: scan-slide 1.4s ease-in-out infinite;
+}
+@keyframes scan-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.skeleton {
+  display: grid;
+  grid-template-columns: minmax(220px, 25%) minmax(0, 1fr);
+  gap: 24px;
+  flex-shrink: 0;
+}
+.sk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sk-list .sk {
+  height: 38px;
+}
+.sk-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+.sk {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--selected) 0%, var(--surface) 50%, var(--selected) 100%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.3s linear infinite;
+}
+.sk-title {
+  width: 60%;
+  height: 18px;
+  margin-bottom: 12px;
+}
+.sk-body {
+  height: 90px;
+  margin-bottom: 12px;
+}
+.sk-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.sk-fields .sk {
+  height: 32px;
+}
+@keyframes sk-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-bar i,
+  .sk {
+    animation: none;
+  }
+}
+@container tasks (max-width:920px) {
+  .skeleton {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sk-list {
+    display: none;
+  }
 }
 .scan-context {
   flex-shrink: 0;
@@ -734,6 +870,11 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
   font-size: 0.7rem;
   color: var(--muted);
 }
+.tag:has(.spinner) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .tag.ok {
   color: var(--accent);
   font-weight: 600;
@@ -768,6 +909,27 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
 /* O card aberto cresce até o fim da coluna (a descrição fica com a sobra); em janela baixa, a coluna rola. */
 .open-card {
   flex: 1 0 auto;
+}
+.card-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+}
+.card-wrap.busy .open-card {
+  opacity: 0.45;
+}
+.card-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 .note {
   margin: 0;
