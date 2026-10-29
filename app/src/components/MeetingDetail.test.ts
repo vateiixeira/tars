@@ -4,7 +4,7 @@ import { ApiError } from "../api/client";
 import { meetingsRevision } from "../composables/useMeetingsRevision";
 import { setStatusStore } from "../composables/useStatus";
 import type { MeetingDetail as Detail, MeetingPrint } from "../api/types";
-import { installStore, reconnect } from "../test/meetingFakes";
+import { IDLE, installStore, reconnect } from "../test/meetingFakes";
 
 const writeText = vi.fn(async (_t: string) => {});
 const save = vi.fn(async (_o?: unknown): Promise<string | null> => "/tmp/x.md");
@@ -69,20 +69,59 @@ async function mountDetail(d: Detail, overrides: Record<string, unknown> = {}) {
 describe("MeetingDetail", () => {
   it("MeetingDetail shows progress and failed state", async () => {
     const { w, emit, getMeeting } = await mountDetail(detail({ status: "processing", segments: [] }));
-    expect(w.text()).toContain("Processando");
+    const states = () => w.findAll(".step").map((li) => `${li.text().split(":")[0]}=${li.attributes("data-state")}`);
+    expect(w.text()).toContain("Preparando sua reunião");
+    expect(w.text()).toContain("Você já pode iniciar outra reunião.");
+    expect(states()).toEqual(["Transcrição=todo", "Falantes=todo", "Finalização=todo"]);
     emit({ type: "progress", meeting_id: "m1", stage: "separando vozes" });
     await flushPromises();
-    expect(w.text()).toContain("separando vozes");
+    expect(states()).toEqual(["Transcrição=done", "Falantes=run", "Finalização=todo"]);
+    expect(w.text()).toContain("Em andamento: Falantes");
+    expect(w.text()).not.toMatch(/\d+\s*%/); // só etapas, nunca porcentagem
     emit({ type: "progress", meeting_id: "outra", stage: "finalizando" });
     await flushPromises();
-    expect(w.text()).not.toContain("finalizando");
+    expect(states()).toEqual(["Transcrição=done", "Falantes=run", "Finalização=todo"]);
 
-    // falhou: mensagem + Reprocessar
+    // falhou: banner com a mensagem + Reprocessar
     getMeeting.mockResolvedValue(detail({ status: "failed", error: "Whisper caiu", segments: [] }));
     emit({ type: "meeting_updated", meeting_id: "m1", status: "failed" });
     await flushPromises();
-    expect(w.text()).toContain("Whisper caiu");
+    expect(w.get(".failed-banner").attributes("role")).toBe("alert");
+    expect(w.get(".failed-banner").text()).toContain("Whisper caiu");
     expect(w.findAll("button").some((b) => b.text() === "Reprocessar")).toBe(true);
+  });
+
+  it("gravando mostra o cronômetro, os medidores e os alertas ao vivo", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-19T14:12:47"));
+    try {
+      const recording = { ...IDLE, meeting: { ...IDLE.meeting, state: "recording" as const, meeting_id: "m1", started_at: "2026-10-19T14:00:00", alerts: ["mic_silent" as const] } };
+      const getMeeting = vi.fn(async () => detail({ status: "recording", ended_at: null, segments: [] }));
+      const { emit } = installStore({ getMeeting }, recording);
+      const w = mount(MeetingDetail, { props: { meetingId: "m1" } });
+      await flushPromises();
+      expect(w.get(".recording h2").text()).toBe("Gravando háGravando · 12:47");
+      const meter = (label: string) => w.get(`[role="meter"][aria-label="${label}"]`);
+      // sem níveis recentes: medidores zerados e o aviso de espera
+      expect(meter("Microfone").attributes("aria-valuenow")).toBe("-90");
+      expect(w.text()).toContain("Aguardando níveis de áudio recentes.");
+      expect(w.get(".recording .alert").text()).toContain("Microfone");
+
+      emit({ type: "levels", mic_db: -30, pc_db: -12.4 });
+      await flushPromises();
+      expect(meter("Microfone").attributes("aria-valuenow")).toBe("-30");
+      expect(meter("Áudio do PC").attributes("aria-valuenow")).toBe("-12");
+      expect(w.text()).not.toContain("Aguardando níveis de áudio recentes.");
+
+      vi.advanceTimersByTime(3500); // níveis velhos contam como sem sinal
+      await flushPromises();
+      expect(w.get(".recording h2").text()).toContain("12:50");
+      expect(meter("Microfone").attributes("aria-valuenow")).toBe("-90");
+      expect(w.text()).toContain("Aguardando níveis de áudio recentes.");
+      w.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("failed state reprocess calls the API", async () => {
@@ -583,14 +622,14 @@ describe("MeetingDetail", () => {
     const { w, events, emit, getMeeting } = await mountDetail(detail({ status: "processing", segments: [] }));
     emit({ type: "progress", meeting_id: "m1", stage: "separando vozes" });
     await flushPromises();
-    expect(w.text()).toContain("separando vozes");
+    expect(w.text()).toContain("Em andamento: Falantes");
 
     // durante a queda a reunião terminou; o `meeting_updated` se perdeu
     getMeeting.mockResolvedValue(detail());
     await reconnect(events, emit);
     await flushPromises();
     expect(w.text()).toContain("Bom dia");
-    expect(w.text()).not.toContain("separando vozes");
+    expect(w.find(".step").exists()).toBe(false);
   });
 
   it("Tarefas é uma aba do mesmo tablist, carregada só ao abrir e com o contador da aba", async () => {

@@ -32,6 +32,8 @@ import AppButton from "./ui/AppButton.vue";
 import AppIcon from "./ui/AppIcon.vue";
 import AppDialog from "./ui/AppDialog.vue";
 import SkeletonLines from "./ui/SkeletonLines.vue";
+import StepProgress from "./ui/StepProgress.vue";
+import MeetingRecording from "./MeetingRecording.vue";
 import MeetingHeader, { type MeetingMenuKey } from "./MeetingHeader.vue";
 import NameSuggestionsDialog from "./NameSuggestionsDialog.vue";
 import SpeakerMenu from "./SpeakerMenu.vue";
@@ -49,28 +51,9 @@ const emit = defineEmits<{
   tasksView: [active: boolean];
 }>();
 
-const { client, events, connected, alerts: liveAlerts, levels } = useStatus();
+const { client, events, connected } = useStatus();
 
 const meeting = ref<MeetingDetail | null>(null);
-const levelTime = ref(Date.now());
-let levelTimer: ReturnType<typeof setInterval> | undefined;
-watch(
-  () => meeting.value?.status,
-  (value) => {
-    clearInterval(levelTimer);
-    levelTimer = undefined;
-    if (value === "recording") {
-      levelTime.value = Date.now();
-      levelTimer = setInterval(() => (levelTime.value = Date.now()), 500);
-    }
-  },
-);
-onBeforeUnmount(() => clearInterval(levelTimer));
-const captureLevels = computed(() =>
-  connected.value && levels.value && levelTime.value - levels.value.at < 3000
-    ? levels.value
-    : null,
-);
 const loadError = ref<string | null>(null);
 // Erro por ação: o de uma não some quando outra começa.
 const actionErrors = ref<Record<string, string>>({});
@@ -85,6 +68,12 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 const stage = ref<ProgressStage | null>(null);
+// Etapas reais do processamento (evento `progress`), na ordem em que o backend as percorre.
+const PROCESSING_STEPS: { key: ProgressStage; label: string }[] = [
+  { key: "transcrevendo", label: "Transcrição" },
+  { key: "separando vozes", label: "Falantes" },
+  { key: "finalizando", label: "Finalização" },
+];
 type MeetingTab = "transcript" | "summary" | "prints" | "tasks";
 const tab = ref<MeetingTab>("transcript");
 // Aba Tarefas aberta: o App recolhe a biblioteca para dar largura às duas colunas das tarefas.
@@ -473,65 +462,32 @@ onBeforeUnmount(() => {
       >
         <AppIcon name="warning" :size="18" />{{ b.message }}
       </p>
-      <div v-if="meeting.status === 'recording'" class="capture-state">
-        <span class="capture-status"
-          ><span class="capture-dot" />Gravação em andamento</span
-        >
-        <h2>Registrando a reunião</h2>
-        <p>
-          Microfone e áudio do computador. A transcrição completa aparece após o
-          processamento.
-        </p>
-        <div
-          v-for="alert in liveAlerts"
-          :key="alert.kind"
-          class="capture-alert"
-          role="status"
-        >
-          <AppIcon name="warning" :size="18" />{{ alert.message }}
+      <MeetingRecording v-if="meeting.status === 'recording'" :started-at="meeting.started_at" />
+      <div v-else-if="meeting.status === 'processing'" class="processing">
+        <div>
+          <h2>Preparando sua reunião</h2>
+          <p class="hint">Você já pode iniciar outra reunião.</p>
         </div>
-        <div v-if="captureLevels" class="capture-levels">
-          <label
-            >Microfone<meter
-              min="-90"
-              max="0"
-              :value="captureLevels.mic_db"
-            />{{
-              captureLevels.mic_db > -60
-                ? "Sinal recebido"
-                : "Sem sinal recente"
-            }}</label
-          ><label
-            >Áudio do PC<meter
-              min="-90"
-              max="0"
-              :value="captureLevels.pc_db"
-            />{{
-              captureLevels.pc_db > -60 ? "Sinal recebido" : "Sem sinal recente"
-            }}</label
-          >
-        </div>
-        <p v-if="!captureLevels" class="capture-hint">
-          Aguardando níveis de áudio recentes.
-        </p>
-        <p class="capture-hint">
-          Use Parar no controle de captura para encerrar a reunião.
-        </p>
-      </div>
-      <div
-        v-else-if="meeting.status === 'processing'"
-        class="state progress"
-        role="status"
-      >
-        <AppIcon name="refresh" :size="28" />
-        <h2>Preparando sua reunião</h2>
-        <p>Processando: {{ stage ?? "aguardando" }}…</p>
-        <p class="muted">Você já pode iniciar outra reunião.</p>
+        <!-- montado durante todo o processamento: a região viva dele anuncia cada etapa -->
+        <StepProgress class="steps" :steps="PROCESSING_STEPS" :current="stage" />
       </div>
       <div v-else-if="meeting.status === 'failed'" class="state failed">
-        <p role="alert">
-          {{ meeting.error || "O processamento da reunião falhou." }}
-        </p>
+        <div class="banner failed-banner" role="alert">
+          <AppIcon name="warning" :size="18" />
+          <div>
+            <strong>O processamento falhou</strong>
+            {{ meeting.error || "Não foi possível transcrever esta reunião." }}
+          </div>
+          <AppButton
+            v-if="!confirmingReprocess"
+            size="sm"
+            :busy="isBusy('reprocess')"
+            :disabled="!connected"
+            @click="requestReprocess"
+          >
+            <AppIcon name="refresh" :size="15" />Reprocessar
+          </AppButton>
+        </div>
         <div
           v-if="confirmingReprocess"
           class="confirm"
@@ -560,15 +516,6 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <button
-          v-else
-          type="button"
-          class="btn pri"
-          :disabled="isBusy('reprocess') || !connected"
-          @click="requestReprocess"
-        >
-          Reprocessar
-        </button>
       </div>
       <template v-else>
         <div class="tabs" role="tablist" aria-label="Conteúdo da reunião">
@@ -773,15 +720,24 @@ onBeforeUnmount(() => {
 .confirm {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  font-size: var(--font-control);
+  gap: var(--space-3);
+  max-width: var(--read-max);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  font-size: 14px;
+}
+.confirm p {
+  margin: 0;
 }
 .confirm div,
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .actions {
   display: flex;
@@ -873,20 +829,37 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
 }
-.progress {
-  display: flex;
+.processing {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--page-gutter);
   text-align: center;
 }
-.progress svg {
-  color: var(--text-accent);
+.processing h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
 }
-.progress h2 {
-  color: var(--text);
-  margin-top: 20px;
+.hint {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.steps {
+  width: min(440px, 100%);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  text-align: left;
 }
 .state {
   padding: var(--space-8) var(--page-gutter);
@@ -904,8 +877,16 @@ onBeforeUnmount(() => {
 .skel-title :deep(.skel) {
   height: 22px;
 }
-.state.failed p {
-  color: var(--danger);
+.state.failed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+.banner strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
 }
 /* Erro de ação (am-banner--danger): ícone, mensagem e, quando houver, a ação de refazer. */
 .banner {
@@ -932,64 +913,6 @@ onBeforeUnmount(() => {
 .state .banner {
   margin: 0;
 }
-.capture-state {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 32px;
-  text-align: center;
-}
-.capture-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--danger);
-  font-size: var(--font-control);
-}
-.capture-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--danger);
-}
-.capture-state h2 {
-  font-size: 1.5rem;
-  margin-top: 24px;
-}
-.capture-state > p {
-  max-width: 55ch;
-  margin: 16px auto;
-  font-size: var(--font-control);
-  color: var(--muted);
-}
-.capture-alert {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  color: var(--warn);
-  background: var(--warning-surface);
-  padding: 12px;
-  margin: 12px auto;
-  max-width: 600px;
-}
-.capture-levels {
-  max-width: 500px;
-  margin: 24px auto;
-}
-.capture-levels label {
-  display: grid;
-  grid-template-columns: 100px 1fr 120px;
-  align-items: center;
-  gap: 12px;
-  margin: 14px 0;
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-meter {
-  width: 100%;
-  accent-color: var(--audio-color);
-}
 /* do mais largo para o mais estreito: a regra mais estreita vence */
 @container detail (max-width:900px) {
   .tabs {
@@ -1008,10 +931,6 @@ meter {
   }
   .actions .audio-action {
     margin-left: 0;
-  }
-  .capture-levels label {
-    grid-template-columns: 1fr;
-    text-align: left;
   }
 }
 </style>
