@@ -28,7 +28,7 @@ import type {
 } from "../api/types";
 import { notifyMeetingsChanged } from "../composables/useMeetingsRevision";
 import { useStatus } from "../composables/useStatus";
-import { alertLines, exportFileName, transcriptText } from "../lib/meeting";
+import { alertLines, exportFileName, playingSegmentId, transcriptText } from "../lib/meeting";
 import AppBanner from "./ui/AppBanner.vue";
 import AppButton from "./ui/AppButton.vue";
 import AppIcon from "./ui/AppIcon.vue";
@@ -388,6 +388,12 @@ const meetingLength = computed(() => {
   return m.segments[m.segments.length - 1]?.end_s ?? 0;
 });
 
+// Fala tocando agora: muda só na troca de fala (o tempo do player muda ~4x/s), então a transcrição
+// não re-renderiza a cada `timeupdate`.
+const playingId = computed(() =>
+  playback.value?.playing && meeting.value ? playingSegmentId(meeting.value.segments, playback.value.at) : null,
+);
+
 /** Tempo do player; voltar a tocar com sucesso tira o aviso de falha de áudio. */
 function onPlayback(state: Playback | null): void {
   playback.value = state;
@@ -612,7 +618,7 @@ onBeforeUnmount(() => {
               :segments="meeting.segments"
               :speakers="meeting.speakers"
               :prints="meeting.prints"
-              :playing-at="playback?.playing ? playback.at : null"
+              :playing-id="playingId"
               @play="playSegment"
               @open-print="openPrint"
             />

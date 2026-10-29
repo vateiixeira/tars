@@ -95,25 +95,21 @@ describe("TranscriptView", () => {
   });
 
   it("marca a fala que está tocando e só ela", async () => {
-    const segments = Array.from({ length: 6 }, (_, i) => seg(i)); // inícios 0,3,6,9,12,15; fim = início + 2
-    const w = mount(TranscriptView, { props: { segments, speakers, prints: [], playingAt: null } });
+    const segments = Array.from({ length: 6 }, (_, i) => seg(i));
+    const w = mount(TranscriptView, { props: { segments, speakers, prints: [], playingId: null } });
     const playing = () => w.findAll(".row").map((r) => r.get(".am-bubble").classes().includes("is-playing"));
     expect(playing()).toEqual([false, false, false, false, false, false]);
-    await w.setProps({ playingAt: 7 });
+    await w.setProps({ playingId: 2 });
     expect(playing()).toEqual([false, false, true, false, false, false]);
-    await w.setProps({ playingAt: 8.5 }); // no intervalo entre falas, fica na última iniciada
-    expect(playing()).toEqual([false, false, true, false, false, false]);
-    await w.setProps({ playingAt: 12 });
+    await w.setProps({ playingId: 4 });
     expect(playing()).toEqual([false, false, false, false, true, false]);
-    await w.setProps({ playingAt: 40 }); // depois do fim da última fala
-    expect(playing()).toEqual([false, false, false, false, false, false]);
-    await w.setProps({ playingAt: null });
+    await w.setProps({ playingId: null });
     expect(playing()).toEqual([false, false, false, false, false, false]);
   });
 
   it("não marca nada se a fala tocando está fora da janela virtualizada", async () => {
     const segments = Array.from({ length: 5000 }, (_, i) => seg(i));
-    const w = mount(TranscriptView, { props: { segments, speakers, prints: [], playingAt: 3 * 4000 } });
+    const w = mount(TranscriptView, { props: { segments, speakers, prints: [], playingId: 4000 } });
     expect(w.findAll(".am-bubble.is-playing")).toHaveLength(0);
     expect(w.findAll(".row").length).toBeLessThan(200);
   });

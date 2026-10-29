@@ -12,8 +12,12 @@ const props = defineProps<{
   segments: Segment[];
   speakers: Speaker[];
   prints: MeetingPrint[];
-  /** Segundo da reunião que está tocando agora; `null` = nada tocando. */
-  playingAt?: number | null;
+  /**
+   * Id da fala que está tocando; `null` = nada tocando. O pai calcula a partir do tempo do player
+   * (`playingSegmentId`) e o valor só muda na troca de fala: o `timeupdate`, que dispara ~4x/s,
+   * não re-renderiza a lista nem refaz a medição das linhas.
+   */
+  playingId?: number | null;
 }>();
 const emit = defineEmits<{ play: [segment: Segment]; openPrint: [id: string] }>();
 
@@ -72,27 +76,6 @@ const range = computed(() => {
   return { start, end };
 });
 
-/**
- * Índice da fala tocando: a última que começou até `playingAt` (busca binária, as falas vêm em
- * ordem de início). Depois do fim da última fala, nenhuma. Só muda de valor quando a fala troca,
- * então o `timeupdate` do player não re-renderiza a lista.
- */
-const playingIndex = computed(() => {
-  const at = props.playingAt;
-  const segs = props.segments;
-  if (at == null || !Number.isFinite(at) || !segs.length) return -1;
-  let lo = 0;
-  let hi = segs.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (segs[mid].start_s <= at) lo = mid + 1;
-    else hi = mid;
-  }
-  const i = lo - 1;
-  if (i < 0) return -1;
-  return i === segs.length - 1 && at >= segs[i].end_s ? -1 : i;
-});
-
 const rows = computed(() =>
   props.segments.slice(range.value.start, range.value.end).map((seg, k) => {
     const index = range.value.start + k;
@@ -106,7 +89,7 @@ const rows = computed(() =>
       me: !!sp?.is_me,
       // falas seguidas do mesmo falante omitem o cabeçalho
       header: !prev || prev.speaker_id !== seg.speaker_id,
-      playing: index === playingIndex.value,
+      playing: seg.id === props.playingId,
       prints: printsBySegment.value.get(seg.id) ?? [],
     };
   }),
@@ -174,7 +157,7 @@ onBeforeUnmount(() => observer?.disconnect());
   <div ref="scroller" class="scroller" aria-label="Transcrição da reunião" tabindex="0" @scroll.passive="onScroll">
     <div class="rows" :style="{ paddingTop: padTop + 'px', paddingBottom: padBottom + 'px' }">
       <div v-for="r in rows" :key="r.seg.id" class="row" :class="{ me: r.me }" :data-id="r.seg.id">
-        <div class="am-bubble" :class="{ 'am-bubble--me': r.me, 'is-playing': r.playing, 'no-header': !r.header }">
+        <div class="am-bubble" :class="{ 'am-bubble--me': r.me, 'is-playing': r.playing }">
           <div v-if="r.header" class="am-bubble__meta">
             <span class="am-bubble__who" :style="{ color: r.color }">{{ r.name }}</span>
             <span class="ts">· {{ r.time }}</span>
