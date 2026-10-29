@@ -597,6 +597,7 @@ onBeforeUnmount(() => {
               :segments="meeting.segments"
               :speakers="meeting.speakers"
               :prints="meeting.prints"
+              :playing-at="playback?.playing ? playback.at : null"
               @play="playSegment"
               @open-print="openPrint"
             />

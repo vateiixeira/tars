@@ -606,6 +606,22 @@ describe("MeetingDetail", () => {
     expect(w.find("audio").exists()).toBe(false);
   });
 
+  it("marca na transcrição a fala que está tocando e desmarca ao pausar", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const { w } = await mountDetail(detail(), { audioBlob });
+    await w.findAll(".row .play")[1].trigger("click");
+    await flushPromises();
+    const audio = w.get("audio");
+    const el = audio.element as HTMLAudioElement;
+    const playing = () => w.findAll(".row").map((r) => r.get(".am-bubble").classes().includes("is-playing"));
+    await audio.trigger("play");
+    el.currentTime = 2; // 31 + 2 = 33s da reunião
+    await audio.trigger("timeupdate");
+    expect(playing()).toEqual([false, true]);
+    await audio.trigger("pause");
+    expect(playing()).toEqual([false, false]);
+  });
+
   it("tocar uma fala leva o player àquele tempo da reunião e permite voltar à reunião inteira", async () => {
     const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
     const { w } = await mountDetail(detail(), { audioBlob });
