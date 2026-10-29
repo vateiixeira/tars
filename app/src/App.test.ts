@@ -95,6 +95,22 @@ describe("Ametista shell", () => {
     await flushPromises();
     expect(wrapper!.get("aside").isVisible()).toBe(true);
   });
+  it("o Iniciar reunião do estado vazio usa a ação da cápsula, com o mesmo guarda", async () => {
+    let finish!: (value: { meeting_id: string }) => void;
+    const ctx = openApp();
+    ctx.client.startMeeting = vi.fn(() => new Promise<{ meeting_id: string }>((resolve) => (finish = resolve)));
+    await flushPromises();
+    const meetings = wrapper!.findComponent(MeetingsView);
+    expect(meetings.attributes("has-meetings")).toBe("false"); // a biblioteca carregou vazia
+    meetings.vm.$emit("start");
+    meetings.vm.$emit("start"); // segundo clique com a chamada em voo
+    await flushPromises();
+    expect(ctx.client.startMeeting).toHaveBeenCalledTimes(1);
+    expect(document.querySelector<HTMLButtonElement>(".appbar .rec")?.disabled).toBe(true);
+    finish({ meeting_id: "m1" });
+    await flushPromises();
+    expect(wrapper!.findComponent(MeetingsView).attributes("meeting-id")).toBe("m1");
+  });
   it("focuses the library search from the top bar, also from settings", async () => {
     openApp();
     await flushPromises();

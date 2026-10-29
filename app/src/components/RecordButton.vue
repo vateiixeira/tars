@@ -87,6 +87,13 @@ async function toggle(): Promise<void> {
     busy.value = false;
   }
 }
+
+/** Inicia como o botão parado (o estado vazio "Nenhuma reunião ainda" chama por aqui): mesmos
+ *  guardas de chamada em voo e o mesmo aviso de erro; gravando, não faz nada (nunca para). */
+function start(): Promise<void> {
+  return recording.value || !connected.value ? Promise.resolve() : toggle();
+}
+defineExpose({ start });
 </script>
 
 <template>

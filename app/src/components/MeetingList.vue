@@ -13,7 +13,11 @@ import MeetingCard from "./MeetingCard.vue";
 import FilterChips from "./ui/FilterChips.vue";
 
 defineProps<{ selectedId: string | null }>();
-const emit = defineEmits<{ select: [meetingId: string] }>();
+const emit = defineEmits<{
+  select: [meetingId: string];
+  /** Quantas reuniões existem (arquivadas inclusive), a cada carga sem busca nem arquivadas. */
+  count: [n: number];
+}>();
 
 const SEARCH_DEBOUNCE_MS = 300;
 const { client, events, meetingState, connected } = useStatus();
@@ -59,6 +63,7 @@ async function load(): Promise<void> {
     if (seq !== requestSeq) return;
     items.value = result;
     if (count) archivedCount.value = count.count;
+    if (!q && !archived) emit("count", result.length + archivedCount.value);
     error.value = null;
   } catch (e) {
     if (seq !== requestSeq) return;

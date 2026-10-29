@@ -46,6 +46,20 @@ describe("MeetingList", () => {
     expect(w.findAll(".item")).toHaveLength(1);
   });
 
+  it("informa quantas reuniões existem só nas cargas sem busca nem arquivadas", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const listMeetings = vi.fn(async (q?: string) => (q ? [] : [item("a", "X", "2026-10-19T14:00:00")]));
+    installStore({ listMeetings, archivedCount: vi.fn(async () => ({ count: 2 })) });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    expect(w.emitted("count")).toEqual([[3]]); // arquivadas contam: o app tem reuniões
+    await w.get("input").setValue("nada");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(listMeetings).toHaveBeenLastCalledWith("nada", undefined);
+    expect(w.emitted("count")).toEqual([[3]]); // a busca vazia não diz que o app não tem reuniões
+  });
+
   it("emits select and reloads on meeting_updated", async () => {
     const listMeetings = vi.fn(async () => [item("a", "X", "2026-10-19T14:00:00")]);
     const { emit } = installStore({ listMeetings });

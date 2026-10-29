@@ -17,6 +17,9 @@ const libraryOpen = ref(false);
 const tasksFocused = ref(false);
 const section = ref("dictation");
 const list = ref<InstanceType<typeof MeetingList> | null>(null);
+const recordButton = ref<InstanceType<typeof RecordButton> | null>(null);
+// Reuniões no app (arquivadas inclusive); `null` até a primeira carga da biblioteca.
+const meetingCount = ref<number | null>(null);
 const viewport = window.matchMedia?.("(max-width: 1023px)");
 const compact = ref(viewport?.matches ?? false);
 const onResize = (event: MediaQueryListEvent) => {
@@ -120,7 +123,7 @@ const dictationLabel = computed(() => {
       @audio-check="openSettings('audio')"
       @settings="openSettings()"
     >
-      <RecordButton @started="openMeeting" @stopped="openMeeting" />
+      <RecordButton ref="recordButton" @started="openMeeting" @stopped="openMeeting" />
     </TopBar>
     <div class="workspace">
       <aside
@@ -130,7 +133,12 @@ const dictationLabel = computed(() => {
         aria-label="Biblioteca de reuniões"
         @keydown="onLibraryKeydown"
       >
-        <MeetingList ref="list" :selected-id="selectedId" @select="openMeeting" />
+        <MeetingList
+          ref="list"
+          :selected-id="selectedId"
+          @select="openMeeting"
+          @count="meetingCount = $event"
+        />
         <footer class="library-footer">
           <div class="dictation">
             <AppIcon name="keyboard" :size="15" />{{ dictationLabel }}
@@ -156,11 +164,14 @@ const dictationLabel = computed(() => {
               </p>
             </div>
           </div>
+          <!-- "Iniciar reunião" do estado vazio usa a mesma ação (e os mesmos guardas) da cápsula -->
           <MeetingsView
             v-if="route === 'meetings'"
             :meeting-id="selectedId"
+            :has-meetings="meetingCount !== 0"
             @deleted="onDeleted"
             @tasks-view="onTasksView"
+            @start="recordButton?.start()"
           />
           <SettingsView
             v-else
