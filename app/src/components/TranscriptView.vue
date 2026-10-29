@@ -162,8 +162,8 @@ onBeforeUnmount(() => observer?.disconnect());
 .text { grid-column:2; min-width:0; overflow-wrap:anywhere; line-height:1.7; }
 .dictated { margin-left:6px; color:var(--muted); font-size:var(--font-meta); }
 .play { display:inline-flex; align-items:center; justify-content:center; vertical-align:middle; border:0; background:transparent; color:var(--muted); min-width:32px; min-height:32px; padding:4px; border-radius:var(--radius-sm); cursor:pointer; }
-.play:hover { color:var(--accent); background:var(--hover); }
+.play:hover { color:var(--text-accent); background:var(--hover); }
 .print-badge { display:inline-flex; align-items:center; gap:4px; vertical-align:middle; margin-left:6px; border:1px solid var(--border); background:var(--surface-raised); color:var(--muted); font:inherit; font-size:var(--font-meta); min-height:28px; padding:2px 8px; border-radius:var(--radius-sm); cursor:pointer; }
-.print-badge:hover { color:var(--accent); background:var(--hover); }
+.print-badge:hover { color:var(--text-accent); background:var(--hover); }
 @media(max-width:640px) { .row { grid-template-columns:42px minmax(0,1fr); gap:6px 10px; } }
 </style>

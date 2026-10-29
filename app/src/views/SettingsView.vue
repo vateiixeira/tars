@@ -138,7 +138,6 @@ watch(
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
 }
 .settings-title {
   padding: 28px 32px 20px;

@@ -183,7 +183,7 @@ h4 {
   gap: 8px;
 }
 .done {
-  color: var(--accent);
+  color: var(--text-accent);
   font-size: 0.85rem;
 }
 .evidence {

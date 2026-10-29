@@ -366,6 +366,6 @@ output {
   min-width: 200px;
 }
 a {
-  color: var(--accent);
+  color: var(--text-accent);
 }
 </style>

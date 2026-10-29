@@ -176,7 +176,7 @@ body {
   background: var(--surface);
   border:1px solid var(--border-control);
   color: var(--text);
-  font: 600 13px system-ui, sans-serif;
+  font: 600 13px var(--font-round);
   display: flex;
   gap: 8px;
   align-items: center;
@@ -184,7 +184,8 @@ body {
 }
 
 .pill.alert {
-  background: var(--warning-surface);
+  /* o tom de aviso é translúcido: fica sobre a superfície opaca para a janela transparente não vazar */
+  background: linear-gradient(var(--warning-surface), var(--warning-surface)), var(--surface);
 }
 
 .dot {
@@ -196,7 +197,7 @@ body {
 }
 
 .dot.blink {
-  outline:2px solid var(--accent); outline-offset:2px;
+  outline:2px solid var(--accent-glow); outline-offset:2px;
 }
 
 @keyframes blink {

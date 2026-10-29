@@ -121,7 +121,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--text-accent);
   font: inherit;
   text-decoration: underline;
   cursor: pointer;

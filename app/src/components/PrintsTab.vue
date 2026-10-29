@@ -203,7 +203,7 @@ onBeforeUnmount(() => {
 .line { display: flex; align-items: center; gap: 10px; }
 .time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: var(--font-meta); }
 .icon { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--muted); min-width: 32px; min-height: 32px; border-radius: var(--radius-sm); cursor: pointer; }
-.icon:hover { color: var(--accent); background: var(--hover); }
+.icon:hover { color: var(--text-accent); background: var(--hover); }
 .said { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
 .who { font-weight: 600; }
 .warn { margin: 0; color: var(--muted); font-size: var(--font-meta); }

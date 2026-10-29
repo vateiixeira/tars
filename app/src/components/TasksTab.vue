@@ -735,7 +735,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
   color: var(--muted);
 }
 .tag.ok {
-  color: var(--accent);
+  color: var(--text-accent);
   font-weight: 600;
 }
 .tag.warn {

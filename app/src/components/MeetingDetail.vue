@@ -1211,7 +1211,7 @@ h1 {
   text-align: center;
 }
 .progress svg {
-  color: var(--accent);
+  color: var(--text-accent);
 }
 .progress h2 {
   color: var(--text);

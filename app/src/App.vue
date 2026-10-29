@@ -197,7 +197,6 @@ const dictationLabel = computed(() => {
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
 }
 .workspace {
   flex: 1;
@@ -254,7 +253,7 @@ const dictationLabel = computed(() => {
   font-size: var(--font-meta);
 }
 .audio-check:hover {
-  color: var(--accent);
+  color: var(--text-accent);
 }
 .sidebar-footer {
   display: flex;
@@ -366,7 +365,7 @@ const dictationLabel = computed(() => {
   left: 16px;
   padding: 12px;
   background: var(--surface);
-  color: var(--accent);
+  color: var(--text-accent);
   border: 1px solid var(--accent);
   border-radius: var(--radius-md);
 }

@@ -596,7 +596,7 @@ function informNumber(): void {
   color: var(--muted);
 }
 .state.ok a {
-  color: var(--accent);
+  color: var(--text-accent);
   font-weight: 600;
 }
 .state.warn,
@@ -681,7 +681,7 @@ textarea:disabled {
 .play {
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--text-accent);
   cursor: pointer;
   padding: 0 2px;
 }
