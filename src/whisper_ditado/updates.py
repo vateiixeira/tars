@@ -9,6 +9,7 @@ e o cache anterior é mantido.
 from __future__ import annotations
 
 import json
+import http.client
 import logging
 import re
 import threading
@@ -27,6 +28,7 @@ LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 CACHE_KEY = "_update_check_cache"  # fora de `settings.DEFAULTS`: nunca aparece em /api/settings
 CHECK_EVERY = timedelta(hours=24)
 AUTO_CHECK_DELAY_S = 30.0
+RECHECK_INTERVAL_S = 3600.0  # com o serviço no ar, de hora em hora vê se o cache venceu (ou se a última falhou)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _VERSION_RE = re.compile(r"^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
@@ -38,7 +40,7 @@ class UpdateCheckError(Exception):
 
 def parse_version(text: str) -> tuple[int, int, int] | None:
     """`0.2.0` ou `v0.2.0` -> (0, 2, 0); pré-release, zeros à esquerda e lixo viram None."""
-    match = _VERSION_RE.match(text) if isinstance(text, str) else None
+    match = _VERSION_RE.fullmatch(text) if isinstance(text, str) else None
     return tuple(int(part) for part in match.groups()) if match else None
 
 
@@ -62,7 +64,7 @@ def fetch_latest(timeout: float = 10.0) -> dict:
             payload = json.load(response)
     except urllib.error.HTTPError as exc:
         raise UpdateCheckError(f"o GitHub respondeu HTTP {exc.code}") from exc
-    except (OSError, urllib.error.URLError) as exc:
+    except (OSError, http.client.HTTPException) as exc:
         raise UpdateCheckError(f"sem acesso ao GitHub: {exc}") from exc
     except ValueError as exc:
         raise UpdateCheckError("resposta do GitHub inválida") from exc
@@ -99,23 +101,38 @@ class UpdateChecker:
         self._clock = clock
         self.stopping = stopping if stopping is not None else threading.Event()
         self._lock = threading.Lock()  # uma consulta por vez
+        # A versão do código que está rodando: resolvida uma vez (mudar o arquivo em disco depois não a muda).
+        try:
+            self._current: str | None = installed_version(root)
+        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+            log.warning("Não foi possível ler a versão instalada (%s): aviso de nova versão desligado", exc)
+            self._current = None
+        self._install = install_kind(root)
 
     def _cache(self) -> dict | None:
-        cache = self._store.get_setting(CACHE_KEY)
+        try:
+            cache = self._store.get_setting(CACHE_KEY)
+        except Exception:
+            log.warning("Não foi possível ler o cache da verificação de versão", exc_info=True)
+            return None
         return cache if isinstance(cache, dict) else None
 
-    def public(self) -> dict:
-        """Versão instalada x última conhecida, no formato da API; nunca consulta a rede."""
-        current = installed_version(self._root)
+    def public(self) -> dict | None:
+        """Versão instalada x última conhecida, no formato da API; nunca consulta a rede.
+
+        None se a versão instalada não pôde ser lida.
+        """
+        if self._current is None:
+            return None
         cache = self._cache() or {}
         latest = cache.get("latest") if parse_version(cache.get("latest")) else None
-        installed, newest = parse_version(current), parse_version(latest) if latest else None
+        installed, newest = parse_version(self._current), parse_version(latest) if latest else None
         return {
-            "current": current,
+            "current": self._current,
             "latest": latest,
             "url": cache.get("url") if latest else None,
             "update_available": installed is not None and newest is not None and newest > installed,
-            "install": install_kind(self._root),
+            "install": self._install,
         }
 
     def needs_check(self) -> bool:
@@ -123,7 +140,7 @@ class UpdateChecker:
         checked = _parse_time(cache.get("checked_at")) if cache else None
         return checked is None or self._clock() - checked > CHECK_EVERY
 
-    def check(self) -> dict:
+    def check(self) -> dict | None:
         """Consulta o GitHub, grava o cache e devolve `public()`.
 
         `UpdateCheckError` se não deu; nesse caso o cache anterior fica como está.
@@ -135,28 +152,29 @@ class UpdateChecker:
                 "latest": release["version"], "url": release["url"]})
             return self.public()
 
-    def start_auto_check(self, stopping: threading.Event | None = None,
-                         delay_s: float = AUTO_CHECK_DELAY_S) -> threading.Thread | None:
-        """Se o cache falta ou está velho, consulta numa thread daemon depois de `delay_s`.
+    def start_auto_check(self, stopping: threading.Event | None = None, delay_s: float = AUTO_CHECK_DELAY_S,
+                         interval_s: float = RECHECK_INTERVAL_S) -> threading.Thread:
+        """Thread daemon que, depois de `delay_s`, consulta se o cache falta ou venceu e repete a cada `interval_s`.
 
-        Nunca bloqueia o início; se `stopping` for acionado antes, a consulta não roda.
+        Nunca bloqueia o início; termina quando `stopping` é acionado. Uma consulta que falhou não grava
+        o cache, então a próxima passada tenta de novo.
         """
-        if not self.needs_check():
-            return None
         stopping = stopping if stopping is not None else self.stopping
-        thread = threading.Thread(target=self._auto_check, args=(stopping, delay_s),
+        thread = threading.Thread(target=self._auto_check, args=(stopping, delay_s, interval_s),
                                   name="update-check", daemon=True)
         thread.start()
         return thread
 
-    def _auto_check(self, stopping: threading.Event, delay_s: float) -> None:
+    def _auto_check(self, stopping: threading.Event, delay_s: float, interval_s: float) -> None:
         if stopping.wait(delay_s):
             return
-        try:
-            if not self.needs_check():
+        while True:
+            try:
+                if self.needs_check():
+                    self.check()
+            except UpdateCheckError as exc:
+                log.info("Não foi possível verificar a nova versão: %s", exc)
+            except Exception:
+                log.exception("Falha inesperada ao verificar a nova versão")
+            if stopping.wait(interval_s):
                 return
-            self.check()
-        except UpdateCheckError as exc:
-            log.info("Não foi possível verificar a nova versão: %s", exc)
-        except Exception:
-            log.exception("Falha inesperada ao verificar a nova versão")

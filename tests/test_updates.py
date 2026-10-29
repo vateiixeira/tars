@@ -1,6 +1,8 @@
+import http.client
 import io
 import json
 import threading
+import time
 import urllib.error
 from datetime import datetime, timedelta, timezone
 
@@ -53,7 +55,7 @@ def release(version):
 
 @pytest.mark.parametrize("text,expected", [
     ("0.2.0", (0, 2, 0)), ("v1.10.3", (1, 10, 3)),
-    ("v1.0.0-rc1", None), ("latest", None), ("v01.2.0", None), ("", None),
+    ("v1.0.0-rc1", None), ("latest", None), ("v01.2.0", None), ("", None), ("0.2.0\n", None),
 ])
 def test_parse_version(text, expected):
     assert parse_version(text) == expected
@@ -120,10 +122,14 @@ def test_auto_check_swallows_check_errors(store, root):
         called.set()
         raise UpdateCheckError("sem rede")
 
+    stopping = threading.Event()
     checker = UpdateChecker(store, root, fetch=failing)
-    thread = checker.start_auto_check(threading.Event(), delay_s=0)
+    thread = checker.start_auto_check(stopping, delay_s=0, interval_s=60)
+    assert called.wait(5)
+    assert thread.is_alive()  # o erro não derruba o laço
+    stopping.set()
     thread.join(5)
-    assert called.is_set() and not thread.is_alive()
+    assert not thread.is_alive()
     assert checker.public()["latest"] is None
 
 
@@ -139,24 +145,113 @@ def test_needs_check_after_24h(store, root):
 
 
 def test_auto_check_runs_when_cache_is_missing(store, root):
+    stopping = threading.Event()
     checker = UpdateChecker(store, root, fetch=release("0.3.0"))
-    thread = checker.start_auto_check(threading.Event(), delay_s=0)
+    thread = checker.start_auto_check(stopping, delay_s=0, interval_s=60)
+    deadline = time.monotonic() + 5
+    while checker.public()["latest"] is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stopping.set()
     thread.join(5)
     assert checker.public()["latest"] == "0.3.0"
 
 
-def test_auto_check_skipped_when_cache_is_fresh(store, root):
+def test_auto_check_does_not_fetch_when_cache_is_fresh(store, root):
+    calls = []
     checker = UpdateChecker(store, root, fetch=release("0.3.0"))
     checker.check()
-    assert checker.start_auto_check(threading.Event(), delay_s=0) is None
+    checker._fetch = lambda: calls.append(1)
+    stopping = threading.Event()
+    thread = checker.start_auto_check(stopping, delay_s=0, interval_s=0.01)
+    time.sleep(0.1)  # várias passadas
+    stopping.set()
+    thread.join(5)
+    assert calls == []
+
+
+def test_auto_check_rechecks_after_cache_goes_stale(store, root):
+    clock = Clock()
+    calls = []
+
+    def fetch():
+        calls.append(clock.now)
+        return release("0.3.0")()
+
+    checker = UpdateChecker(store, root, fetch=fetch, clock=clock)
+    stopping = threading.Event()
+    thread = checker.start_auto_check(stopping, delay_s=0, interval_s=0.01)
+    deadline = time.monotonic() + 5
+    while len(calls) < 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    clock.now = T0 + timedelta(hours=25)
+    while len(calls) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(calls) == 2
+    stopping.set()
+    thread.join(5)
+    assert not thread.is_alive()
+
+
+def test_auto_check_retries_after_failure(store, root):
+    results = [None, release("0.3.0")]
+
+    def fetch():
+        step = results.pop(0)
+        if step is None:
+            raise UpdateCheckError("sem rede")
+        return step()
+
+    checker = UpdateChecker(store, root, fetch=fetch)
+    stopping = threading.Event()
+    thread = checker.start_auto_check(stopping, delay_s=0, interval_s=0.01)
+    deadline = time.monotonic() + 5
+    while checker.public()["latest"] is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stopping.set()
+    thread.join(5)
+    assert checker.public()["latest"] == "0.3.0"
 
 
 def test_auto_check_does_not_run_when_stopping_is_set(store, root):
+    calls = []
     stopping = threading.Event()
     stopping.set()
-    thread = UpdateChecker(store, root, fetch=boom).start_auto_check(stopping, delay_s=0)
+    checker = UpdateChecker(store, root, fetch=lambda: calls.append(1))
+    thread = checker.start_auto_check(stopping, delay_s=0, interval_s=0)
     thread.join(5)
     assert not thread.is_alive()
+    assert calls == []
+
+
+def test_missing_pyproject_makes_public_none(store, tmp_path):
+    empty = tmp_path / "vazio"
+    empty.mkdir()
+    checker = UpdateChecker(store, empty, fetch=boom)  # não levanta
+    assert checker.public() is None
+
+
+@pytest.mark.parametrize("content", ["isto não é toml [[[", "[tool]\nx = 1\n"])
+def test_unreadable_pyproject_makes_public_none(store, root, content):
+    (root / "pyproject.toml").write_text(content, encoding="utf-8")
+    assert UpdateChecker(store, root, fetch=boom).public() is None
+
+
+def test_public_keeps_version_from_construction(store, root):
+    checker = UpdateChecker(store, root, fetch=release("0.3.0"))
+    (root / "pyproject.toml").write_text('[project]\nversion = "0.9.0"\n', encoding="utf-8")
+    assert checker.check()["current"] == "0.2.0"
+
+
+def test_public_survives_cache_read_failure(store, root, monkeypatch):
+    checker = UpdateChecker(store, root, fetch=boom)
+
+    def broken(*_a, **_k):
+        raise ValueError("json corrompido")
+
+    monkeypatch.setattr(store, "get_setting", broken)
+    assert checker.public() == {"current": "0.2.0", "latest": None, "url": None,
+                                "update_available": False, "install": "package"}
+    assert checker.needs_check() is True
 
 
 class FakeResponse(io.BytesIO):
@@ -189,6 +284,12 @@ def test_fetch_latest_rejects_bad_payloads(monkeypatch):
     with pytest.raises(UpdateCheckError):
         fetch_latest()
     fake_urlopen(monkeypatch, error=urllib.error.URLError("sem rede"))
+    with pytest.raises(UpdateCheckError):
+        fetch_latest()
+
+
+def test_fetch_latest_rejects_http_client_errors(monkeypatch):
+    fake_urlopen(monkeypatch, error=http.client.IncompleteRead(b"{"))
     with pytest.raises(UpdateCheckError):
         fetch_latest()
 
