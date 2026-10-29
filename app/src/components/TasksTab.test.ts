@@ -312,7 +312,7 @@ describe("TasksTab", () => {
     const t = task({ create_state: "failed", create_error: "Equipe inválida no MCP de issues" });
     const { w } = await mountTab(payload([t]), { createTasks });
     expect(w.text()).toContain("A revisar (1)");
-    expect(row(w, "t1").text()).toContain("falhou");
+    expect(row(w, "t1").text()).toContain("Falhou");
     expect(w.get('[data-task-id="t1"]').text()).toContain("Equipe inválida no MCP de issues");
     expect(btn(w, "Criar issue").attributes("disabled")).toBeUndefined();
     await btn(w, "Criar issue").trigger("click");
@@ -369,7 +369,7 @@ describe("TasksTab", () => {
     expect(listTasks.mock.calls.length).toBeGreaterThan(before);
     expect(openId(w)).toBe("t2");
     expect(w.text()).toContain("A revisar (2)");
-    expect(row(w, "t1").text()).toContain("criando…");
+    expect(row(w, "t1").text()).toContain("Criando…");
   });
 
   it("Criar no último pendente abre o anterior", async () => {
@@ -493,7 +493,8 @@ describe("TasksTab", () => {
     expect(w.get(".evidence").text()).toContain("Miguel");
     // texto do Claude/da conversa é texto puro
     expect(w.get(".evidence").text()).toContain("<b>Eu pego</b> isso");
-    expect(w.find(".evidence b").exists()).toBe(false);
+    // só o <b> do orador (am-evidence): o <b> que veio no texto não vira elemento
+    expect(w.findAll(".evidence b").map((b) => b.text())).toEqual(["Miguel"]);
     await w.get(".evidence .play").trigger("click");
     expect(w.emitted("play")).toEqual([[61, 80]]);
   });
@@ -652,11 +653,13 @@ describe("TasksTab", () => {
       expect(row(w, "p1").text()).toContain("Bug fix");
       expect(row(w, "p1").text()).toContain("Primeira");
       expect(row(w, "p2").text()).toContain("(sem título)");
-      expect(row(w, "p2").text()).toContain("falhou");
-      expect(row(w, "c1").text()).toContain("#217");
-      expect(row(w, "c2").text()).toContain("criando…");
-      expect(row(w, "c3").text()).toContain("conferir no MCP de issues");
+      expect(row(w, "p2").text()).toContain("Falhou");
+      expect(row(w, "c1").text()).toContain("Criada #217");
+      expect(row(w, "c2").text()).toContain("Criando…");
+      expect(row(w, "c3").text()).toContain("Verificar");
       expect(row(w, "c4").get(".rtitle").classes()).toContain("struck");
+      expect(row(w, "c4").text()).toContain("Descartada");
+      expect(row(w, "p1").text()).toContain("A revisar");
     });
 
     it("clicar numa linha abre o item à direita (inclusive concluído)", async () => {
@@ -804,7 +807,7 @@ describe("TasksTab", () => {
       await flushPromises();
       patch.reject(new Error("falha ao salvar"));
       await flushPromises();
-      expect(row(w, "t1").text()).toContain("criando…");
+      expect(row(w, "t1").text()).toContain("Criando…");
       expect(w.text()).not.toContain("falha ao salvar");
     });
 
@@ -839,7 +842,7 @@ describe("TasksTab", () => {
       await flushPromises();
       expect(openId(w)).toBe("t2");
       expect(w.text()).toContain("A revisar (1)");
-      expect(row(w, "t1").text()).toContain("criando…");
+      expect(row(w, "t1").text()).toContain("Criando…");
       await btn(w, "Criar issue").trigger("click"); // t2 em voo: não volta para t1
       await flushPromises();
       expect(createTasks).toHaveBeenCalledTimes(2);

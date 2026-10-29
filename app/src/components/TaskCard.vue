@@ -4,6 +4,7 @@
 // cria e descarta é o `TasksTab`. Texto do Claude é sempre interpolado como texto (nada de HTML bruto).
 import { computed, reactive, ref, watch } from "vue";
 import AppIcon from "./ui/AppIcon.vue";
+import StatusPill from "./ui/StatusPill.vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { usePrintThumbs } from "../composables/usePrintThumbs";
 import type {
@@ -211,7 +212,7 @@ function informNumber(): void {
 
 <template>
   <div v-if="task.discarded" class="task discarded" :data-task-id="task.id">
-    <span>Tarefa descartada: {{ task.title || "sem título" }}</span>
+    <span class="discarded-text">Tarefa descartada: {{ task.title || "sem título" }}</span>
     <button
       type="button"
       class="btn"
@@ -221,11 +222,8 @@ function informNumber(): void {
     </button>
   </div>
 
-  <article v-else class="task" :class="{ locked }" :data-task-id="task.id">
-
-
-    <label class="title-field"
-      >Título *
+  <article v-else class="task" :class="{ locked }" :data-task-id="task.id">    <label class="title-field"
+      ><span>Título <span class="req">*</span></span>
       <input
         v-model="draft.title"
         class="title-input"
@@ -253,7 +251,7 @@ function informNumber(): void {
           {{ label }}
         </option>
       </select>
-      <span v-if="task.create_state === 'created'" class="state ok">
+      <StatusPill v-if="task.create_state === 'created'" class="state ok" tone="ok" icon="check">
         <a
           v-if="issueUrl"
           :href="issueUrl"
@@ -265,18 +263,18 @@ function informNumber(): void {
           >#{{ task.issue_number }}</span
         >
         criada no MCP de issues
-      </span>
-      <span v-else-if="task.create_state === 'creating'" class="state"
-        >criando no MCP de issues…</span
+      </StatusPill>
+      <StatusPill v-else-if="task.create_state === 'creating'" class="state" tone="accent" busy
+        >criando no MCP de issues…</StatusPill
       >
-      <span v-else-if="task.create_state === 'uncertain'" class="state warn"
-        >incerto — confira no MCP de issues</span
+      <StatusPill v-else-if="task.create_state === 'uncertain'" class="state warn" tone="warn" icon="warning"
+        >incerto — confira no MCP de issues</StatusPill
       >
-      <span v-else-if="task.create_state === 'failed'" class="state bad"
-        >falhou ao criar</span
+      <StatusPill v-else-if="task.create_state === 'failed'" class="state bad" tone="danger" icon="warning"
+        >falhou ao criar</StatusPill
       >
-      <span v-if="task.repeats_number !== null" class="state warn"
-        >parece repetir #{{ task.repeats_number }}</span
+      <StatusPill v-if="task.repeats_number !== null" class="state warn" tone="warn" icon="warning"
+        >parece repetir #{{ task.repeats_number }}</StatusPill
       >
     </header>
 
@@ -304,7 +302,7 @@ function informNumber(): void {
         />
       </label>
       <label
-        >Produto *
+        ><span>Produto <span class="req">*</span></span>
         <select
           aria-label="Produto"
           :disabled="locked || noOptions"
@@ -322,7 +320,7 @@ function informNumber(): void {
         </select>
       </label>
       <label
-        >Responsável *
+        ><span>Responsável <span class="req">*</span></span>
         <select
           aria-label="Responsável"
           :disabled="locked || noOptions"
@@ -344,7 +342,7 @@ function informNumber(): void {
         >
       </label>
       <label
-        >Equipe *
+        ><span>Equipe <span class="req">*</span></span>
         <select
           aria-label="Equipe"
           :disabled="locked || noOptions"
@@ -366,7 +364,7 @@ function informNumber(): void {
         >
       </label>
       <label
-        >Etapa *
+        ><span>Etapa <span class="req">*</span></span>
         <select
           aria-label="Etapa"
           :disabled="locked || noOptions"
@@ -404,13 +402,13 @@ function informNumber(): void {
           type="button"
           class="play"
           title="Ouvir este trecho"
-          aria-label="Ouvir este trecho"
+          :aria-label="`Ouvir este trecho, ${mmss(e.start_s)}`"
           @click="emit('play', e.start_s, e.end_s)"
         >
-          <AppIcon name="play" :size="14" />
+          <AppIcon name="play" :size="13" />
         </button>
-        <span class="ts">{{ mmss(e.start_s) }}</span>
-        <span class="who">{{ e.speaker }}</span>
+        <time class="ts">{{ mmss(e.start_s) }}</time>
+        <b class="who">{{ e.speaker }}</b>
         <span class="text">{{ e.text }}</span>
       </li>
     </ul>
@@ -440,7 +438,7 @@ function informNumber(): void {
             :disabled="locked"
             @click="removePrint(p.id)"
           >
-            ×
+            <AppIcon name="close" :size="12" />
           </button>
         </li>
       </ul>
@@ -507,16 +505,217 @@ function informNumber(): void {
 </template>
 
 <style scoped>
-.task-prints h4 {
-  margin: 0 0 6px;
-  font-size: 0.85rem;
+.task {
+  container: task-editor / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-1) 0;
+}
+.task.discarded {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  color: var(--text-muted);
+  font-size: 14px;
   font-weight: 600;
+}
+.discarded-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.top .state {
+  height: auto;
+  min-height: 28px;
+  white-space: normal;
+}
+.top .state.ok a {
+  color: inherit;
+  text-decoration: underline;
+}
+.msg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.msg.warn {
+  color: var(--warning);
+}
+.msg.bad {
+  color: var(--danger);
+}
+
+/* Campos (am-input/am-select/am-textarea): pílula de 48 px sobre vidro forte. */
+input,
+select,
+textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-lg);
+  padding: 0 var(--space-5);
+  background-color: var(--glass-strong);
+  color: var(--text);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    border-color var(--duration-fast),
+    box-shadow var(--duration-fast);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow:
+    0 0 0 1px var(--focus-ring),
+    0 0 0 5px var(--selected);
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+select {
+  appearance: none;
+  padding-right: 44px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 24px) 50%,
+    calc(100% - 19px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select option {
+  background: var(--surface-solid);
+  color: var(--text);
+}
+textarea {
+  padding: 14px var(--space-5);
+  border-radius: var(--radius-md);
+  line-height: 22px;
+  font-weight: 500;
+  resize: vertical;
+}
+.top select {
+  width: auto;
+  min-width: 140px;
+}
+.title-field,
+.description-field,
+.grid label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+}
+.req {
+  color: var(--text-accent);
+}
+.description-field {
+  flex: 1;
+}
+.description {
+  flex: 1 1 auto;
+  min-height: clamp(220px, 34vh, 380px);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.hint {
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Evidência (am-evidence): ouvir, instante, quem falou e o trecho. */
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: var(--space-4) 0 0;
+  border-top: 1px solid var(--glass-border);
+}
+.evidence li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.evidence time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.evidence b {
+  color: var(--text-accent);
+}
+.evidence .text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.play {
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.play:hover {
+  background: var(--selected);
+  color: var(--text);
+}
+
+/* Prints que vão junto */
+.task-prints h4 {
+  margin: 0 0 var(--space-2);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
 }
 .task-prints ul {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 6px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
   padding: 0;
   list-style: none;
 }
@@ -524,208 +723,74 @@ function informNumber(): void {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   width: 96px;
-  font-size: 0.75rem;
-  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 .task-prints img,
 .thumb-fallback {
   width: 96px;
   height: 60px;
   object-fit: cover;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass);
 }
 .thumb-fallback {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 600;
+  font-weight: 700;
 }
 .task-prints .remove {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: var(--space-1);
+  right: var(--space-1);
   width: 24px;
   height: 24px;
-  min-width: 24px;
-  min-height: 24px;
+  display: grid;
+  place-items: center;
   padding: 0;
-  line-height: 1;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: 50%;
-  background: var(--surface);
+  background: var(--surface-solid);
   color: var(--text);
   cursor: pointer;
+}
+.task-prints .remove:hover:not(:disabled) {
+  background: var(--selected);
 }
 .task-prints .remove:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.task {
-  container: task-editor / inline-size;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 4px 0;
-  background: var(--surface);
-  border: 0;
-  border-radius: 0;
-}
-.task.locked {
-  color: var(--text);
-}
-.task.discarded {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--muted);
-  font-size: 0.85rem;
-  overflow-wrap: anywhere;
-}
-.top {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.state {
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-.state.ok a {
-  color: var(--text-accent);
-  font-weight: 600;
-}
-.state.warn,
-.msg.warn {
-  color: var(--warn);
-}
-.state.bad,
-.msg.bad {
-  color: var(--danger);
-}
-.msg {
-  margin: 0;
-  font-size: 0.85rem;
-  overflow-wrap: anywhere;
-}
-input,
-select,
-textarea {
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-control);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-family: inherit;
-  font-size: var(--font-control);
-}
-input:disabled,
-select:disabled,
-textarea:disabled {
-  opacity: 0.6;
-}
-.title-input {
-  min-height: 52px;
-  font-size: 1rem;
-  font-weight: 600;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px 16px;
-}
-.grid label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 0.75rem;
-  color: var(--muted);
-  min-width: 0;
-}
-.hint {
-  color: var(--warn);
-  font-size: 0.75rem;
-}
-.description {
-  flex: 1 1 auto;
-  resize: vertical;
-  min-height: clamp(260px, 38vh, 420px);
-  line-height: 1.6;
-}
-.evidence {
-  list-style: none;
-  margin: 0;
-  padding: 16px 0 0;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-.evidence li {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 2px 0;
-}
-.evidence .text {
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-.evidence .who {
-  font-weight: 600;
-}
-.play {
-  border: 0;
-  background: transparent;
-  color: var(--text-accent);
-  cursor: pointer;
-  padding: 0 2px;
-}
+
 .resolve {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .resolve .msg {
   flex-basis: 100%;
 }
 .number {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .number input {
-  width: 110px;
-}
-.evidence li {
-  flex-wrap: wrap;
-}
-.play {
-  min-width: 32px;
-  min-height: 32px;
-}
-.title-field,
-.description-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: var(--font-meta);
-  font-weight: 500;
-}
-.description-field {
-  flex: 1;
-}
-.description-field textarea {
-  font-size: var(--font-body);
+  width: 130px;
 }
 @container task-editor (max-width: 600px) {
-  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @container task-editor (max-width: 360px) {
-  .grid { grid-template-columns: minmax(0, 1fr); }
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>
