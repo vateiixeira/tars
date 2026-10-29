@@ -87,7 +87,7 @@ class FakeIssue:
 
 
 def scan_item(title="Fazer X", **kw):
-    base = dict(kind="tarefa", title=title, description="d", project=None, product_id=4, assignee_id=9,
+    base = dict(kind="tarefa", title=title, description="d", product_id=4, assignee_id=9,
                 assignee_hint="Miguel", team_id=3, team_hint=None, priority="medium", evidence=[],
                 repeats_number=None)
     base.update(kw)
@@ -270,6 +270,31 @@ def test_scan_saves_items_with_default_stage(rig, store, settings, mid):
     assert str(call["root"]) == settings.get("issues_root")
     assert call["rules"] == settings.get("tasks_prompt")
     assert "vamos fazer X" in call["transcript"] and call["existing"] == []
+
+
+def test_scan_fills_from_history(rig, store, settings, mid):
+    settings.update({"issues_enabled": True})
+    old = store.create_meeting(T0).id
+    done = store.claim_tasks_for_create([store.add_task(
+        old, {"title": "antiga", "product_id": 4, "assignee_id": 9, "team_id": 3}, origin="claude").id])
+    store.finish_create(done[0], "created", number=7, url="u")
+    rig.scan_result = [scan_item("A", assignee_id=None, assignee_hint=None, team_id=None)]
+    rig.scan(mid)
+    (t,) = store.list_tasks(mid)
+    assert (t.assignee_id, t.team_id) == (9, 3) and not t.edited
+    assert t.suggested["fill"] == {"assignee_id": "last", "team_id": "last"}
+    assert store.get_job(mid, "tasks").state == "done"
+
+
+def test_scan_fill_error_still_finishes_the_scan(rig, store, settings, mid, monkeypatch):
+    settings.update({"issues_enabled": True})
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("falhou")
+
+    monkeypatch.setattr(jobs_mod.autofill, "fill_from_sources", boom)
+    rig.scan(mid)
+    assert store.get_job(mid, "tasks").state == "done" and len(store.list_tasks(mid)) == 1
 
 
 def test_scan_runs_without_options_when_issues_client_fails(rig, store, settings, mid):
@@ -623,6 +648,40 @@ def test_create_records_outcomes(rig, store, mid):
     assert (c.create_state, c.create_error) == ("failed", "recusado")
     assert rig.events("tasks_changed") == [{"type": "tasks_changed", "meeting_id": mid}] * 3
     assert [f.title for f in rig.issues_client.sent] == ["T0", "T1", "T2"]
+
+
+def test_created_issue_propagates_to_siblings(rig, store, mid):
+    ids = make_tasks(store, mid, 1)
+    sibling = store.add_task(mid, {"title": "irmã", "product_id": 4}, origin="claude")
+    rig.issues_client.outcomes = [CreateOutcome("created", 101, "https://k/101", None)]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    got = store.get_task(sibling.id)
+    assert (got.assignee_id, got.team_id) == (9, 3) and not got.edited
+    assert got.suggested["fill"] == {"assignee_id": "last", "team_id": "last"}
+    assert rig.events("tasks_changed") == [{"type": "tasks_changed", "meeting_id": mid}]
+
+
+def test_failed_creation_does_not_propagate(rig, store, mid):
+    ids = make_tasks(store, mid, 1)
+    sibling = store.add_task(mid, {"title": "irmã", "product_id": 4}, origin="claude")
+    rig.issues_client.outcomes = [CreateOutcome("failed", None, None, "recusado")]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_task(sibling.id).assignee_id is None
+
+
+def test_propagation_error_never_touches_create_state(rig, store, mid, monkeypatch):
+    ids = make_tasks(store, mid, 1)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("falhou")
+
+    monkeypatch.setattr(jobs_mod.autofill, "propagate", boom)
+    rig.issues_client.outcomes = [CreateOutcome("created", 101, "https://k/101", None)]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_task(ids[0]).create_state == "created"
 
 
 def test_create_created_keeps_conference_error(rig, store, mid):

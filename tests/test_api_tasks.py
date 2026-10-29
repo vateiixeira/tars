@@ -540,3 +540,18 @@ def test_patch_task_print_ids_and_json_fields(client, ctx, mid):
     r = client.patch(f"/api/tasks/{t.id}", json={"print_ids": ["p1"]})
     assert r.status_code == 409 and r.json() == {"detail": BUSY_MSG}
     assert ctx.store.get_task(t.id).print_ids == []
+
+
+def test_patch_assignee_propagates_and_notifies(client, ctx, mid):
+    first = add(ctx, mid, assignee_id=None, team_id=None)
+    second = add(ctx, mid, assignee_id=None, team_id=None)
+    r = client.patch(f"/api/tasks/{first.id}", json={"assignee_id": 9})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == first.id and body["assignee_id"] == 9
+    assert body["suggested"]["fill"] == {"assignee_id": "manual"}
+    assert body == client.get(f"/api/meetings/{mid}/tasks").json()["items"][0]  # relido do banco
+    other = ctx.store.get_task(second.id)
+    assert other.assignee_id == 9 and other.suggested["fill"]["assignee_id"] == "last"
+    assert not other.edited
+    assert len(changed(ctx, mid)) == 1

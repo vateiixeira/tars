@@ -337,6 +337,8 @@ class TaskLocked(Exception):
 CONTENT_FIELDS = ("kind", "title", "description", "project", "product_id", "assignee_id",
                   "team_id", "stage_id", "priority")
 _LOCKED_STATES = ("creating", "created", "uncertain")
+# Campos que o preenchimento pelo último usado completa; a origem de cada um fica em `suggested["fill"]`.
+FILL_FIELDS = ("assignee_id", "team_id")
 _FINISH_STATES = ("created", "failed", "uncertain")
 _ATTACH_STATES = ("none", "sending", "sent", "unsupported", "failed")
 _RESTART_TASK_ERROR = "O serviço reiniciou durante a criação — confira no MCP de issues"
@@ -937,9 +939,18 @@ class Store:
             return []
         return self.list_tasks(meeting_id)
 
+    @staticmethod
+    def _with_fill_marks(suggested_json: str | None, fields, mark: str) -> str:
+        """`suggested_json` com `suggested["fill"][campo] = mark` para cada campo."""
+        suggested = json.loads(suggested_json) if suggested_json else {}
+        suggested["fill"] = {**suggested.get("fill", {}), **dict.fromkeys(fields, mark)}
+        return json.dumps(suggested)
+
     def update_task(self, task_id: str, changes: dict) -> TaskSuggestion:
         """Aplica mudanças de conteúdo e/ou `discarded`; só mudança de conteúdo marca `edited`.
 
+        Responsável e equipe enviados (mesmo vazios ou com o mesmo valor) ficam marcados como
+        escolha do operador (`suggested["fill"][campo] = "manual"`); só a marca não é edição.
         Levanta `TaskLocked` se a sugestão já está sendo criada/foi criada/está incerta e
         `KeyError` se não existe.
         """
@@ -956,12 +967,52 @@ class Store:
                 sets["edited"] = 1
             if "discarded" in changes:
                 sets["discarded"] = int(bool(changes["discarded"]))
+            chosen = [name for name in FILL_FIELDS if name in content]
+            if chosen:
+                marked = self._with_fill_marks(row["suggested_json"], chosen, "manual")
+                if json.loads(marked) != json.loads(row["suggested_json"] or "{}"):
+                    sets["suggested_json"] = marked
             if sets:
                 sets["updated_at"] = datetime.now().isoformat()
                 assignments = ", ".join(f"{name}=?" for name in sets)
                 c.execute(f"UPDATE task_suggestions SET {assignments} WHERE id=?",
                           [*sets.values(), task_id])
         return self.get_task(task_id)
+
+    def tasks_for_product(self, product_id: int, limit: int = 500) -> list[TaskSuggestion]:
+        """Sugestões do produto em todas as reuniões, da mudança mais recente para a mais antiga."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM task_suggestions WHERE product_id=?"
+                " ORDER BY updated_at DESC, rowid DESC LIMIT ?",
+                (product_id, limit),
+            ).fetchall()
+        return [self._task(r) for r in rows]
+
+    def fill_task(self, task_id: str, values: dict[str, int], expected_updated_at: str) -> bool:
+        """Preenchimento automático: grava `values` marcados como "last", sem marcar `edited`.
+
+        Só grava se a sugestão continua pendente e intocada desde a leitura (`updated_at` igual
+        a `expected_updated_at`): uma edição do operador no meio vence. Devolve se gravou.
+        """
+        unknown = set(values) - set(FILL_FIELDS)
+        if unknown:
+            raise ValueError(f"campos inválidos para o preenchimento: {sorted(unknown)}")
+        if not values:
+            return False
+        with self._tx() as c:
+            row = c.execute(
+                "SELECT suggested_json FROM task_suggestions WHERE id=? AND updated_at=?"
+                " AND discarded=0 AND create_state IN ('none','failed')",
+                (task_id, expected_updated_at),
+            ).fetchone()
+            if row is None:
+                return False
+            sets = {**values, "suggested_json": self._with_fill_marks(row["suggested_json"], values, "last"),
+                    "updated_at": datetime.now().isoformat()}
+            assignments = ", ".join(f"{name}=?" for name in sets)
+            c.execute(f"UPDATE task_suggestions SET {assignments} WHERE id=?", [*sets.values(), task_id])
+        return True
 
     def claim_tasks_for_create(self, task_ids: list[str]) -> list[str]:
         """Reserva (`creating`) as sugestões que podem ser criadas; devolve só as reservadas.
