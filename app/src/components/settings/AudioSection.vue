@@ -152,7 +152,7 @@ async function saveDevice(key: DeviceKey, e: Event): Promise<void> {
     />
 
     <div class="s-card meters">
-      <h3>Teste os níveis</h3>
+      <h2>Teste os níveis</h2>
       <p class="s-note">Fale e toque um som no PC para conferir antes da reunião.</p>
       <LevelMeter icon="mic" label="Nível do microfone" :db="micDb" />
       <LevelMeter icon="volume" label="Nível do som do PC" :db="pcDb" />

@@ -112,7 +112,7 @@ async function saveEffort(key: EffortKey, e: Event): Promise<void> {
     </p>
 
     <div v-for="g in groups" :key="g.prefix" class="s-card group" :data-group="g.prefix">
-      <h3>{{ g.title }}</h3>
+      <h2>{{ g.title }}</h2>
 
       <div class="s-grid">
         <SettingField label="Modelo" :for="`${g.prefix}-model`" :error="form.errors[g.model]">

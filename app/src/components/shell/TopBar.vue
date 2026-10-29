@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Barra superior (84 px, sem fundo): marca ou "Voltar à reunião" à esquerda, a cápsula de
 // gravação no centro (slot) e as ferramentas à direita, com o ponto de status da conexão.
-import { computed } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useStatus } from "../../composables/useStatus";
 import AppIcon from "../ui/AppIcon.vue";
 import BrandOrb from "../ui/BrandOrb.vue";
@@ -36,6 +36,12 @@ const connLabel = computed(
 const connTitle = computed(() =>
   connectionError.value && !connected.value ? `${connLabel.value}: ${connectionError.value}` : connLabel.value,
 );
+const settingsLink = ref<HTMLButtonElement | null>(null);
+// "Voltar à reunião" some ao voltar (v-if): o foco passa para as Configurações, não cai no body.
+function goBack(): void {
+  emit("back");
+  void nextTick(() => settingsLink.value?.focus());
+}
 const showToggle = computed(() => props.route === "meetings" && props.libraryToggle);
 </script>
 
@@ -46,7 +52,7 @@ const showToggle = computed(() => props.route === "meetings" && props.libraryTog
         v-if="route === 'settings'"
         type="button"
         class="btn ghost back"
-        @click="emit('back')"
+        @click="goBack"
       >
         <AppIcon name="arrow" :size="18" />Voltar à reunião
       </button>
@@ -83,6 +89,7 @@ const showToggle = computed(() => props.route === "meetings" && props.libraryTog
       <AppearanceMenu />
       <span class="conn-dot" :class="connState" role="img" :aria-label="connLabel" :title="connTitle" />
       <button
+        ref="settingsLink"
         type="button"
         class="icon-button settings-link"
         aria-label="Configurações"

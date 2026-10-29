@@ -764,7 +764,7 @@ describe("SettingsView", () => {
       expect(w.text()).toContain(
         "O modelo fica gravado pelo apelido (opus, sonnet…): quando sair uma versão nova, ela passa a ser usada sozinha.",
       );
-      const titles = w.findAll(".group h3").map((h) => h.text());
+      const titles = w.findAll(".group h2").map((h) => h.text());
       expect(titles).toEqual(["Resumo, títulos e nomes", "Levantamento de tarefas e criação no MCP de issues"]);
     });
 

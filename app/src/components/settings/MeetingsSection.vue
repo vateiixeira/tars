@@ -155,7 +155,7 @@ async function removeToken(): Promise<void> {
 <template>
   <section v-if="form.settings.value" class="s-section">
     <div class="s-card">
-      <h3>Memória dos modelos</h3>
+      <h2>Memória dos modelos</h2>
       <SettingField
         label="Liberar memória dos modelos de reunião"
         for="meet-model-idle"
@@ -169,7 +169,7 @@ async function removeToken(): Promise<void> {
     </div>
 
     <div class="s-card">
-      <h3>Título e resumo</h3>
+      <h2>Título e resumo</h2>
       <ToggleField
         :form="form"
         field="auto_title"
@@ -206,7 +206,7 @@ async function removeToken(): Promise<void> {
     </div>
 
     <div class="s-card">
-      <h3>Separação de falantes</h3>
+      <h2>Separação de falantes</h2>
       <SettingField
         label="Motor de separação de falantes"
         for="meet-diarizer"
@@ -286,7 +286,7 @@ async function removeToken(): Promise<void> {
     </div>
 
     <div class="s-card">
-      <h3>Capturas durante a reunião</h3>
+      <h2>Capturas durante a reunião</h2>
       <SettingField
         label="Prints de tela"
         for="meet-print-mode"

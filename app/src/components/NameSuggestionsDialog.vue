@@ -97,31 +97,33 @@ onBeforeUnmount(() => (alive = false));
           <AppIcon name="close" :size="18" />
         </button>
       </header>
-      <p class="hint">Nada é trocado sozinho: “Aplicar” renomeia só nesta reunião.</p>
+      <div class="body">
+        <p class="hint">Nada é trocado sozinho: “Aplicar” renomeia só nesta reunião.</p>
 
-      <p v-if="loading" class="loading" role="status"><TypingDots /><span>O Claude está lendo a transcrição…</span></p>
+        <p v-if="loading" class="loading" role="status"><TypingDots /><span>O Claude está lendo a transcrição…</span></p>
 
-      <template v-else-if="loadError">
-        <AppBanner class="error" role="alert">{{ loadError }}</AppBanner>
-        <button type="button" class="btn" @click="fetchSuggestions">Tentar de novo</button>
-      </template>
+        <template v-else-if="loadError">
+          <AppBanner class="error" role="alert">{{ loadError }}</AppBanner>
+          <button type="button" class="btn" @click="fetchSuggestions">Tentar de novo</button>
+        </template>
 
-      <p v-else-if="!rows.length" class="muted">O Claude não encontrou nomes no contexto.</p>
+        <p v-else-if="!rows.length" class="muted">O Claude não encontrou nomes no contexto.</p>
 
-      <ul v-else class="list">
-        <li v-for="row in rows" :key="row.suggestion.speaker_id" class="item">
-          <div class="line">
-            <strong>{{ row.suggestion.label }} → {{ row.suggestion.name }}</strong>
-            <span v-if="row.applied" class="done"><AppIcon name="check" :size="15" />Aplicado</span>
-            <button v-else type="button" class="btn pri btn-sm" :disabled="row.busy" @click="apply(row)">Aplicar</button>
-          </div>
-          <blockquote v-if="row.suggestion.evidence" class="evidence">“{{ row.suggestion.evidence }}”</blockquote>
-          <label v-if="!row.applied" class="check">
-            <input v-model="row.saveVoice" type="checkbox" :disabled="row.busy" /> também salvar a voz
-          </label>
-          <p v-if="row.error" class="item-error" role="alert">{{ row.error }}</p>
-        </li>
-      </ul>
+        <ul v-else class="list">
+          <li v-for="row in rows" :key="row.suggestion.speaker_id" class="item">
+            <div class="line">
+              <strong>{{ row.suggestion.label }} → {{ row.suggestion.name }}</strong>
+              <span v-if="row.applied" class="done"><AppIcon name="check" :size="15" />Aplicado</span>
+              <button v-else type="button" class="btn pri btn-sm" :disabled="row.busy" @click="apply(row)">Aplicar</button>
+            </div>
+            <blockquote v-if="row.suggestion.evidence" class="evidence">“{{ row.suggestion.evidence }}”</blockquote>
+            <label v-if="!row.applied" class="check">
+              <input v-model="row.saveVoice" type="checkbox" :disabled="row.busy" /> também salvar a voz
+            </label>
+            <p v-if="row.error" class="item-error" role="alert">{{ row.error }}</p>
+          </li>
+        </ul>
+      </div>
     </div>
   </div>
 </template>
@@ -148,8 +150,10 @@ onBeforeUnmount(() => (alive = false));
   transform: translate(-50%, -50%);
   width: min(560px, calc(100vw - 32px));
   max-height: 80vh;
-  overflow-y: auto;
-  padding: var(--space-6);
+  /* o cabeçalho (com o X de fechar) fica fixo; só o corpo rola */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--surface-raised);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
@@ -157,10 +161,16 @@ onBeforeUnmount(() => (alive = false));
 }
 header {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  margin-bottom: var(--space-3);
+  padding: var(--space-6) var(--space-6) var(--space-3);
+}
+.body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-6) var(--space-6);
 }
 h4 {
   margin: 0;

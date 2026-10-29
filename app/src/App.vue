@@ -79,6 +79,11 @@ function focusSearch(): void {
   if (collapsed.value) libraryOpen.value = true;
   void nextTick(() => list.value?.focusSearch());
 }
+// Abre ou fecha o painel sobreposto; ao abrir, o foco vai para a busca (o painel estava escondido).
+function toggleLibrary(): void {
+  libraryOpen.value = !libraryOpen.value;
+  if (libraryOpen.value) void nextTick(() => list.value?.focusSearch());
+}
 // Painel sobreposto: Esc fecha e devolve o foco ao botão "Reuniões".
 function onLibraryKeydown(event: KeyboardEvent): void {
   if (event.key !== "Escape" || !collapsed.value || !libraryOpen.value) return;
@@ -118,7 +123,7 @@ const dictationLabel = computed(() => {
       :library-open="libraryOpen"
       :compact="compact"
       @back="route = 'meetings'"
-      @toggle-library="libraryOpen = !libraryOpen"
+      @toggle-library="toggleLibrary"
       @search="focusSearch"
       @audio-check="openSettings('audio')"
       @settings="openSettings()"

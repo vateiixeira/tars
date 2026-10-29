@@ -95,6 +95,23 @@ describe("Ametista shell", () => {
     await flushPromises();
     expect(wrapper!.get("aside").isVisible()).toBe(true);
   });
+  it("ao abrir a biblioteca recolhida pelo botão Reuniões, o foco vai para a busca", async () => {
+    openApp();
+    await flushPromises();
+    wrapper!.findComponent(MeetingsView).vm.$emit("tasksView", true);
+    await flushPromises();
+    await wrapper!.get(".library-toggle").trigger("click");
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper!.get("aside input.search").element);
+  });
+  it("Voltar à reunião devolve o foco às Configurações em vez de soltá-lo no body", async () => {
+    openApp();
+    await flushPromises();
+    await wrapper!.get(".settings-link").trigger("click");
+    await wrapper!.get(".appbar .back").trigger("click");
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper!.get(".settings-link").element);
+  });
   it("o Iniciar reunião do estado vazio usa a ação da cápsula, com o mesmo guarda", async () => {
     let finish!: (value: { meeting_id: string }) => void;
     const ctx = openApp();
