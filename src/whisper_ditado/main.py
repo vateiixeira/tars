@@ -47,6 +47,7 @@ from whisper_ditado.meeting.session import MeetingManager
 from whisper_ditado.priority import DictationBusy
 from whisper_ditado.settings import Settings
 from whisper_ditado.store import Store
+from whisper_ditado.updates import UpdateChecker
 
 log = logging.getLogger("ditado")
 
@@ -186,6 +187,7 @@ async def serve(args: argparse.Namespace) -> int:
     jobs = PostMeetingJobs(store, settings, bus, claude, issues_client, issue_options, tasks_claude)
     stopping = threading.Event()  # o desligamento avisa as threads de fundo (ex.: catálogo de modelos)
     claude_models = ClaudeModels(store, lambda: settings.get("claude_bin"), stopping=stopping)
+    updates = UpdateChecker(store, stopping=stopping)
 
     def meeting_transcriber():  # segunda instância, carregada ao iniciar a primeira reunião
         return dictation.make_transcriber(_meeting_options(settings), dictation.build_vocabulary(settings))
@@ -213,7 +215,7 @@ async def serve(args: argparse.Namespace) -> int:
     ctx = api.AppContext(store=store, settings=settings, bus=bus, dictation=service,
                          meetings=meetings, claude=claude, diarizer=diarizer,
                          jobs=jobs, issue_options=issue_options, tasks_claude=tasks_claude,
-                         claude_models=claude_models)
+                         claude_models=claude_models, updates=updates)
     # access_log desligado: a URL do WebSocket leva `?token=` e nunca pode ir para o log.
     server = _Server(uvicorn.Config(api.create_app(ctx, token), host=HOST, port=args.port,
                                     access_log=False, log_level="warning"))
@@ -236,6 +238,7 @@ async def serve(args: argparse.Namespace) -> int:
             api.write_api_info(args.port, token)
             log.info("API em http://%s:%d", HOST, args.port)
             claude_models.start_auto_refresh(stopping)  # cache ausente/velho: atualiza em segundo plano
+            updates.start_auto_check(stopping)  # idem: consulta a última release no GitHub
             memory_task = asyncio.create_task(_maintain_meeting_models(meetings, shutdown))
         waiter = asyncio.create_task(shutdown.wait())
         await asyncio.wait({waiter, server_task}, return_when=asyncio.FIRST_COMPLETED)

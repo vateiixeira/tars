@@ -62,7 +62,7 @@
   ```
   `latest` e `url` são `null` antes da primeira verificação bem-sucedida; `update_available` é `false` nesse caso.
 
-- [ ] **Step 1: Escrever os testes que falham em `tests/test_updates.py`**
+- [x] **Step 1: Escrever os testes que falham em `tests/test_updates.py`**
 
 Use `Store(tmp_path / "t.db")` e um `pyproject.toml` mínimo em `tmp_path` (`[project]\nversion = "0.2.0"`). `fetch` e `clock` falsos, nunca rede.
 
@@ -100,21 +100,21 @@ def test_fetch_latest_rejects_bad_payloads(monkeypatch):
     # payload {"tag_name": "v0.3.0", "html_url": "https://x"} -> {"version": "0.3.0", "url": "https://x"}
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/test_updates.py -q`
 Expected: FAIL (`ModuleNotFoundError: whisper_ditado.updates`)
 
-- [ ] **Step 3: Implementar `src/whisper_ditado/updates.py`**
+- [x] **Step 3: Implementar `src/whisper_ditado/updates.py`**
 
 `PROJECT_ROOT = Path(__file__).resolve().parents[2]`. `fetch_latest` usa `urllib.request.Request` com headers `Accept: application/vnd.github+json` e `User-Agent: tars-update-check`. O cache guarda `{"checked_at", "latest", "url"}`; `public()` sempre lê `installed_version`/`install_kind` na hora (barato) e compara com o cache. `start_auto_check` segue `ClaudeModels.start_auto_refresh`/`_auto_refresh` (thread daemon `update-check`, `stopping.wait(delay_s)`, revalida `needs_check()`, captura `UpdateCheckError` com `log.info` e qualquer outra exceção com `log.exception`).
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/test_updates.py -q`
 Expected: PASS
 
-- [ ] **Step 5: Teste do status em `tests/test_api.py`**
+- [x] **Step 5: Teste do status em `tests/test_api.py`**
 
 ```python
 def test_status_has_version(client, ctx):
@@ -128,16 +128,16 @@ def test_status_version_from_checker(client, ctx):
 
 `test_status_shape` continua passando (só verifica chaves específicas).
 
-- [ ] **Step 6: Implementar a ligação**
+- [x] **Step 6: Implementar a ligação**
 
 `build_status`: `"version": ctx.updates.public() if ctx.updates is not None else None`. Em `main.py`: `updates = UpdateChecker(store, stopping=stopping)` ao lado do `ClaudeModels`, `updates=updates` no `AppContext`, e `updates.start_auto_check(stopping)` logo após `claude_models.start_auto_refresh(stopping)`.
 
-- [ ] **Step 7: Rodar a suíte Python**
+- [x] **Step 7: Rodar a suíte Python**
 
 Run: `uv run --frozen pytest -q`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/whisper_ditado/updates.py src/whisper_ditado/api.py src/whisper_ditado/main.py tests/test_updates.py tests/test_api.py
@@ -167,7 +167,7 @@ git commit -m "[Feat] Verificar nova versão no GitHub e expor no status"
   ```
   `VersionLine.vue` sem props; lê `useStatus()` e `__APP_VERSION__`.
 
-- [ ] **Step 1: Escrever os testes que falham em `VersionLine.test.ts`**
+- [x] **Step 1: Escrever os testes que falham em `VersionLine.test.ts`**
 
 Montar com o status falso no padrão de `App.test.ts`/`useStatus.test.ts` (`setStatusStore`). Mockar `@tauri-apps/plugin-opener` (`openUrl`) e `@tauri-apps/plugin-clipboard-manager` (`writeText`). `__APP_VERSION__` = `"0.2.0"` via `vi.stubGlobal`.
 
@@ -188,26 +188,26 @@ it("sem backend mostra só a versão do app", ...)
   // status null -> "TARS 0.2.0"
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `cd app && pnpm exec vitest run VersionLine`
 Expected: FAIL (componente não existe)
 
-- [ ] **Step 3: Implementar `VersionLine.vue`, tipos e `define`**
+- [x] **Step 3: Implementar `VersionLine.vue`, tipos e `define`**
 
 Linha com o estilo de `.conn` (`font-size: 0.6875rem; color: var(--muted)`), link como `<button type="button">` com `color: var(--accent)`. Diálogo com `AppDialog` (`components/ui/AppDialog.vue`, título `TARS 0.3.0 disponível`), comando em `<code>` com `AppButton` "Copiar". Erro de `openUrl`/`writeText` vai para `console.error`, como em `MeetingsSection.vue`. Versões divergentes têm precedência sobre o aviso de atualização na linha (o diálogo cobre os dois casos).
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `cd app && pnpm exec vitest run VersionLine`
 Expected: PASS
 
-- [ ] **Step 5: Inserir no `App.vue` e rodar tudo**
+- [x] **Step 5: Inserir no `App.vue` e rodar tudo**
 
 Run: `cd app && pnpm test && pnpm build`
 Expected: PASS e build sem erro de tipo.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/vite.config.ts app/src/vite-env.d.ts app/src/api/types.ts app/src/components/VersionLine.vue app/src/components/VersionLine.test.ts app/src/App.vue
@@ -242,7 +242,7 @@ Fluxo de `update()` (spec, seção `scripts/update.py`):
 9. `systemctl --user start whisper-ditado-backend.service` se a unidade existir, senão orienta a iniciar `./run-backend.sh`; apaga `PENDING`; diz a versão nova e pede para fechar e reabrir o app.
 10. Falha em 6–8: tenta o passo 9 sem apagar `PENDING`, informa se o serviço subiu, qual passo falhou e que basta rodar `python3 scripts/update.py` de novo.
 
-- [ ] **Step 1: Escrever os testes que falham**
+- [x] **Step 1: Escrever os testes que falham**
 
 Repositório git real em `tmp_path` (`git init`, `pyproject.toml` com `version = "0.2.0"`, commit, tags `v0.2.0` e, num segundo commit com `0.3.0`, `v0.3.0`), `origin` apontando para um bare repo local (como `tests/test_release.py` faz). `run` falso registra os comandos e só executa de verdade os `git`; `uv`, `pnpm` e `systemctl` são simulados.
 
@@ -269,30 +269,30 @@ def test_build_failure_restarts_service_and_resumes(repo):
     # 2ª execução (build ok) refaz stop..start para v0.3.0 apesar de pyproject já em 0.3.0; PENDING apagado
 ```
 
-- [ ] **Step 2: Rodar e ver falhar**
+- [x] **Step 2: Rodar e ver falhar**
 
 Run: `uv run --frozen pytest tests/test_update_script.py -q`
 Expected: FAIL (arquivo `scripts/update.py` não existe)
 
-- [ ] **Step 3: Implementar `scripts/update.py`**
+- [x] **Step 3: Implementar `scripts/update.py`**
 
 Só biblioteca padrão (`subprocess`, `tomllib`, `urllib.request`, `json`, `pathlib`). `main()` captura `UpdateError`, imprime em stderr e sai com código 1. Cada passo imprime `==> <nome>` como `scripts/release.py`. O `api()` padrão usa timeout de 3 s e trata `URLError`/`ConnectionRefusedError`/arquivo ausente como "backend parado".
 
-- [ ] **Step 4: Rodar e ver passar**
+- [x] **Step 4: Rodar e ver passar**
 
 Run: `uv run --frozen pytest tests/test_update_script.py -q`
 Expected: PASS
 
-- [ ] **Step 5: README**
+- [x] **Step 5: README**
 
 Seção `## Atualizando`: o app avisa no rodapé; rodar `python3 scripts/update.py` na pasta do clone; o que ele faz (vai para a última release, para o serviço por alguns minutos, sincroniza dependências, recompila, sobe o serviço); que recusa com arquivos alterados ou reunião em andamento; que pode ser rodado de novo se falhar; quem instalou pelo pacote segue `docs/INSTALL_RELEASE.md`.
 
-- [ ] **Step 6: Rodar a suíte Python**
+- [x] **Step 6: Rodar a suíte Python**
 
 Run: `uv run --frozen pytest -q`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scripts/update.py tests/test_update_script.py README.md

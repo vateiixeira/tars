@@ -29,6 +29,17 @@ export type TrackSource = "mic" | "pc";
 /** Etapas do processamento (meeting/finalize.py). */
 export type ProgressStage = "transcrevendo" | "separando vozes" | "finalizando";
 
+/** Versão em `GET /status` (`version`): a do serviço e a última release publicada. */
+export interface VersionInfo {
+  current: string;
+  /** Última versão conhecida (null se nunca foi consultada). */
+  latest: string | null;
+  /** Página da release `latest`. */
+  url: string | null;
+  update_available: boolean;
+  install: "git" | "package";
+}
+
 /** `GET /status` e o evento `status`. */
 export interface Status {
   dictation: {
@@ -46,6 +57,7 @@ export interface Status {
     alerts: AlertKind[];
     print_mode: PrintMode;
   };
+  version?: VersionInfo | null;
 }
 
 /** Item de `GET /meetings`. */

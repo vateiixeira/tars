@@ -84,6 +84,50 @@ Resumos e criação de issues exigem o [Claude Code](https://code.claude.com/doc
 instalado e autenticado. A separação de falantes funciona sem configuração; o pyannote, com token do
 Hugging Face, é opcional (veja abaixo).
 
+## Atualizando
+
+O app avisa no rodapé quando há uma versão nova. Para atualizar um clone git, rode na pasta
+do projeto:
+
+```bash
+python3 scripts/update.py
+```
+
+O script leva o clone à última release, para o serviço de usuário (ditado e reuniões ficam
+fora do ar por alguns minutos), sincroniza as dependências Python e do app, recompila o app e
+sobe o serviço de novo. Depois, feche e reabra o app. Os extras já instalados (como o pyannote)
+são mantidos.
+
+Ele recusa atualizar, sem mexer em nada, se houver arquivos rastreados alterados ou uma reunião
+gravando ou processando, ou se o backend estiver rodando fora do systemd (`./run-backend.sh`).
+Se algum passo falhar, o serviço é religado e basta corrigir o problema e rodar o comando de
+novo: ele continua de onde parou.
+
+Depois de atualizar, o clone fica numa tag (HEAD destacado, sem branch); `git checkout main`
+volta para a branch.
+
+Se o app ou o serviço não estiverem na versão do código (por exemplo, depois de um `git pull`
+sem recompilar nem reiniciar), o comando acima já detecta o serviço desatualizado e refaz a
+instalação. Para refazer sempre, mesmo sem release nova, use:
+
+```bash
+python3 scripts/update.py --force
+```
+
+O `--force` sincroniza as dependências, recompila o app e reinicia o serviço com o código que
+já está no clone, sem trocar de versão. Se algum passo falhar, rode-o de novo.
+
+Quem está numa versão 0.2.0 ou anterior ainda não tem o script. Na primeira vez, traga a
+última release e rode o script já nela (troque `vX.Y.Z` pela tag da última release, listada em
+[Releases](https://github.com/vateiixeira/tars/releases)):
+
+```bash
+git fetch --tags && git checkout vX.Y.Z && python3 scripts/update.py --force
+```
+
+Quem instalou pelo pacote `.tar.gz` não tem clone git; siga
+[docs/INSTALL_RELEASE.md](docs/INSTALL_RELEASE.md).
+
 ## Desenvolvimento
 
 Veja [CONTRIBUTING.md](CONTRIBUTING.md) para executar testes e enviar mudanças.

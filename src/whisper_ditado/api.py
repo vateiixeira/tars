@@ -81,6 +81,7 @@ class AppContext:
     issue_options: Any = None  # OptionsCache
     tasks_claude: Any = None  # ClaudeCli do criador de issues (modelo/effort `tasks_*`)
     claude_models: Any = None  # ClaudeModels (catálogo de modelos); None cria um sob demanda
+    updates: Any = None  # UpdateChecker (aviso de nova versão); None: `version` do status fica nulo
 
 
 def generate_token() -> str:
@@ -183,6 +184,7 @@ def build_status(ctx: AppContext) -> dict:
             "print_mode": ctx.settings.get("print_mode"),
             "alerts": list(alerts),
         },
+        "version": ctx.updates.public() if ctx.updates is not None else None,
     }
 
 
