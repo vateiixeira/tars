@@ -84,6 +84,28 @@ Resumos e criação de issues exigem o [Claude Code](https://code.claude.com/doc
 instalado e autenticado. A separação de falantes funciona sem configuração; o pyannote, com token do
 Hugging Face, é opcional (veja abaixo).
 
+## Atualizando
+
+O app avisa no rodapé quando há uma versão nova. Para atualizar um clone git, rode na pasta
+do projeto:
+
+```bash
+python3 scripts/update.py
+```
+
+O script leva o clone à última release, para o serviço de usuário (ditado e reuniões ficam
+fora do ar por alguns minutos), sincroniza as dependências Python e do app, recompila o app e
+sobe o serviço de novo. Depois, feche e reabra o app. Os extras já instalados (como o pyannote)
+são mantidos.
+
+Ele recusa atualizar, sem mexer em nada, se houver arquivos rastreados alterados ou uma reunião
+gravando ou processando, ou se o backend estiver rodando fora do systemd (`./run-backend.sh`).
+Se algum passo falhar, o serviço é religado e basta corrigir o problema e rodar o comando de
+novo: ele continua de onde parou.
+
+Quem instalou pelo pacote `.tar.gz` não tem clone git; siga
+[docs/INSTALL_RELEASE.md](docs/INSTALL_RELEASE.md).
+
 ## Desenvolvimento
 
 Veja [CONTRIBUTING.md](CONTRIBUTING.md) para executar testes e enviar mudanças.
