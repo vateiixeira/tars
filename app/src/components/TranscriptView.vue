@@ -195,7 +195,7 @@ onBeforeUnmount(() => observer?.disconnect());
 /* O espaço entre balões é padding da linha medida, para a soma dos offsets incluí-lo. */
 .row { display:flex; justify-content:flex-start; padding-bottom:var(--space-3); }
 .row.me { justify-content:flex-end; }
-.am-bubble { position:relative; box-sizing:border-box; max-width:76%; min-width:0; padding:var(--space-3) calc(var(--space-4) + var(--space-5)) var(--space-3) var(--space-4); border-radius:var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--space-2); background:var(--glass); border:1px solid var(--glass-border); font-size:var(--font-body); line-height:1.5; font-weight:500; transition:box-shadow var(--duration-fast) var(--ease-out); }
+.am-bubble { position:relative; box-sizing:border-box; max-width:76%; min-width:0; padding:var(--space-3) calc(var(--space-4) + var(--space-5)) var(--space-3) var(--space-4); border-radius:var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--space-2); background:var(--glass); border:1px solid var(--glass-border); font-size:16px; line-height:1.5; font-weight:500; transition:box-shadow var(--duration-fast) var(--ease-out); }
 .am-bubble--me { border-radius:var(--radius-lg) var(--radius-lg) var(--space-2) var(--radius-lg); background:linear-gradient(150deg, var(--selected), var(--glass)); border-color:var(--selected-border); }
 .am-bubble.is-playing { box-shadow:0 0 0 2px var(--accent-glow); }
 .am-bubble__meta { display:flex; align-items:center; gap:var(--space-1); margin-bottom:var(--space-1); font-size:12px; line-height:16px; font-weight:700; color:var(--text-muted); }

@@ -22,6 +22,7 @@
   --settings-nav-width: 260px;
   --read-max: 68ch;
   --form-max: 720px;
+  --page-gutter: var(--space-7);
   --blur-glass: 16px;
   --blur-bar: 14px;
   --duration-fast: 120ms;
@@ -32,19 +33,8 @@
   --font-round: "Quicksand Variable", "Quicksand", "Nunito", ui-rounded, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
-
-/*
- * Aliases temporários do Mineral para os componentes ainda não redesenhados.
- * Este bloco sai na Fase 9 do plano Ametista.
- */
-:root {
-  --font-ui: var(--font-round);
-  --font-code: var(--font-mono);
-  --font-meta: 13px;
-  --font-control: 14px;
-  --font-body: 16px;
-  --font-h2: 20px;
-  --font-h1: 26px;
-  --nav-width: var(--settings-nav-width);
-  --page-gutter: var(--space-7);
+@media (max-width: 640px) {
+  :root {
+    --page-gutter: var(--space-4);
+  }
 }

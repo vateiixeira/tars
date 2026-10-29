@@ -178,11 +178,6 @@ svg {
 .icon-button:disabled {
   opacity: 0.5;
 }
-@media (max-width: 640px) {
-  :root {
-    --page-gutter: var(--space-4);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

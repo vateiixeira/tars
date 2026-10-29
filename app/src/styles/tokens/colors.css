@@ -103,21 +103,3 @@
     --glass: var(--surface-solid);
   }
 }
-
-/*
- * Aliases temporários do Mineral: mantêm os componentes legíveis até serem
- * redesenhados. Este bloco sai na Fase 9 do plano Ametista.
- */
-:root {
-  --bg: var(--surface-solid);
-  --surface: var(--surface-solid);
-  --panel: var(--glass);
-  --border: var(--glass-border);
-  --muted: var(--text-muted);
-  --hover: var(--glass-strong);
-  --accent-hover: var(--accent-grad-to);
-  --selected-text: var(--text-accent);
-  --warn: var(--warning);
-  --audio-color: var(--speaker-1);
-  --reference-color: var(--speaker-2);
-}
