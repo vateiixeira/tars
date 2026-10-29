@@ -393,6 +393,7 @@ function stopAudio(): void {
   if (audioUrl.value) URL.revokeObjectURL(audioUrl.value);
   audioUrl.value = null;
   audioClip.value = null;
+  playback.value = null;
 }
 
 /** Baixa o áudio (reunião inteira ou só o trecho) e toca no player. */

@@ -5,7 +5,7 @@
 // (`end` definido) começa em `start` da reunião, e o tempo mostrado é sempre o da reunião.
 // `progress` informa o tempo atual (em segundos da reunião) e se está tocando, a cada
 // `timeupdate`: é o dado para marcar a fala que está tocando na transcrição.
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { mmss } from "../lib/format";
 import AppIcon from "./ui/AppIcon.vue";
 import AppLoader from "./ui/AppLoader.vue";
@@ -53,7 +53,14 @@ const shownTotal = computed(() => props.start + length.value);
 const percent = computed(() => (length.value > 0 ? Math.min(100, (current.value / length.value) * 100) : 0));
 const isClip = computed(() => props.src !== null && props.end !== null);
 
-watch([() => props.src, at, playing], () => emit("progress", props.src ? { at: at.value, playing: playing.value } : null));
+// `immediate` e o `null` ao desmontar: quem guarda o tempo nunca fica com o de um áudio que já
+// não está aqui (ex.: trocar de reunião desmonta o player antes de o `pause` do áudio chegar).
+watch(
+  [() => props.src, at, playing],
+  () => emit("progress", props.src ? { at: at.value, playing: playing.value } : null),
+  { immediate: true },
+);
+onBeforeUnmount(() => emit("progress", null));
 
 function onDuration(): void {
   const d = audioEl.value?.duration;

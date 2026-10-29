@@ -20,6 +20,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(async () => {}) }));
 
 import MeetingDetail from "./MeetingDetail.vue";
+import MeetingPlayer from "./MeetingPlayer.vue";
 
 const detail = (extra: Partial<Detail> = {}): Detail => ({
   id: "m1",
@@ -580,8 +581,29 @@ describe("MeetingDetail", () => {
     await range.setValue("90");
     expect(el.currentTime).toBe(90);
     expect(player.text()).toContain("01:30 / 02:00");
-    // o tempo atual fica disponível para a transcrição (Fase 5)
-    expect((w.vm as unknown as { playback: { at: number } | null }).playback?.at).toBe(90);
+    // o tempo atual sai no `progress` do player (o detalhe guarda em `playback` para a Fase 5)
+    expect(w.findComponent(MeetingPlayer).emitted("progress")?.slice(-1)[0]).toEqual([{ at: 90, playing: true }]);
+  });
+
+  it("trocar de reunião zera o tempo do player: nada fica tocando na reunião nova", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const { w, getMeeting } = await mountDetail(detail(), { audioBlob });
+    await w.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
+    await flushPromises();
+    const audio = w.get("audio");
+    await audio.trigger("play");
+    (audio.element as HTMLAudioElement).currentTime = 20;
+    await audio.trigger("timeupdate");
+    const oldPlayer = w.findComponent(MeetingPlayer);
+    expect(oldPlayer.emitted("progress")?.slice(-1)[0]).toEqual([{ at: 20, playing: true }]);
+
+    getMeeting.mockImplementation(async (id: string) => detail({ id }));
+    await w.setProps({ meetingId: "m2" });
+    await flushPromises();
+    // o player antigo avisa "sem áudio" ao desmontar, e o novo começa sem áudio
+    expect(oldPlayer.emitted("progress")?.slice(-1)[0]).toEqual([null]);
+    expect(w.findComponent(MeetingPlayer).emitted("progress")).toEqual([[null]]);
+    expect(w.find("audio").exists()).toBe(false);
   });
 
   it("tocar uma fala leva o player àquele tempo da reunião e permite voltar à reunião inteira", async () => {
