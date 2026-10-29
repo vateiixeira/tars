@@ -60,7 +60,6 @@ export function taskFields(t: TaskSuggestion): TaskFields {
     kind: t.kind,
     title: t.title,
     description: t.description,
-    project: t.project,
     product_id: t.product_id,
     assignee_id: t.assignee_id,
     team_id: t.team_id,
@@ -82,7 +81,6 @@ export function tasksMarkdown(items: TaskSuggestion[], options: IssueOptions | n
   const blocks = kept.map((t, i) => {
     const lines = [
       `- **Tipo:** ${KIND_LABELS[t.kind] ?? t.kind}`,
-      `- **Projeto:** ${t.project || "—"}`,
       `- **Produto:** ${optionName(options?.products, t.product_id)}`,
       `- **Responsável:** ${optionName(options?.people, t.assignee_id)}`,
       `- **Equipe:** ${optionName(options?.teams, t.team_id)}`,

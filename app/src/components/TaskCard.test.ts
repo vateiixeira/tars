@@ -117,3 +117,75 @@ describe("TaskCard prints", () => {
     w.unmount();
   });
 });
+
+describe("TaskCard campos", () => {
+  const OPTIONS = {
+    username: "vini",
+    people: [{ id: 1, name: "Ana" }, { id: 2, name: "Miguel" }],
+    teams: [{ id: 10, name: "Dev" }, { id: 20, name: "Suporte" }],
+    products: [],
+    stages: [],
+    fetched_at: "2026-10-20T10:00:00",
+  };
+  const mountWith = (t: TaskSuggestion) => {
+    installStore({});
+    return mount(TaskCard, {
+      props: { task: t, options: OPTIONS, missing: [], prints: PRINTS },
+      attachTo: document.body,
+    });
+  };
+  const selected = (w: ReturnType<typeof mount>, label: string) =>
+    (w.get(`[aria-label="${label}"]`).element as HTMLSelectElement).selectedOptions[0].textContent?.trim();
+
+  it("não tem o campo Projeto", () => {
+    const w = mountWith(task());
+    expect(w.find('[aria-label="Projeto"]').exists()).toBe(false);
+    expect(w.text()).not.toContain("Projeto");
+    w.unmount();
+  });
+
+  it.each([
+    ["Responsável", "assignee_id", 2, "Miguel"],
+    ["Equipe", "team_id", 20, "Suporte"],
+  ] as const)("%s: marca o último usado, e só ele", (label, key, id, name) => {
+    let w = mountWith(task({ [key]: id, suggested: { fill: { [key]: "last" } } }));
+    expect(selected(w, label)).toBe(`${name} (último usado)`);
+    w.unmount();
+    w = mountWith(task({ [key]: id, suggested: { fill: { [key]: "manual" } } }));
+    expect(selected(w, label)).toBe(name);
+    w.unmount();
+    w = mountWith(task({ [key]: id, suggested: null }));
+    expect(selected(w, label)).toBe(name);
+    w.unmount();
+  });
+
+  it("a sugestão do Claude continua '(sugestão)' e tem precedência", () => {
+    const w = mountWith(
+      task({ assignee_id: 2, suggested: { assignee_id: 2, fill: { assignee_id: "last" } } }),
+    );
+    expect(selected(w, "Responsável")).toBe("Miguel (sugestão)");
+    w.unmount();
+  });
+
+  it("a marca de último usado de um campo não vaza para o outro", () => {
+    const w = mountWith(
+      task({ assignee_id: 2, team_id: 20, suggested: { fill: { assignee_id: "last" } } }),
+    );
+    expect(selected(w, "Responsável")).toBe("Miguel (último usado)");
+    expect(selected(w, "Equipe")).toBe("Suporte");
+    w.unmount();
+  });
+
+  it("mostra a dica do Claude mesmo com suggested só com fill", () => {
+    const w = mountWith(
+      task({ suggested: { fill: {} } }),
+    );
+    expect(w.text()).not.toContain("Sugestão do Claude");
+    w.unmount();
+    const w2 = mountWith(
+      task({ suggested: { assignee_id: null, assignee_hint: "Zé", fill: {} } }),
+    );
+    expect(w2.text()).toContain("Sugestão do Claude: Zé");
+    w2.unmount();
+  });
+});

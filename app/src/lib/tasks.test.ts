@@ -17,7 +17,6 @@ const FIELDS: TaskFields = {
   kind: "bugfix",
   title: "Checkout: corrigir frete",
   description: "## Problema\nO frete some.",
-  project: "web-store",
   product_id: 1,
   assignee_id: 10,
   team_id: 20,
@@ -27,6 +26,7 @@ const FIELDS: TaskFields = {
 
 const ITEM: TaskSuggestion = {
   ...FIELDS,
+  project: "web-store",
   id: "t1",
   meeting_id: "m1",
   origin: "claude",
@@ -111,6 +111,7 @@ describe("tasks", () => {
 
   it("taskFields extrai só os campos editáveis", () => {
     expect(taskFields(CREATED_ITEM)).toEqual(FIELDS);
+    expect(taskFields(CREATED_ITEM)).not.toHaveProperty("project");
   });
 
   it("mostra — em campo vazio e #id quando a opção não existe", () => {
@@ -124,7 +125,7 @@ describe("tasks", () => {
   it("gera o Markdown só dos itens não descartados", () => {
     expect(tasksMarkdown([CREATED_ITEM, { ...ITEM, discarded: true }], OPTIONS)).toBe(
       "# Tarefas da reunião\n\n## 1. Checkout: corrigir frete\n\n" +
-        "- **Tipo:** Bug fix\n- **Projeto:** web-store\n- **Produto:** e-commerce\n- **Responsável:** Miguel\n" +
+        "- **Tipo:** Bug fix\n- **Produto:** e-commerce\n- **Responsável:** Miguel\n" +
         "- **Equipe:** Desenvolvimento\n- **Prioridade:** Média\n- **Etapa:** To Do\n- **Issue:** #217 https://issues.example.test/issues/217\n\n" +
         "## Problema\nO frete some.\n",
     );
@@ -138,7 +139,7 @@ describe("tasks", () => {
     expect(md).toContain("## 1. Checkout: corrigir frete");
     expect(md).toContain("## 2. Outra");
     expect(md).not.toContain("## 3.");
-    expect(md).toContain("- **Projeto:** —");
+    expect(md).not.toContain("**Projeto:**");
     expect(md).toContain("- **Produto:** #1");
     expect(md).toContain("O frete some.\n\n## 2. Outra");
     expect(md).not.toContain("MCP de issues");

@@ -232,7 +232,6 @@ export interface TaskFields {
   kind: TaskKind;
   title: string;
   description: string;
-  project: string | null;
   product_id: number | null;
   assignee_id: number | null;
   team_id: number | null;
@@ -243,16 +242,20 @@ export interface TaskFields {
 export type AttachState = "none" | "sending" | "sent" | "unsupported" | "failed";
 
 export interface TaskSuggestion extends TaskFields {
+  /** Legado: continua no banco, mas não aparece na interface nem vai para o MCP de issues. */
+  project: string | null;
   id: string;
   meeting_id: string;
   origin: "claude" | "manual";
   position: number;
+  /** Sugestão do Claude e origem do que foi preenchido sozinho (`fill`); null em tarefa manual sem preenchimento. */
   suggested: {
-    product_id: number | null;
-    assignee_id: number | null;
-    team_id: number | null;
-    assignee_hint: string | null;
-    team_hint: string | null;
+    product_id?: number | null;
+    assignee_id?: number | null;
+    team_id?: number | null;
+    assignee_hint?: string | null;
+    team_hint?: string | null;
+    fill?: Partial<Record<"assignee_id" | "team_id", "last" | "manual">>;
   } | null;
   evidence: Evidence[];
   edited: boolean;
