@@ -26,6 +26,7 @@ import {
 } from "../lib/tasks";
 import AppIcon from "./ui/AppIcon.vue";
 import AppSpinner from "./ui/AppSpinner.vue";
+import ScanContextPrompt from "./ScanContextPrompt.vue";
 import TaskCard from "./TaskCard.vue";
 
 const props = defineProps<{ meetingId: string; startedAt: string; prints: MeetingPrint[] }>();
@@ -45,6 +46,8 @@ const optionsError = ref<string | null>(null);
 const actionError = ref<string | null>(null);
 const scanContext = ref("");
 const contextId = useId();
+// "Agora não" na caixa de contexto: vale só enquanto a aba está aberta (não é persistido).
+const contextDismissed = ref(false);
 // Erro por cartão (recusa na criação, falha ao salvar, ao resolver).
 const cardErrors = ref<Record<string, string>>({});
 // Tarefa aberta à direita (por id: sobrevive às recargas).
@@ -302,6 +305,12 @@ async function run(name: string, fn: () => Promise<void>): Promise<void> {
   }
 }
 
+const contextDisabled = computed(() => !connected.value || !enabled.value || running.value || isBusy("scan"));
+// Antes do primeiro levantamento a caixa de contexto aparece aberta e em destaque.
+const showContextPrompt = computed(
+  () => enabled.value && loaded.value && scan.value === null && !running.value && !contextDismissed.value,
+);
+
 function rescan(): Promise<void> {
   return run("scan", async () => {
     const context = scanContext.value.trim();
@@ -427,14 +436,21 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       </button>
     </div>
 
-    <details v-if="enabled || items.length" class="scan-context">
-      <summary>Contexto para o levantamento{{ scanContext.trim() ? " (preenchido)" : " (opcional)" }}</summary>
+    <ScanContextPrompt
+      v-if="showContextPrompt"
+      v-model="scanContext"
+      :disabled="contextDisabled"
+      @generate="rescan"
+      @dismiss="contextDismissed = true"
+    />
+    <details v-else-if="enabled || items.length" class="scan-context">
+      <summary>Orientar as sugestões{{ scanContext.trim() ? " (preenchido)" : " (opcional)" }}</summary>
       <label :for="contextId">Como você quer orientar as sugestões?</label>
       <textarea
         :id="contextId"
         v-model="scanContext"
         :aria-describedby="`${contextId}-hint`"
-        :disabled="!connected || !enabled || running || isBusy('scan')"
+        :disabled="contextDisabled"
         rows="3"
         maxlength="10000"
         placeholder="Ex.: Foque nas pendências do checkout e agrupe os ajustes de pagamento em uma tarefa."
@@ -509,7 +525,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       <p v-else-if="scan?.state === 'done'" class="muted">
         Nenhuma tarefa identificada nesta reunião
       </p>
-      <p v-else-if="scan === null" class="muted">
+      <p v-else-if="scan === null && !showContextPrompt" class="muted">
         Revise os prints e clique em Levantar tarefas.
       </p>
     </template>

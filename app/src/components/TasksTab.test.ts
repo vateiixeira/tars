@@ -93,19 +93,52 @@ const row = (w: ReturnType<typeof mount>, id: string) => w.get(`[data-row-id="${
 const openId = (w: ReturnType<typeof mount>) => w.get(".detail [data-task-id]").attributes("data-task-id");
 
 describe("TasksTab", () => {
-  it("antes do primeiro levantamento mostra o botão Levantar tarefas e o campo de contexto", async () => {
+  it("antes do primeiro levantamento mostra a caixa de contexto em destaque e gera com o texto", async () => {
     const scanTasks = vi.fn(async () => ({ state: "running" as const }));
     const { w } = await mountTab(payload([], { scan: null }), { scanTasks });
-    expect(w.text()).toContain("Revise os prints e clique em Levantar tarefas.");
+    expect(w.text()).toContain("Quer orientar as sugestões de tarefas?");
+    expect(w.find(".scan-context").exists()).toBe(false);
+    expect(w.text()).not.toContain("Revise os prints e clique em Levantar tarefas.");
     expect(w.text()).not.toContain("Refazer sugestões");
-    expect(w.get(".scan-context summary").text()).toBe("Contexto para o levantamento (opcional)");
+    await w.get("textarea").setValue("  Foque no checkout.  ");
+    await btn(w, "Gerar tarefas").trigger("click");
+    await flushPromises();
+    expect(scanTasks).toHaveBeenCalledWith("m1", "Foque no checkout.");
+  });
+
+  it("'Agora não' esconde a caixa e deixa o contexto recolhido, preservando o texto", async () => {
+    const { w } = await mountTab(payload([], { scan: null }));
+    await w.get("textarea").setValue("Foque no checkout.");
+    await btn(w, "Agora não").trigger("click");
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
+    expect(w.get(".scan-context summary").text()).toBe("Orientar as sugestões (preenchido)");
+    expect((w.get(".scan-context textarea").element as HTMLTextAreaElement).value).toBe("Foque no checkout.");
+    expect(w.text()).toContain("Revise os prints e clique em Levantar tarefas.");
+  });
+
+  it("'Agora não' sem texto deixa o resumo como opcional", async () => {
+    const { w } = await mountTab(payload([], { scan: null }));
+    await btn(w, "Agora não").trigger("click");
+    expect(w.get(".scan-context summary").text()).toBe("Orientar as sugestões (opcional)");
+  });
+
+  it("depois do levantamento a caixa não aparece e o contexto fica recolhido", async () => {
+    const { w } = await mountTab(payload([task()]));
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
+    expect(w.get(".scan-context summary").text()).toBe("Orientar as sugestões (opcional)");
     expect(w.get(".scan-context").text()).toContain(
       "O texto será usado junto com a transcrição e os prints ao levantar as tarefas. Tarefas editadas, descartadas ou já enviadas são preservadas.",
     );
-    await w.get(".scan-context textarea").setValue("  Foque no checkout.  ");
-    await btn(w, "Levantar tarefas").trigger("click");
-    await flushPromises();
-    expect(scanTasks).toHaveBeenCalledWith("m1", "Foque no checkout.");
+  });
+
+  it("com o fluxo desligado a caixa não aparece", async () => {
+    const { w } = await mountTab(payload([], { enabled: false, scan: null }));
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
+  });
+
+  it("com o levantamento rodando a caixa não aparece", async () => {
+    const { w } = await mountTab(payload([], { scan: { state: "running", error: null, updated_at: "x" } }));
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
   });
 
   it("deixa o botão de levantamento desabilitado até a primeira carga terminar", async () => {
