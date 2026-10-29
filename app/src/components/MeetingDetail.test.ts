@@ -382,7 +382,7 @@ describe("MeetingDetail", () => {
     await flushPromises();
     expect(renameSpeaker).toHaveBeenCalledWith("s2", "João");
     expect(getMeeting).toHaveBeenCalledTimes(2); // recarregou o detalhe
-    await w.findAll("button").find((b) => b.text() === "Fechar")!.trigger("click");
+    await w.get('.name-dialog [aria-label="Fechar diálogo"]').trigger("click");
     expect(w.find(".name-dialog").exists()).toBe(false);
   });
 

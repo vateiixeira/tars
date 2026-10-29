@@ -7,6 +7,9 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useFocusScope } from "../composables/useFocusScope";
 import type { NameSuggestion } from "../api/types";
 import { useStatus } from "../composables/useStatus";
+import AppBanner from "./ui/AppBanner.vue";
+import AppIcon from "./ui/AppIcon.vue";
+import TypingDots from "./ui/TypingDots.vue";
 
 const props = defineProps<{ meetingId: string }>();
 const emit = defineEmits<{
@@ -88,13 +91,18 @@ onBeforeUnmount(() => (alive = false));
   <div ref="root" class="name-dialog" role="dialog" aria-modal="true" aria-label="Sugestão de nomes" tabindex="-1" @keydown.esc.stop.prevent="emit('close')">
     <div class="backdrop" @click="emit('close')"></div>
     <div class="card">
-      <h4>Sugestão de nomes</h4>
+      <header>
+        <h4>Sugestão de nomes</h4>
+        <button type="button" class="icon-button" aria-label="Fechar diálogo" @click="emit('close')">
+          <AppIcon name="close" :size="18" />
+        </button>
+      </header>
       <p class="hint">Nada é trocado sozinho: “Aplicar” renomeia só nesta reunião.</p>
 
-      <p v-if="loading" class="muted">O Claude está lendo a transcrição…</p>
+      <p v-if="loading" class="loading" role="status"><TypingDots /><span>O Claude está lendo a transcrição…</span></p>
 
       <template v-else-if="loadError">
-        <p class="error" role="alert">{{ loadError }}</p>
+        <AppBanner class="error" role="alert">{{ loadError }}</AppBanner>
         <button type="button" class="btn" @click="fetchSuggestions">Tentar de novo</button>
       </template>
 
@@ -104,27 +112,25 @@ onBeforeUnmount(() => (alive = false));
         <li v-for="row in rows" :key="row.suggestion.speaker_id" class="item">
           <div class="line">
             <strong>{{ row.suggestion.label }} → {{ row.suggestion.name }}</strong>
-            <span v-if="row.applied" class="done">Aplicado</span>
-            <button v-else type="button" class="btn pri" :disabled="row.busy" @click="apply(row)">Aplicar</button>
+            <span v-if="row.applied" class="done"><AppIcon name="check" :size="15" />Aplicado</span>
+            <button v-else type="button" class="btn pri btn-sm" :disabled="row.busy" @click="apply(row)">Aplicar</button>
           </div>
           <blockquote v-if="row.suggestion.evidence" class="evidence">“{{ row.suggestion.evidence }}”</blockquote>
           <label v-if="!row.applied" class="check">
             <input v-model="row.saveVoice" type="checkbox" :disabled="row.busy" /> também salvar a voz
           </label>
-          <p v-if="row.error" class="error" role="alert">{{ row.error }}</p>
+          <p v-if="row.error" class="item-error" role="alert">{{ row.error }}</p>
         </li>
       </ul>
-
-      <div class="foot">
-        <button type="button" class="btn" @click="emit('close')">Fechar</button>
-      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .name-dialog {
-  position:fixed; inset:0; z-index:50;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   outline: none;
 }
 .backdrop {
@@ -133,6 +139,7 @@ onBeforeUnmount(() => (alive = false));
   z-index: 50;
   background: var(--backdrop);
 }
+/* Mesmo visual do AppDialog (surface-raised, radius-xl, shadow-dialog). */
 .card {
   position: fixed;
   z-index: 51;
@@ -142,26 +149,42 @@ onBeforeUnmount(() => (alive = false));
   width: min(560px, calc(100vw - 32px));
   max-height: 80vh;
   overflow-y: auto;
-  padding: 16px 18px;
+  padding: var(--space-6);
   background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-dialog);
 }
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
 h4 {
-  margin: 0 0 4px;
-  font-size: 1.05rem;
+  margin: 0;
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 700;
 }
 .hint,
 .muted {
-  color: var(--muted);
-  margin: 0 0 10px;
-  font-size: 0.85rem;
+  margin: 0 0 var(--space-4);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--text-accent);
+  font-size: 14px;
+  font-weight: 700;
 }
 .error {
-  color: var(--danger);
-  margin: 6px 0;
-  font-size: 0.85rem;
+  margin: 0 0 var(--space-3);
 }
 .list {
   list-style: none;
@@ -169,40 +192,49 @@ h4 {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .item {
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
 }
 .line {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .done {
-  color: var(--text-accent);
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 700;
 }
 .evidence {
-  margin: 6px 0;
-  padding:12px 0;
-  border-top:1px solid var(--border);
-  color: var(--muted);
-  font-size: 0.85rem;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
 }
 .check {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.82rem;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
-.foot {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
+.item-error {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
 }
 </style>
