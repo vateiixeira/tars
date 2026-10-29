@@ -74,58 +74,66 @@ function append(text: string) {
 </template>
 
 <style scoped>
+/* Cartão de vidro com a faixa de destaque (Ametista). */
 .ctx {
-  flex-shrink: 0;
-  margin-bottom: 14px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-left: 4px solid var(--accent-glow);
+  border-radius: var(--radius-xl);
+  background: var(--glass);
+  box-shadow: var(--shadow-panel);
 }
 .ctx-head {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: flex-start;
 }
 .ctx-icon {
   flex: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
   background: var(--selected);
-  color: var(--selected-text);
+  color: var(--text-accent);
 }
 h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 700;
 }
 .ctx-head p {
-  max-width: 75ch;
+  max-width: var(--read-max);
   margin: 2px 0 0;
-  color: var(--muted);
-  font-size: var(--font-control);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
 }
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 12px 0 8px;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 var(--space-3);
 }
 .chip {
-  padding: 4px 10px;
+  height: var(--control-sm);
+  padding: 0 var(--space-3);
   border: 1px dashed var(--border-control);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font: inherit;
-  font-size: var(--font-meta);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
 }
 .chip:hover:not(:disabled) {
   border-style: solid;
+  background: var(--selected);
   color: var(--text);
 }
 .chip:disabled {
@@ -135,16 +143,28 @@ h3 {
 textarea {
   display: block;
   width: 100%;
-  min-height: 80px;
+  min-height: 88px;
   max-height: 160px;
   resize: vertical;
-  padding: 8px 12px;
+  padding: 14px var(--space-5);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background-color: var(--glass-strong);
   color: var(--text);
   font: inherit;
-  font-size: var(--font-control);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+}
+textarea::placeholder {
+  color: var(--text-muted);
+}
+textarea:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow:
+    0 0 0 1px var(--focus-ring),
+    0 0 0 5px var(--selected);
 }
 textarea:disabled {
   opacity: 0.55;
@@ -153,12 +173,13 @@ textarea:disabled {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 .note {
   margin-right: auto;
-  color: var(--muted);
-  font-size: var(--font-meta);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
 }
 </style>

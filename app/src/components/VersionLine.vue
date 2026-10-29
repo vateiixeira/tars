@@ -115,13 +115,13 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
 <style scoped>
 .version-line {
   font-size: 0.6875rem;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .link {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: var(--text-accent);
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
@@ -131,7 +131,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
   flex-direction: column;
   gap: 16px;
   color: var(--text);
-  font-size: var(--font-control);
+  font-size: 14px;
 }
 .body p {
   margin: 0;
@@ -142,7 +142,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
 }
 .command code {

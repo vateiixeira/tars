@@ -4,6 +4,7 @@ import type { Segment, Speaker } from "../api/types";
 import { useStatus } from "../composables/useStatus";
 import { mmss } from "../lib/format";
 import { speakerName, speakerSamples } from "../lib/meeting";
+import AppIcon from "./ui/AppIcon.vue";
 
 const props = defineProps<{ meetingId: string; speaker: Speaker; segments: Segment[] }>();
 const emit = defineEmits<{ play: [] }>();
@@ -66,7 +67,7 @@ onBeforeUnmount(stop);
         :title="sample.text"
         @click="play(sample)"
       >
-        <span aria-hidden="true">▶</span> {{ mmss(sample.start_s) }}
+        <AppIcon name="play" :size="12" />{{ mmss(sample.start_s) }}
       </button>
     </div>
     <p v-else class="hint">Nenhum trecho disponível para ouvir.</p>
@@ -86,37 +87,59 @@ onBeforeUnmount(stop);
 
 <style scoped>
 .speaker-samples {
-  padding: 6px 8px 10px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-1) 10px var(--space-3);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--glass-border);
 }
 .hint {
   margin: 0 0 6px;
-  font-size: 0.78rem;
-  color: var(--muted);
+  padding-top: var(--space-1);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.hint[role="status"],
+.hint:not(:first-child) {
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 12px;
 }
 .samples {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
+/* Trecho: pílula de vidro com o instante; o selecionado leva o realce. */
 .sample {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass);
   color: var(--text);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
+  transition: background var(--duration-fast);
 }
-.sample:hover:not(:disabled),
+.sample svg {
+  color: var(--text-accent);
+}
+.sample:hover:not(:disabled) {
+  background: var(--selected);
+}
 .sample.selected {
-  border-color: var(--accent);
-}
-.sample:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  background: var(--selected);
+  border-color: var(--selected-border);
+  color: var(--text-accent);
 }
 .sample:disabled {
   opacity: 0.6;
@@ -126,11 +149,17 @@ onBeforeUnmount(stop);
   display: block;
   width: 100%;
   height: 36px;
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .sample-error {
   margin: 6px 0 0;
-  font-size: 0.8rem;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sample {
+    transition: none;
+  }
 }
 </style>

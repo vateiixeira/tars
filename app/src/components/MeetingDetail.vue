@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Reunião aberta: título editável, etiquetas dos participantes, ações, alertas e abas
-// Transcrição/Resumo. Cobre também os estados "processando" (com o estágio do evento `progress`)
-// e "falhou" (com Reprocessar).
+// Reunião aberta: cabeçalho (`MeetingHeader`), abas Resumo · Transcrição · Prints · Tarefas com as
+// ações de cada uma, alertas e o player no rodapé (`MeetingPlayer`). Cobre também os estados
+// "gravando" (`MeetingRecording`), "processando" (`StepProgress` com as etapas do evento
+// `progress`) e "falhou" (banner com Reprocessar).
 //
 // Pessoas e resumo: clique numa etiqueta abre o `SpeakerMenu` (renomear/identificar/juntar), "Sugerir
 // nomes" abre o `NameSuggestionsDialog`, a aba "Resumo" é o `SummaryTab` e a aba "Tarefas" é o
@@ -13,7 +14,6 @@ import {
   inject,
   nextTick,
   onBeforeUnmount,
-  onMounted,
   ref,
   watch,
 } from "vue";
@@ -28,12 +28,17 @@ import type {
 } from "../api/types";
 import { notifyMeetingsChanged } from "../composables/useMeetingsRevision";
 import { useStatus } from "../composables/useStatus";
-import { groupByDay, timeOfDay } from "../lib/format";
-import { alertLines, exportFileName, transcriptText } from "../lib/meeting";
+import { alertLines, exportFileName, playingSegmentId, transcriptText } from "../lib/meeting";
+import AppBanner from "./ui/AppBanner.vue";
+import AppButton from "./ui/AppButton.vue";
 import AppIcon from "./ui/AppIcon.vue";
 import AppDialog from "./ui/AppDialog.vue";
+import SkeletonLines from "./ui/SkeletonLines.vue";
+import StepProgress from "./ui/StepProgress.vue";
+import MeetingRecording from "./MeetingRecording.vue";
+import MeetingPlayer, { type Playback } from "./MeetingPlayer.vue";
+import MeetingHeader, { type MeetingMenuKey } from "./MeetingHeader.vue";
 import NameSuggestionsDialog from "./NameSuggestionsDialog.vue";
-import SpeakerChips from "./SpeakerChips.vue";
 import SpeakerMenu from "./SpeakerMenu.vue";
 import PrintsTab from "./PrintsTab.vue";
 import SummaryTab from "./SummaryTab.vue";
@@ -49,28 +54,9 @@ const emit = defineEmits<{
   tasksView: [active: boolean];
 }>();
 
-const { client, events, connected, alerts: liveAlerts, levels } = useStatus();
+const { client, events, connected } = useStatus();
 
 const meeting = ref<MeetingDetail | null>(null);
-const levelTime = ref(Date.now());
-let levelTimer: ReturnType<typeof setInterval> | undefined;
-watch(
-  () => meeting.value?.status,
-  (value) => {
-    clearInterval(levelTimer);
-    levelTimer = undefined;
-    if (value === "recording") {
-      levelTime.value = Date.now();
-      levelTimer = setInterval(() => (levelTime.value = Date.now()), 500);
-    }
-  },
-);
-onBeforeUnmount(() => clearInterval(levelTimer));
-const captureLevels = computed(() =>
-  connected.value && levels.value && levelTime.value - levels.value.at < 3000
-    ? levels.value
-    : null,
-);
 const loadError = ref<string | null>(null);
 // Erro por ação: o de uma não some quando outra começa.
 const actionErrors = ref<Record<string, string>>({});
@@ -85,43 +71,34 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 const stage = ref<ProgressStage | null>(null);
+// Etapas reais do processamento (evento `progress`), na ordem em que o backend as percorre.
+const PROCESSING_STEPS: { key: ProgressStage; label: string }[] = [
+  { key: "transcrevendo", label: "Transcrição" },
+  { key: "separando vozes", label: "Falantes" },
+  { key: "finalizando", label: "Finalização" },
+];
 type MeetingTab = "transcript" | "summary" | "prints" | "tasks";
 const tab = ref<MeetingTab>("transcript");
-const previousTab = ref<"transcript" | "summary" | "prints">("transcript");
+// Aba Tarefas aberta: o App recolhe a biblioteca para dar largura às duas colunas das tarefas.
 const tasksActive = computed(() => tab.value === "tasks" && meeting.value?.status === "ready");
-const tasksBack = ref<HTMLButtonElement | null>(null);
-function openTasks(): void {
-  if (tab.value !== "tasks") previousTab.value = tab.value;
-  printFocus.value = null; // ao voltar, a aba Prints não deve rolar de novo até o print antigo
-  menuOpen.value = false;
-  speakerMenu.value = null;
-  tab.value = "tasks";
-}
-function closeTasks(): void {
-  tab.value = previousTab.value;
-}
-watch(tasksActive, (active, previous) => {
-  emit("tasksView", active);
-  void nextTick(() => {
-    if (active) tasksBack.value?.focus();
-    else if (previous) document.getElementById("open-tasks")?.focus();
-  });
-});
+watch(tasksActive, (active) => emit("tasksView", active));
 const tabMemory = inject<Map<string, string>>("meeting-tabs", new Map());
 let didChooseTab = false;
-const detailTabs = computed<{ id: MeetingTab; label: string }[]>(() => {
-  const tabs: { id: MeetingTab; label: string }[] = [
+// Tarefas da reunião (não descartadas), informadas pela aba depois que ela carrega.
+const tasksCount = ref<number | null>(null);
+const detailTabs = computed<{ id: MeetingTab; label: string; count?: number }[]>(() => {
+  const tabs: { id: MeetingTab; label: string; count?: number }[] = [
     { id: "summary", label: "Resumo" },
     { id: "transcript", label: "Transcrição" },
   ];
-  const count = meeting.value?.prints.length ?? 0;
-  if (count) tabs.push({ id: "prints", label: `Prints (${count})` });
+  const prints = meeting.value?.prints.length ?? 0;
+  if (prints) tabs.push({ id: "prints", label: "Prints", count: prints });
+  tabs.push({ id: "tasks", label: "Tarefas", count: tasksCount.value || undefined });
   return tabs;
 });
 // Sem prints (ex.: o último foi apagado) a aba some: volta para a transcrição.
 watch(detailTabs, (tabs) => {
-  if (!tabs.some((t) => t.id === tab.value) && tab.value !== "tasks") tab.value = "transcript";
-  if (previousTab.value === "prints" && !tabs.some((t) => t.id === "prints")) previousTab.value = "transcript";
+  if (!tabs.some((t) => t.id === tab.value)) tab.value = "transcript";
 });
 const printFocus = ref<string | null>(null);
 function openPrint(id: string): void {
@@ -164,7 +141,6 @@ async function load(): Promise<void> {
     meeting.value = result;
     if (!didChooseTab) {
       didChooseTab = true;
-      previousTab.value = result.summary ? "summary" : "transcript";
       const remembered = tabMemory.get(props.meetingId) as MeetingTab | undefined;
       tab.value =
         remembered && (remembered !== "prints" || result.prints.length)
@@ -199,82 +175,40 @@ watch(connected, (on) => {
 
 // -- cabeçalho ------------------------------------------------------------------------------
 
+const header = ref<InstanceType<typeof MeetingHeader> | null>(null);
 const title = computed(() => meeting.value?.title || "Reunião sem título");
-const when = computed(() => {
-  const m = meeting.value;
-  if (!m) return "";
-  const day = groupByDay([m])[0].label;
-  const end = m.ended_at ? `–${timeOfDay(m.ended_at)}` : "";
-  return `${day}, ${timeOfDay(m.started_at)}${end}`;
-});
 const alerts = computed(() => (meeting.value ? alertLines(meeting.value) : []));
 
-const editing = ref(false);
-const draft = ref("");
-const titleInput = ref<HTMLInputElement | null>(null);
-const savingTitle = ref(false);
-const renameButton = ref<HTMLButtonElement | null>(null);
-const moreButton = ref<HTMLButtonElement | null>(null);
-const moreWrap = ref<HTMLElement | null>(null);
-function toggleMore() {
-  menuOpen.value = !menuOpen.value;
-  confirmingDelete.value = false;
-  if (menuOpen.value)
-    void nextTick(() =>
-      moreWrap.value?.querySelector<HTMLButtonElement>(".menu button")?.focus(),
-    );
-}
-function closeOutside(event: PointerEvent) {
-  if (menuOpen.value && !moreWrap.value?.contains(event.target as Node))
-    menuOpen.value = false;
-}
-onMounted(() => document.addEventListener("pointerdown", closeOutside));
-onBeforeUnmount(() =>
-  document.removeEventListener("pointerdown", closeOutside),
-);
-function cancelDelete() {
-  confirmingDelete.value = false;
-  void nextTick(() => moreButton.value?.focus());
-}
-function cancelTitle() {
-  editing.value = false;
-  void nextTick(() => renameButton.value?.focus());
-}
-
-function startEdit(): void {
-  draft.value = meeting.value?.title ?? "";
-  editing.value = true;
-  void nextTick(() => titleInput.value?.select());
-}
-
-async function commitTitle(): Promise<void> {
-  if (!editing.value || savingTitle.value) return;
-  const next = draft.value.trim();
-  if (!next || next === (meeting.value?.title ?? "")) {
-    cancelTitle();
-    return;
-  }
-  savingTitle.value = true;
+/** Salva o título vindo do cabeçalho; o erro vira banner e o cabeçalho continua editando. */
+async function renameTitle(next: string): Promise<boolean> {
   const id = props.meetingId;
   const { title: _oldError, ...rest } = actionErrors.value;
   actionErrors.value = rest;
   try {
     await client.renameMeeting(id, next);
     await refreshAfterChange(id);
-    if (id === props.meetingId) cancelTitle();
+    return true;
   } catch (e) {
-    if (id === props.meetingId) {
-      actionErrors.value = { ...actionErrors.value, title: errorText(e) };
-      void nextTick(() => titleInput.value?.focus());
-    }
-  } finally {
-    savingTitle.value = false;
+    if (id === props.meetingId) actionErrors.value = { ...actionErrors.value, title: errorText(e) };
+    return false;
   }
+}
+
+function onMenu(key: MeetingMenuKey): void {
+  if (key === "export") void exportMeeting();
+  else if (key === "suggest") suggesting.value = true;
+  else if (key === "archive") void toggleArchive();
+  else confirmingDelete.value = true;
+}
+function cancelDelete(): void {
+  confirmingDelete.value = false;
+  void nextTick(() => header.value?.focusMenuButton());
 }
 
 // -- ações ----------------------------------------------------------------------------------
 
-const copied = ref(false);
+// O que acabou de ser copiado (o botão mostra "Copiado" por 2 s).
+const copied = ref<"transcript" | "summary" | null>(null);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 // Ações em andamento (várias podem rodar juntas; cada uma só habilita o próprio botão ao terminar).
 // A chave leva o id da reunião: uma ação que ficou para trás ao trocar de reunião não trava os
@@ -317,16 +251,21 @@ async function run(name: string, fn: () => Promise<void>): Promise<void> {
   }
 }
 
-function copyTranscript(): Promise<void> {
-  return run("copy", async () => {
-    const m = meeting.value;
-    if (!m) return;
-    await writeText(transcriptText(m.segments, m.speakers));
-    copied.value = true;
+function copyText(what: "transcript" | "summary", text: () => string | null): Promise<void> {
+  return run(`copy-${what}`, async () => {
+    const value = text();
+    if (!value) return;
+    await writeText(value);
+    copied.value = what;
     clearTimeout(copiedTimer);
-    copiedTimer = setTimeout(() => (copied.value = false), 2000);
+    copiedTimer = setTimeout(() => (copied.value = null), 2000);
   });
 }
+const copyTranscript = () =>
+  copyText("transcript", () => (meeting.value ? transcriptText(meeting.value.segments, meeting.value.speakers) : null));
+const copySummary = () => copyText("summary", () => meeting.value?.summary ?? null);
+// Resumindo: por clique ou pelo resumo automático (job rodando).
+const summarizing = computed(() => isBusy("summarize") || meeting.value?.summary_job?.state === "running");
 
 /** Com prints, exporta o .zip (markdown + imagens); sem prints, só o .md. */
 function exportMeeting(): Promise<void> {
@@ -405,19 +344,12 @@ function reprocess(): Promise<void> {
   });
 }
 
-const menuOpen = ref(false);
-const peopleExpanded = ref(false);
 const confirmingDelete = ref(false);
 const archived = computed(() => !!meeting.value?.archived_at);
-// gravando/processando: o backend recusa (409), igual à exclusão
-const canArchive = computed(
-  () => meeting.value?.status !== "recording" && meeting.value?.status !== "processing",
-);
 
 function toggleArchive(): Promise<void> {
   const id = props.meetingId;
   const archive = !archived.value;
-  menuOpen.value = false;
   return run("archive", async () => {
     const r = archive ? await client.archiveMeeting(id) : await client.unarchiveMeeting(id);
     if (id === props.meetingId && meeting.value) meeting.value.archived_at = r.archived_at;
@@ -432,7 +364,6 @@ function remove(): Promise<void> {
     notifyMeetingsChanged();
     emit("deleted", id);
     if (id !== props.meetingId) return;
-    menuOpen.value = false;
     confirmingDelete.value = false;
   });
 }
@@ -440,14 +371,45 @@ function remove(): Promise<void> {
 // -- áudio ----------------------------------------------------------------------------------
 
 const audioUrl = ref<string | null>(null);
-const audioEl = ref<HTMLAudioElement | null>(null);
+// Trecho carregado no player (segundos da reunião); `null` = reunião inteira.
+const audioClip = ref<{ start: number; end: number } | null>(null);
+const player = ref<InstanceType<typeof MeetingPlayer> | null>(null);
+// Tempo atual do player em segundos da reunião (e se está tocando), atualizado a cada
+// `timeupdate`; `null` sem áudio carregado. É o que marca a fala tocando na transcrição.
+const playback = ref<Playback | null>(null);
 let audioSeq = 0;
+
+const meetingLength = computed(() => {
+  const m = meeting.value;
+  if (!m) return 0;
+  const start = Date.parse(m.started_at);
+  const end = m.ended_at ? Date.parse(m.ended_at) : NaN;
+  if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) return (end - start) / 1000;
+  return m.segments[m.segments.length - 1]?.end_s ?? 0;
+});
+
+// Fala tocando agora: muda só na troca de fala (o tempo do player muda ~4x/s), então a transcrição
+// não re-renderiza a cada `timeupdate`.
+const playingId = computed(() =>
+  playback.value?.playing && meeting.value ? playingSegmentId(meeting.value.segments, playback.value.at) : null,
+);
+
+/** Tempo do player; voltar a tocar com sucesso tira o aviso de falha de áudio. */
+function onPlayback(state: Playback | null): void {
+  playback.value = state;
+  if (state?.playing && actionErrors.value.audio) {
+    const { audio: _cleared, ...rest } = actionErrors.value;
+    actionErrors.value = rest;
+  }
+}
 
 function stopAudio(): void {
   ++audioSeq;
-  audioEl.value?.pause?.();
+  player.value?.pause();
   if (audioUrl.value) URL.revokeObjectURL(audioUrl.value);
   audioUrl.value = null;
+  audioClip.value = null;
+  playback.value = null;
 }
 
 /** Baixa o áudio (reunião inteira ou só o trecho) e toca no player. */
@@ -459,10 +421,10 @@ function playAudio(start?: number, end?: number): Promise<void> {
     if (id !== props.meetingId || seq !== audioSeq) return;
     const previous = audioUrl.value;
     audioUrl.value = URL.createObjectURL(blob);
+    audioClip.value = start !== undefined && end !== undefined ? { start, end } : null;
     if (previous) URL.revokeObjectURL(previous);
     await nextTick();
-    // jsdom não implementa `play`; no app, um autoplay barrado não deve virar erro na tela
-    await audioEl.value?.play?.()?.catch(() => {});
+    await player.value?.play();
   });
 }
 
@@ -478,17 +440,14 @@ watch(
     meeting.value = null;
     stage.value = null;
     actionErrors.value = {};
-    editing.value = false;
     confirmingDelete.value = false;
     confirmingReprocess.value = false;
-    menuOpen.value = false;
-    peopleExpanded.value = false;
     speakerMenu.value = null;
     suggesting.value = false;
     tab.value = "transcript";
     printFocus.value = null;
     tasksOpenedFor.value = null;
-    previousTab.value = "transcript";
+    tasksCount.value = null;
     stopAudio();
     void load();
   },
@@ -506,213 +465,66 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="detail" :class="{ 'tasks-page': tasksActive }">
-    <p v-if="loadError && !meeting" class="state error" role="alert">
-      {{ loadError }}
-      <button class="btn" type="button" @click="load">Tentar de novo</button>
-    </p>
-    <div v-else-if="!meeting" class="state" role="status">
-      <div class="skeleton-line" />
-      <div class="skeleton-line short" />
-      Carregando reunião…
+  <section class="detail">
+    <div v-if="loadError && !meeting" class="state">
+      <AppBanner class="banner error" role="alert">
+        {{ loadError }}
+        <template #action>
+          <button class="btn btn-sm" type="button" @click="load">Tentar de novo</button>
+        </template>
+      </AppBanner>
+    </div>
+    <div v-else-if="!meeting" class="state loading">
+      <SkeletonLines :lines="1" class="skel-title" />
+      <SkeletonLines :lines="4" label="Carregando reunião…" />
     </div>
     <template v-else>
-      <header v-show="!tasksActive" class="head">
-        <div class="context-label">
-          Reunião
-          <span v-if="meeting.status === 'ready'" class="ready"
-            ><AppIcon name="check" :size="14" />Pronta para revisar</span
-          >
-        </div>
-        <div class="title-row">
-          <input
-            v-if="editing"
-            ref="titleInput"
-            v-model="draft"
-            class="title-input"
-            maxlength="200"
-            aria-label="Título da reunião"
-            :aria-invalid="actionErrors.title ? true : undefined"
-            :disabled="savingTitle"
-            @keydown.enter.prevent="commitTitle"
-            @keydown.esc.prevent="cancelTitle"
-            @blur="commitTitle"
-          />
-          <h1 v-else>
-            <button
-              ref="renameButton"
-              type="button"
-              class="title"
-              title="Editar título da reunião"
-              :aria-label="`Renomear reunião: ${title}`"
-              :disabled="!connected"
-              @click="startEdit"
-            >
-              {{ title }}<AppIcon name="edit" :size="17" />
-            </button>
-          </h1>
-          <div
-            ref="moreWrap"
-            class="more-wrap"
-            @keydown.esc.stop.prevent="
-              menuOpen = false;
-              moreButton?.focus();
-            "
-          >
-            <button
-              ref="moreButton"
-              type="button"
-              class="more icon-button"
-              aria-label="Mais opções"
-              :aria-expanded="menuOpen"
-              @click="toggleMore"
-            >
-              <AppIcon name="more" />
-            </button>
-            <div
-              v-if="menuOpen"
-              class="menu"
-              @keydown.esc.stop.prevent="
-                menuOpen = false;
-                moreButton?.focus();
-              "
-            >
-              <button
-                type="button"
-                :disabled="isBusy('export') || !connected"
-                @click="
-                  exportMeeting();
-                  menuOpen = false;
-                "
-              >
-                {{ meeting.prints.length ? "Exportar reunião com prints (.zip)" : "Exportar reunião em Markdown" }}
-              </button>
-              <button
-                type="button"
-                :disabled="!connected"
-                @click="
-                  suggesting = true;
-                  menuOpen = false;
-                "
-              >
-                Sugerir nomes
-              </button>
-              <button
-                type="button"
-                @click="
-                  peopleExpanded = !peopleExpanded;
-                  menuOpen = false;
-                "
-              >
-                {{ peopleExpanded ? "Ocultar participantes" : "Participantes" }}
-              </button>
-              <button
-                type="button"
-                :disabled="!connected || isBusy('archive') || (!archived && !canArchive)"
-                @click="toggleArchive"
-              >
-                {{ archived ? "Desarquivar" : "Arquivar reunião" }}
-              </button>
-              <button
-                type="button"
-                class="danger"
-                :disabled="!connected"
-                @click="
-                  confirmingDelete = true;
-                  menuOpen = false;
-                "
-              >
-                Excluir reunião
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="meta">
-          <AppIcon name="clock" :size="14" />{{ when
-          }}<span v-if="archived" class="archived-tag">Arquivada</span
-          ><span v-if="savingTitle" role="status">Salvando título…</span>
-        </div>
-        <div class="head-bottom" :class="{ expanded: peopleExpanded }">
-          <SpeakerChips
-            :speakers="meeting.speakers"
-            @select="onSpeakerSelect"
-          /><button
-            type="button"
-            class="btn export"
-            :disabled="isBusy('export') || !connected"
-            @click="exportMeeting"
-          >
-            <AppIcon name="export" :size="16" />Exportar {{ exportExtension }}
-          </button>
-        </div>
-      </header>
-      <p
+      <MeetingHeader
+        ref="header"
+        :meeting="meeting"
+        :connected="connected"
+        :rename="renameTitle"
+        :title-invalid="!!actionErrors.title"
+        :export-busy="isBusy('export')"
+        :archive-busy="isBusy('archive')"
+        @menu="onMenu"
+        @select-speaker="onSpeakerSelect"
+      />
+      <AppBanner
         v-for="b in errorBanners"
         :key="b.action"
         class="banner error"
         role="alert"
       >
         {{ b.message }}
-      </p>
-      <div v-if="meeting.status === 'recording'" class="capture-state">
-        <span class="capture-status"
-          ><span class="capture-dot" />Gravação em andamento</span
-        >
-        <h2>Registrando a reunião</h2>
-        <p>
-          Microfone e áudio do computador. A transcrição completa aparece após o
-          processamento.
-        </p>
-        <div
-          v-for="alert in liveAlerts"
-          :key="alert.kind"
-          class="capture-alert"
-          role="status"
-        >
-          <AppIcon name="warning" :size="18" />{{ alert.message }}
+      </AppBanner>
+      <MeetingRecording v-if="meeting.status === 'recording'" :started-at="meeting.started_at" />
+      <div v-else-if="meeting.status === 'processing'" class="processing">
+        <div>
+          <h2>Preparando sua reunião</h2>
+          <p class="hint">Você já pode iniciar outra reunião.</p>
         </div>
-        <div v-if="captureLevels" class="capture-levels">
-          <label
-            >Microfone<meter
-              min="-90"
-              max="0"
-              :value="captureLevels.mic_db"
-            />{{
-              captureLevels.mic_db > -60
-                ? "Sinal recebido"
-                : "Sem sinal recente"
-            }}</label
-          ><label
-            >Áudio do PC<meter
-              min="-90"
-              max="0"
-              :value="captureLevels.pc_db"
-            />{{
-              captureLevels.pc_db > -60 ? "Sinal recebido" : "Sem sinal recente"
-            }}</label
-          >
-        </div>
-        <p v-if="!captureLevels" class="capture-hint">
-          Aguardando níveis de áudio recentes.
-        </p>
-        <p class="capture-hint">
-          Use Parar no controle de captura para encerrar a reunião.
-        </p>
-      </div>
-      <div
-        v-else-if="meeting.status === 'processing'"
-        class="state progress"
-        role="status"
-      >
-        <AppIcon name="refresh" :size="28" />
-        <h2>Preparando sua reunião</h2>
-        <p>Processando: {{ stage ?? "aguardando" }}…</p>
-        <p class="muted">Você já pode iniciar outra reunião.</p>
+        <!-- montado durante todo o processamento: a região viva dele anuncia cada etapa -->
+        <StepProgress class="steps" :steps="PROCESSING_STEPS" :current="stage" />
       </div>
       <div v-else-if="meeting.status === 'failed'" class="state failed">
-        <p role="alert">
-          {{ meeting.error || "O processamento da reunião falhou." }}
-        </p>
+        <AppBanner class="failed-banner">
+          <div role="alert">
+            <strong>O processamento falhou</strong>
+            {{ meeting.error || "Não foi possível transcrever esta reunião." }}
+          </div>
+          <template #action>
+            <AppButton
+              v-if="!confirmingReprocess"
+              size="sm"
+              :busy="isBusy('reprocess')"
+              :disabled="!connected"
+              @click="requestReprocess"
+            >
+              <AppIcon name="refresh" :size="15" />Reprocessar
+            </AppButton>
+          </template>
+        </AppBanner>
         <div
           v-if="confirmingReprocess"
           class="confirm"
@@ -741,93 +553,52 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <button
-          v-else
-          type="button"
-          class="btn pri"
-          :disabled="isBusy('reprocess') || !connected"
-          @click="requestReprocess"
-        >
-          Reprocessar
-        </button>
       </div>
       <template v-else>
-        <header v-show="tasksActive" class="tasks-head">
-          <button ref="tasksBack" type="button" class="btn ghost" @click="closeTasks">
-            <AppIcon name="arrow" :size="18" />Voltar à reunião
-          </button>
-          <div class="tasks-heading">
-            <h1 id="tasks-heading">Tarefas</h1>
-            <p>{{ title }}</p>
-          </div>
-        </header>
-        <div v-show="!tasksActive" class="tabs-row">
-          <div class="tabs" role="tablist" aria-label="Conteúdo da reunião">
-            <button
-              v-for="(item, index) in detailTabs"
-              :id="`tab-${item.id}`"
-              :key="item.id"
-              type="button"
-              role="tab"
-              class="tab"
-              :class="{ on: tab === item.id }"
-              :aria-selected="tab === item.id"
-              :aria-controls="`panel-${item.id}`"
-              :tabindex="tab === item.id ? 0 : -1"
-              @click="selectTab(item.id)"
-              @keydown="onTabKey($event, index)"
+        <div class="tabs" role="tablist" aria-label="Conteúdo da reunião">
+          <button
+            v-for="(item, index) in detailTabs"
+            :id="`tab-${item.id}`"
+            :key="item.id"
+            type="button"
+            role="tab"
+            class="tab"
+            :class="{ on: tab === item.id }"
+            :aria-selected="tab === item.id"
+            :aria-controls="`panel-${item.id}`"
+            :tabindex="tab === item.id ? 0 : -1"
+            @click="selectTab(item.id)"
+            @keydown="onTabKey($event, index)"
+          >
+            {{ item.label }}<template v-if="item.count"
+              ><span class="sr-only"> (</span><span class="count">{{ item.count }}</span><span class="sr-only">)</span></template
             >
-              {{ item.label }}
-            </button>
-          </div>
-          <button id="open-tasks" type="button" class="btn ghost tasks-link" @click="openTasks">
-            <AppIcon name="file" :size="16" />Tarefas<AppIcon name="chevron" :size="16" />
           </button>
         </div>
         <div v-if="tab !== 'tasks'" class="actions">
-          <template v-if="tab === 'transcript'"
-            ><button
-              type="button"
-              class="btn ghost"
-              :disabled="isBusy('copy')"
-              @click="copyTranscript"
-            >
-              <AppIcon name="copy" :size="16" />{{
-                copied ? "Copiado" : "Copiar transcrição"
-              }}</button
-            ><button
-              type="button"
-              class="btn ghost"
-              :disabled="!connected"
-              @click="suggesting = true"
-            >
-              <AppIcon name="people" :size="16" />Sugerir nomes</button
-            ><button
-              type="button"
-              class="btn ghost"
-              :disabled="isBusy('summarize') || !connected"
-              @click="onSummarize"
-            >
-              <AppIcon name="file" :size="16" />{{
-                isBusy("summarize") ? "Resumindo…" : "Resumir"
-              }}
-            </button></template
-          >
-          <span v-else-if="tab === 'summary'" class="section-caption"
-            >Resumo da reunião</span
-          ><span v-else-if="tab === 'prints'" class="section-caption"
-            >Prints de tela tirados durante a reunião.</span
-          ><span v-else class="section-caption"
-            >Revise antes de criar no MCP de issues.</span
-          >
-          <button
-            type="button"
-            class="btn ghost audio-action"
-            :disabled="isBusy('audio') || !connected"
-            @click="playAudio()"
-          >
-            <AppIcon name="play" :size="16" />Ouvir áudio
-          </button>
+          <template v-if="tab === 'transcript'">
+            <AppButton size="sm" :disabled="isBusy('copy-transcript')" @click="copyTranscript">
+              <AppIcon name="copy" :size="15" />{{ copied === "transcript" ? "Copiado" : "Copiar transcrição" }}
+            </AppButton>
+            <AppButton size="sm" :disabled="!connected" @click="suggesting = true">
+              <AppIcon name="user-plus" :size="15" />Sugerir nomes
+            </AppButton>
+            <AppButton size="sm" :busy="isBusy('summarize')" :disabled="!connected" @click="onSummarize">
+              <AppIcon name="spark" :size="15" />{{ isBusy("summarize") ? "Resumindo…" : "Resumir" }}
+            </AppButton>
+          </template>
+          <template v-else-if="tab === 'summary' && meeting.summary">
+            <AppButton size="sm" :disabled="summarizing || isBusy('copy-summary')" @click="copySummary">
+              <AppIcon name="copy" :size="15" />{{ copied === "summary" ? "Copiado" : "Copiar" }}
+            </AppButton>
+            <AppButton size="sm" :disabled="summarizing || !connected" @click="onSummarize">
+              <AppIcon name="refresh" :size="15" />Refazer
+            </AppButton>
+          </template>
+          <span v-else-if="tab === 'prints'" class="section-caption">Prints de tela tirados durante a reunião.</span>
+          <AppButton size="sm" :busy="isBusy('export')" :disabled="!connected" @click="exportMeeting">
+            <AppIcon name="export" :size="15" />Exportar {{ exportExtension }}
+          </AppButton>
         </div>
         <ul v-if="alerts.length && tab === 'transcript'" class="alerts">
           <li v-for="(line, i) in alerts" :key="i">{{ line }}</li>
@@ -847,6 +618,7 @@ onBeforeUnmount(() => {
               :segments="meeting.segments"
               :speakers="meeting.speakers"
               :prints="meeting.prints"
+              :playing-id="playingId"
               @play="playSegment"
               @open-print="openPrint"
             />
@@ -892,8 +664,8 @@ onBeforeUnmount(() => {
           <div
             v-show="tab === 'tasks'"
             id="panel-tasks"
-            role="region"
-            aria-labelledby="tasks-heading"
+            role="tabpanel"
+            aria-labelledby="tab-tasks"
             class="tab-panel"
             tabindex="0"
           >
@@ -904,19 +676,24 @@ onBeforeUnmount(() => {
               :started-at="meeting.started_at"
               :prints="meeting.prints"
               @play="playAudio"
+              @count="tasksCount = $event"
             />
           </div>
         </div>
-        <audio
-          v-if="audioUrl"
-          ref="audioEl"
-          class="player"
+        <MeetingPlayer
+          ref="player"
           :src="audioUrl"
-          aria-label="Áudio da reunião"
-          controls
+          :start="audioClip?.start ?? 0"
+          :end="audioClip?.end ?? null"
+          :total="meetingLength"
+          :loading="isBusy('audio')"
+          :disabled="!connected"
+          @load="playAudio()"
+          @progress="onPlayback"
+          @error="actionErrors = { ...actionErrors, audio: $event }"
         />
         <span class="sr-only" role="status">{{
-          copied ? "Transcrição copiada." : ""
+          copied === "transcript" ? "Transcrição copiada." : copied === "summary" ? "Resumo copiado." : ""
         }}</span>
       </template>
       <SpeakerMenu
@@ -976,219 +753,101 @@ onBeforeUnmount(() => {
   min-height: 0;
   container: detail / inline-size;
 }
-.head {
-  padding: 28px var(--page-gutter) 18px;
-}
-.tasks-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px 24px;
-  padding: 16px var(--page-gutter);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.tasks-heading {
-  min-width: 0;
-  flex: 1;
-}
-.tasks-heading h1 {
-  font-size: var(--font-h2);
-}
-.tasks-heading p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tabs-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 var(--page-gutter);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.tasks-link {
-  margin-left: auto;
-}
-.context-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.75rem;
-  color: var(--muted);
-  margin-bottom: 14px;
-}
-.ready {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--audio-color);
-  font-size: 0.6875rem;
-}
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-h1 {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-}
-.title {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: inherit;
-  font-weight: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  overflow-wrap: anywhere;
-  max-width: 100%;
-}
-.title svg {
-  color: var(--muted);
-  flex-shrink: 0;
-}
-.title-input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: var(--font-h1);
-  padding: 4px 8px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  background: var(--surface);
-}
-.meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  margin-top: 12px;
-}
-.archived-tag {
-  padding: 1px 8px;
-  border: 1px solid var(--border-control);
-  border-radius: 999px;
-  font-size: 0.6875rem;
-}
-.head-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-}
-.export {
-  font-size: var(--font-meta);
-  flex-shrink: 0;
-}
-.more-wrap {
-  position: relative;
-  margin-left: auto;
-}
-.menu {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 20;
-  min-width: 220px;
-  padding: 6px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover);
-}
-.menu button {
-  padding: 12px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  text-align: left;
-  width: 100%;
-  font-size: var(--font-control);
-}
-.menu button:hover {
-  background: var(--hover);
-}
-.danger,
-.error {
-  color: var(--danger);
-}
 .confirm {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  font-size: var(--font-control);
+  gap: var(--space-3);
+  max-width: var(--read-max);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  font-size: 14px;
+}
+.confirm p {
+  margin: 0;
 }
 .confirm div,
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  padding: 8px var(--page-gutter);
-}
-.actions .btn {
-  font-size: 0.75rem;
-  min-height: 36px;
-  padding: 6px 4px;
-}
-.audio-action {
-  margin-left: auto;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--page-gutter) var(--space-2);
 }
 .section-caption {
-  color: var(--muted);
-  font-size: var(--font-meta);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
 }
-.player {
-  width: calc(100% - 2 * var(--page-gutter));
-  margin: 8px var(--page-gutter) 16px;
-  height: 42px;
-  flex-shrink: 0;
-}
+/* Abas (am-tab): sublinhado em gradiente na selecionada e contador em pílula. */
 .tabs {
   display: flex;
   flex-shrink: 0;
-  gap: 28px;
+  gap: var(--space-5);
+  margin: 0 var(--page-gutter);
+  border-bottom: 1px solid var(--glass-border);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .tab {
-  padding: 14px 0;
-  min-height: 48px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: var(--space-2) 0;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
-  color: var(--muted);
-  font-size: var(--font-control);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text);
 }
 .tab.on {
   color: var(--text);
-  font-weight: 600;
-  border-bottom-color: var(--accent);
+}
+.tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--text-accent), var(--accent));
+}
+.tab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -3px 0 var(--focus-ring);
+}
+.count {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--selected);
+  color: var(--text-accent);
+  font-size: 11px;
+  line-height: 16px;
 }
 .alerts {
   margin: 0;
-  padding: 8px var(--page-gutter) 8px calc(var(--page-gutter) + 18px);
-  color: var(--warn);
-  font-size: var(--font-meta);
+  padding: var(--space-2) var(--page-gutter) var(--space-2) calc(var(--page-gutter) + var(--space-5));
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
 }
 .body {
   flex: 1;
@@ -1198,173 +857,82 @@ h1 {
   height: 100%;
   min-height: 0;
 }
-.state {
-  padding: var(--space-8) var(--page-gutter);
-  color: var(--muted);
-}
-.progress {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-.progress svg {
-  color: var(--accent);
-}
-.progress h2 {
-  color: var(--text);
-  margin-top: 20px;
-}
-.state.failed p {
-  color: var(--danger);
-}
-.banner {
-  margin: 0;
-  padding: 8px var(--page-gutter);
-  font-size: var(--font-meta);
-}
-.capture-state {
+.processing {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 32px;
-  text-align: center;
-}
-.capture-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--danger);
-  font-size: var(--font-control);
-}
-.capture-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--danger);
-}
-.capture-state h2 {
-  font-size: 1.5rem;
-  margin-top: 24px;
-}
-.capture-state > p {
-  max-width: 55ch;
-  margin: 16px auto;
-  font-size: var(--font-control);
-  color: var(--muted);
-}
-.capture-alert {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--warn);
-  background: var(--warning-surface);
-  padding: 12px;
-  margin: 12px auto;
-  max-width: 600px;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--page-gutter);
+  text-align: center;
 }
-.capture-levels {
-  max-width: 500px;
-  margin: 24px auto;
+.processing h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
 }
-.capture-levels label {
-  display: grid;
-  grid-template-columns: 100px 1fr 120px;
-  align-items: center;
-  gap: 12px;
-  margin: 14px 0;
-  font-size: 0.75rem;
-  color: var(--muted);
+.hint {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
 }
-meter {
-  width: 100%;
-  accent-color: var(--audio-color);
+.steps {
+  width: min(440px, 100%);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  text-align: left;
 }
-.skeleton-line {
-  height: 24px;
-  margin-bottom: 16px;
-  width: 70%;
-  background: var(--panel);
-  border-radius: var(--radius-sm);
+.state {
+  padding: var(--space-8) var(--page-gutter);
+  color: var(--text-muted);
 }
-.skeleton-line.short {
-  width: 40%;
+.state.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: var(--read-max);
+}
+.skel-title {
+  width: 55%;
+}
+.skel-title :deep(.skel) {
+  height: 22px;
+}
+.state.failed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+/* Faixa de erro de ação (AppBanner): só a margem da página. */
+.banner {
+  margin: 0 var(--page-gutter) var(--space-2);
+}
+.state .banner {
+  margin: 0;
+}
+/* do mais largo para o mais estreito: a regra mais estreita vence */
+@container detail (max-width:900px) {
+  .tabs {
+    margin: 0 var(--space-6);
+  }
+  .actions {
+    padding: var(--space-2) var(--space-6);
+  }
 }
 @container detail (max-width:560px) {
-  .head {
-    padding: 20px;
-  }
-  .ready {
-    display: none;
-  }
-  .head-bottom {
-    flex-wrap: wrap;
-  }
-  .title {
-    font-size: 1.25rem;
-  }
   .tabs {
-    padding: 0 20px;
+    margin: 0 var(--space-5);
   }
   .actions {
-    padding: 8px 20px;
-  }
-  .actions .audio-action {
-    margin-left: 0;
-  }
-  .capture-levels label {
-    grid-template-columns: 1fr;
-    text-align: left;
-  }
-}
-@container detail (max-width:900px) {
-  .head {
-    padding: 16px 24px 12px;
-  }
-  .context-label {
-    display: none;
-  }
-  .title {
-    font-size: 1.375rem;
-  }
-  .meta {
-    margin-top: 8px;
-    font-size: 0.75rem;
-  }
-  .head-bottom {
-    margin-top: 8px;
-  }
-  .export {
-    min-height: 34px;
-  }
-  .tabs {
-    padding: 0 24px;
-  }
-  .tab {
-    padding: 11px 0;
-    min-height: 44px;
-  }
-  .actions {
-    padding: 4px 24px;
-  }
-}
-@media (max-height: 600px) {
-  .head {
-    padding: 12px 24px;
-  }
-  .context-label,
-  .meta,
-  .head-bottom {
-    display: none;
-  }
-  .head-bottom.expanded {
-    display: flex;
-  }
-  .title {
-    font-size: 1.25rem;
+    padding: var(--space-2) var(--space-5);
   }
 }
 </style>

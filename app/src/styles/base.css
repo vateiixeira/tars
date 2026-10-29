@@ -1,7 +1,7 @@
 @import "./tokens/colors.css";
 @import "./tokens/metrics.css";
 :root {
-  font-family: var(--font-ui);
+  font-family: var(--font-round);
   font-size: 16px;
   line-height: 1.5;
   color: var(--text);
@@ -13,7 +13,17 @@
 }
 body {
   margin: 0;
-  background: var(--canvas);
+  min-height: 100dvh;
+  font-family: var(--font-round);
+  font-size: 15px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--text);
+  background:
+    radial-gradient(60% 70% at 85% 0%, var(--haze-1), transparent 60%),
+    radial-gradient(50% 60% at 0% 100%, var(--haze-2), transparent 60%),
+    var(--canvas);
+  -webkit-font-smoothing: antialiased;
 }
 button,
 input,
@@ -34,20 +44,26 @@ textarea {
   accent-color: var(--accent);
 }
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 h1 {
-  font-size: var(--font-h1);
-  font-weight: 650;
-  line-height: 1.28;
-  letter-spacing: -0.03em;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 32px;
+  letter-spacing: -0.01em;
   margin: 0 0 var(--space-3);
 }
 h2 {
-  font-size: var(--font-h2);
-  font-weight: 600;
-  line-height: 1.3;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 26px;
+}
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
 }
 svg {
   vertical-align: middle;
@@ -63,6 +79,7 @@ svg {
   white-space: nowrap;
   border: 0;
 }
+/* Botões Ametista (am-btn): pílula de 42 px; primário com gradiente e brilho. */
 .btn,
 .s-btn {
   display: inline-flex;
@@ -70,66 +87,96 @@ svg {
   justify-content: center;
   gap: var(--space-2);
   min-height: var(--control-md);
-  padding: 8px 14px;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-md);
-  background: var(--surface);
+  padding: 10px var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass);
   color: var(--text);
-  font-size: var(--font-control);
-  line-height: 1.4;
-  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
   cursor: pointer;
+  transition:
+    background var(--duration-fast),
+    transform var(--duration-fast),
+    box-shadow var(--duration-fast),
+    filter var(--duration-fast);
 }
 .btn:hover:not(:disabled),
 .s-btn:hover:not(:disabled) {
-  background: var(--hover);
+  background: var(--selected);
+}
+.btn:active:not(:disabled),
+.s-btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .btn.pri,
 .s-btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  border-color: transparent;
   color: var(--on-accent);
+  background: linear-gradient(135deg, var(--accent-grad-from), var(--accent-grad-to));
+  box-shadow: var(--shadow-glow), var(--shadow-highlight);
 }
 .btn.pri:hover:not(:disabled),
 .s-btn.primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: linear-gradient(135deg, var(--accent-grad-from), var(--accent-grad-to));
+  filter: brightness(1.08);
 }
 .btn.ghost {
   background: transparent;
   border-color: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
 }
-.btn-danger {
-  color: var(--danger);
+.btn.ghost:hover:not(:disabled) {
+  background: var(--selected);
+  color: var(--text);
+}
+.btn-danger,
+.btn.btn-danger {
   background: var(--danger-surface);
-  border-color: var(--danger);
+  border-color: transparent;
+  color: var(--danger);
+}
+.btn.btn-danger:hover:not(:disabled) {
+  background: var(--danger-surface);
+  filter: brightness(1.15);
 }
 .btn:disabled,
 .s-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
 }
+.btn[aria-busy="true"] {
+  cursor: progress;
+}
+/* ocupado: o loader de órbita entra no lugar do ícone do botão */
+.btn[aria-busy="true"] > svg {
+  display: none;
+}
+/* IconButton (am-btn--icon): redondo, de vidro, rótulo só em aria-label.
+   Sem backdrop-filter: ele criaria bloco de contenção para filhos fixed e custa no WebKitGTK. */
 .icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: var(--control-md);
   height: var(--control-md);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--muted);
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  background: var(--glass);
+  color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast);
 }
-.icon-button:hover {
-  background: var(--hover);
+.icon-button:hover:not(:disabled) {
+  background: var(--selected);
   color: var(--text);
 }
-@media (max-width: 640px) {
-  :root {
-    --page-gutter: 1rem;
-  }
+.icon-button:disabled {
+  opacity: 0.5;
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -143,10 +190,11 @@ svg {
 
 .btn.btn-sm {
   min-height: var(--control-sm);
-  padding: 6px 10px;
-  font-size: var(--font-meta);
+  padding: 6px 14px;
+  font-size: 13px;
+  line-height: 18px;
 }
 .btn.btn-lg {
   min-height: var(--control-lg);
-  padding: 10px 18px;
+  padding: 13px 22px;
 }

@@ -34,7 +34,9 @@ describe("RecordButton", () => {
 
     emit({ type: "status", ...recording("Zoom", "2026-10-19T14:00:00") });
     await flushPromises();
-    expect(w.text()).toContain("Parar · 02:05");
+    expect(w.get(".time").text()).toBe("02:05");
+    expect(w.get(".rec").text()).toBe("Parar");
+    expect(w.get(".rec").classes()).toContain("recording");
     expect(w.text()).toContain("Seguindo: Zoom");
     await w.get("button").trigger("click");
     await flushPromises();
@@ -64,6 +66,40 @@ describe("RecordButton", () => {
     await flushPromises();
     expect(startMeeting).toHaveBeenCalledOnce();
     expect(w.emitted("started")?.[0]).toEqual(["m2"]);
+  });
+
+  it("draws the mini meters from the latest levels and empties them when stale", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-19T14:00:10"));
+    const { emit } = installStore();
+    const w = mount(RecordButton);
+    emit({ type: "status", ...recording(null, "2026-10-19T14:00:00") });
+    emit({ type: "levels", mic_db: -10, pc_db: -80 });
+    await flushPromises();
+    const mic = w.get(".mini-meter.mic");
+    expect(mic.attributes("aria-label")).toBe("Microfone: sinal recebido");
+    expect(mic.findAll("i").map((i) => i.attributes("style"))).toEqual([
+      "height: 7px;",
+      "height: 12px;",
+      "height: 10px;",
+    ]);
+    expect(mic.get(".mini").classes()).not.toContain("off");
+    expect(w.get(".mini-meter.pc").attributes("aria-label")).toBe("Áudio do PC: sem sinal recente");
+    expect(w.get(".mini-meter.pc .mini").classes()).toContain("off");
+
+    await vi.advanceTimersByTimeAsync(4000); // sem `levels` novos: não congela o último
+    expect(w.get(".mini-meter.mic .mini").classes()).toContain("off");
+  });
+
+  it("says when there is no connection and keeps start disabled", async () => {
+    const { events } = installStore();
+    const w = mount(RecordButton);
+    await flushPromises();
+    events.state.value = "closed";
+    await flushPromises();
+    expect(w.text()).toContain("Sem conexão com o serviço");
+    expect(w.get(".capsule").classes()).toContain("offline");
+    expect(w.get(".rec").attributes("disabled")).toBeDefined();
   });
 
   it("shows the backend error when start fails", async () => {
@@ -104,6 +140,16 @@ describe("RecordButton", () => {
     // até a próxima ação
     await w.get("button").trigger("click");
     await flushPromises();
+    expect(w.find(".error").exists()).toBe(false);
+  });
+
+  it("lets the error be dismissed", async () => {
+    installStore({ startMeeting: vi.fn(async () => { throw new Error("Sem microfone"); }) });
+    const w = mount(RecordButton);
+    await flushPromises();
+    await w.get(".rec").trigger("click");
+    await flushPromises();
+    await w.get("[aria-label='Dispensar aviso']").trigger("click");
     expect(w.find(".error").exists()).toBe(false);
   });
 });

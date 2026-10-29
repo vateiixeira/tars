@@ -65,6 +65,12 @@ export function groupByDay<T extends { started_at: string }>(
   return groups;
 }
 
+/** Começo (00:00 local) da semana de `now`, contada a partir de segunda-feira. */
+export function startOfWeek(now: Date = new Date()): Date {
+  const daysSinceMonday = (now.getDay() + 6) % 7;
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday);
+}
+
 export function speakerColor(index: number): string {
   const n = SPEAKER_COLORS.length;
   return SPEAKER_COLORS[((Math.trunc(index) % n) + n) % n];

@@ -1,25 +1,40 @@
+/* Ametista: grade de 4 px, tudo arredondado. Fonte: docs/design-redesign/ametista/tokens.css. */
 :root {
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --space-12: 3rem;
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-code: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  --font-meta: 0.8125rem;
-  --font-control: 0.875rem;
-  --font-body: 1rem;
-  --font-h2: 1.25rem;
-  --font-h1: 1.5625rem;
-  --control-sm: 2rem;
-  --control-md: 2.5rem;
-  --control-lg: 2.75rem;
-  --nav-width: 16rem;
-  --read-max: 72ch;
-  --page-gutter: 2rem;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+  --control-sm: 32px;
+  --control-md: 42px;
+  --control-lg: 48px;
+  --topbar-height: 84px;
+  --list-width: 330px;
+  --settings-nav-width: 260px;
+  --read-max: 68ch;
+  --form-max: 720px;
+  --page-gutter: var(--space-7);
+  --blur-glass: 16px;
+  --blur-bar: 14px;
+  --duration-fast: 120ms;
+  --duration-base: 220ms;
+  --duration-glow: 1800ms;
+  --duration-orbit: 2200ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --font-round: "Quicksand Variable", "Quicksand", "Nunito", ui-rounded, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (max-width: 640px) {
+  :root {
+    --page-gutter: var(--space-4);
+  }
 }

@@ -33,36 +33,51 @@ const unidentified = (s: Speaker) => !s.voice_id && !s.is_me;
 </template>
 
 <style scoped>
+/* Pílulas de falante (am-pill). */
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 4px 0;
+  gap: var(--space-2);
 }
 .chip {
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: .75rem;
-  min-height:32px;
-  border: 1px solid var(--border-control);
-  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-sm);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background var(--duration-fast);
 }
+/* --selected, não --glass-strong: no tema Dia o segundo some sobre o branco. */
 .chip:hover:not(.me) {
-  background: var(--hover);
+  background: var(--selected);
 }
 .chip.me {
   cursor: default;
 }
 .chip i {
-  display: inline-block;
   width: 8px;
   height: 8px;
+  flex-shrink: 0;
   border-radius: 50%;
-  margin-right: 5px;
 }
 .chip.unknown {
   border-style: dashed;
-  color: var(--warn);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chip {
+    transition: none;
+  }
 }
 </style>

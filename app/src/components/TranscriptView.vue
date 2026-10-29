@@ -8,10 +8,20 @@ import type { MeetingPrint, Segment, Speaker } from "../api/types";
 import { mmss, speakerColor } from "../lib/format";
 import { segmentAt, speakerName } from "../lib/meeting";
 
-const props = defineProps<{ segments: Segment[]; speakers: Speaker[]; prints: MeetingPrint[] }>();
+const props = defineProps<{
+  segments: Segment[];
+  speakers: Speaker[];
+  prints: MeetingPrint[];
+  /**
+   * Id da fala que está tocando; `null` = nada tocando. O pai calcula a partir do tempo do player
+   * (`playingSegmentId`) e o valor só muda na troca de fala: o `timeupdate`, que dispara ~4x/s,
+   * não re-renderiza a lista nem refaz a medição das linhas.
+   */
+  playingId?: number | null;
+}>();
 const emit = defineEmits<{ play: [segment: Segment]; openPrint: [id: string] }>();
 
-const ESTIMATED_ROW = 44; // px, antes de medir
+const ESTIMATED_ROW = 84; // px (balão + espaço entre balões), antes de medir
 const OVERSCAN = 8; // linhas extras acima e abaixo
 const FALLBACK_VIEWPORT = 600; // sem layout (testes)
 
@@ -67,13 +77,19 @@ const range = computed(() => {
 });
 
 const rows = computed(() =>
-  props.segments.slice(range.value.start, range.value.end).map((seg) => {
+  props.segments.slice(range.value.start, range.value.end).map((seg, k) => {
+    const index = range.value.start + k;
     const sp = seg.speaker_id ? speakerById.value.get(seg.speaker_id) : undefined;
+    const prev = index > 0 ? props.segments[index - 1] : undefined;
     return {
       seg,
       time: mmss(seg.start_s),
       name: speakerName(sp),
-      color: sp ? speakerColor(sp.color_index) : "var(--muted)",
+      color: sp ? speakerColor(sp.color_index) : "var(--text-muted)",
+      me: !!sp?.is_me,
+      // falas seguidas do mesmo falante omitem o cabeçalho
+      header: !prev || prev.speaker_id !== seg.speaker_id,
+      playing: seg.id === props.playingId,
       prints: printsBySegment.value.get(seg.id) ?? [],
     };
   }),
@@ -140,14 +156,18 @@ onBeforeUnmount(() => observer?.disconnect());
 <template>
   <div ref="scroller" class="scroller" aria-label="Transcrição da reunião" tabindex="0" @scroll.passive="onScroll">
     <div class="rows" :style="{ paddingTop: padTop + 'px', paddingBottom: padBottom + 'px' }">
-      <div v-for="r in rows" :key="r.seg.id" class="row" :data-id="r.seg.id">
-        <span class="ts">{{ r.time }}</span>
-        <span class="who" :style="{ color: r.color }">{{ r.name }}</span>
-        <span class="text">
-          {{ r.seg.text }}<em v-if="r.seg.dictated" class="dictated">(ditado)</em>
-          <button v-for="p in r.prints" :key="p.id" type="button" class="print-badge" :title="`Ver print ${p.label}`" :aria-label="`Ver print ${p.label}`" @click="emit('openPrint', p.id)">📷 {{ p.label }}</button>
-          <button type="button" class="play" title="Ouvir este trecho" :aria-label="`Ouvir ${r.name} a partir de ${r.time}`" @click="emit('play', r.seg)"><AppIcon name="play" :size="14" /></button>
-        </span>
+      <div v-for="r in rows" :key="r.seg.id" class="row" :class="{ me: r.me }" :data-id="r.seg.id">
+        <div class="am-bubble" :class="{ 'am-bubble--me': r.me, 'is-playing': r.playing }">
+          <div v-if="r.header" class="am-bubble__meta">
+            <span class="am-bubble__who" :style="{ color: r.color }">{{ r.name }}</span>
+            <span class="ts">· {{ r.time }}</span>
+          </div>
+          <button type="button" class="play am-bubble__play" title="Ouvir este trecho" :aria-label="`Ouvir ${r.name} a partir de ${r.time}`" @click="emit('play', r.seg)"><AppIcon name="play" :size="13" /></button>
+          <span class="text">{{ r.seg.text }}<em v-if="r.seg.dictated" class="dictated">(ditado)</em></span>
+          <div v-if="r.prints.length" class="prints">
+            <button v-for="p in r.prints" :key="p.id" type="button" class="print-badge" :title="`Ver print ${p.label}`" :aria-label="`Ver print ${p.label}`" @click="emit('openPrint', p.id)"><AppIcon name="file" :size="13" />{{ p.label }}</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -155,15 +175,22 @@ onBeforeUnmount(() => observer?.disconnect());
 
 <style scoped>
 .scroller { height:100%; overflow-y:auto; overflow-anchor:none; padding:0 var(--page-gutter); }
-.rows { max-width:var(--read-max); }
-.row { display:grid; grid-template-columns:58px minmax(0,1fr); gap:6px 16px; padding:18px 0; border-bottom:1px solid var(--border); }
-.ts { grid-row:1 / 3; color:var(--muted); font-size:.75rem; padding-top:3px; font-variant-numeric:tabular-nums; }
-.who { font-weight:600; font-size:var(--font-control); overflow-wrap:anywhere; }
-.text { grid-column:2; min-width:0; overflow-wrap:anywhere; line-height:1.7; }
-.dictated { margin-left:6px; color:var(--muted); font-size:var(--font-meta); }
-.play { display:inline-flex; align-items:center; justify-content:center; vertical-align:middle; border:0; background:transparent; color:var(--muted); min-width:32px; min-height:32px; padding:4px; border-radius:var(--radius-sm); cursor:pointer; }
-.play:hover { color:var(--accent); background:var(--hover); }
-.print-badge { display:inline-flex; align-items:center; gap:4px; vertical-align:middle; margin-left:6px; border:1px solid var(--border); background:var(--surface-raised); color:var(--muted); font:inherit; font-size:var(--font-meta); min-height:28px; padding:2px 8px; border-radius:var(--radius-sm); cursor:pointer; }
-.print-badge:hover { color:var(--accent); background:var(--hover); }
-@media(max-width:640px) { .row { grid-template-columns:42px minmax(0,1fr); gap:6px 10px; } }
+/* O espaço entre balões é padding da linha medida, para a soma dos offsets incluí-lo. */
+.row { display:flex; justify-content:flex-start; padding-bottom:var(--space-3); }
+.row.me { justify-content:flex-end; }
+.am-bubble { position:relative; box-sizing:border-box; max-width:76%; min-width:0; padding:var(--space-3) calc(var(--space-4) + var(--space-5)) var(--space-3) var(--space-4); border-radius:var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--space-2); background:var(--glass); border:1px solid var(--glass-border); font-size:16px; line-height:1.5; font-weight:500; transition:box-shadow var(--duration-fast) var(--ease-out); }
+.am-bubble--me { border-radius:var(--radius-lg) var(--radius-lg) var(--space-2) var(--radius-lg); background:linear-gradient(150deg, var(--selected), var(--glass)); border-color:var(--selected-border); }
+.am-bubble.is-playing { box-shadow:0 0 0 2px var(--accent-glow); }
+.am-bubble__meta { display:flex; align-items:center; gap:var(--space-1); margin-bottom:var(--space-1); font-size:12px; line-height:16px; font-weight:700; color:var(--text-muted); }
+.am-bubble__who { font-weight:700; overflow-wrap:anywhere; }
+.ts { font-variant-numeric:tabular-nums; }
+.text { display:block; min-width:0; overflow-wrap:anywhere; }
+.dictated { margin-left:var(--space-2); padding:1px var(--space-2); border-radius:var(--radius-pill); border:1px solid var(--glass-border); color:var(--text-muted); font-size:11px; font-style:normal; font-weight:600; vertical-align:middle; }
+.am-bubble__play { position:absolute; top:var(--space-2); right:var(--space-2); width:28px; height:28px; border-radius:50%; border:0; display:grid; place-items:center; background:transparent; color:var(--text-muted); cursor:pointer; }
+.am-bubble__play:hover { background:var(--selected); color:var(--text); }
+.prints { display:flex; flex-wrap:wrap; gap:var(--space-2); margin-top:var(--space-2); }
+.print-badge { display:inline-flex; align-items:center; gap:var(--space-1); border:1px solid var(--glass-border); background:var(--glass); color:var(--text-muted); font:inherit; font-size:12px; font-weight:700; min-height:28px; padding:2px var(--space-3); border-radius:var(--radius-pill); cursor:pointer; }
+.print-badge:hover { color:var(--text-accent); background:var(--selected); }
+@media (prefers-reduced-motion:reduce) { .am-bubble { transition:none; } }
+@media (max-width:640px) { .am-bubble { max-width:92%; } }
 </style>

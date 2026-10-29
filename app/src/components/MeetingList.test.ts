@@ -3,6 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { setStatusStore } from "../composables/useStatus";
 import type { MeetingListItem } from "../api/types";
 import { ApiError } from "../api/client";
+import { notifyMeetingsChanged } from "../composables/useMeetingsRevision";
 import { installStore, reconnect } from "../test/meetingFakes";
 import MeetingList from "./MeetingList.vue";
 
@@ -46,6 +47,20 @@ describe("MeetingList", () => {
     expect(w.findAll(".item")).toHaveLength(1);
   });
 
+  it("informa quantas reuniões existem só nas cargas sem busca nem arquivadas", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const listMeetings = vi.fn(async (q?: string) => (q ? [] : [item("a", "X", "2026-10-19T14:00:00")]));
+    installStore({ listMeetings, archivedCount: vi.fn(async () => ({ count: 2 })) });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    expect(w.emitted("count")).toEqual([[3]]); // arquivadas contam: o app tem reuniões
+    await w.get("input").setValue("nada");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(listMeetings).toHaveBeenLastCalledWith("nada", undefined);
+    expect(w.emitted("count")).toEqual([[3]]); // a busca vazia não diz que o app não tem reuniões
+  });
+
   it("emits select and reloads on meeting_updated", async () => {
     const listMeetings = vi.fn(async () => [item("a", "X", "2026-10-19T14:00:00")]);
     const { emit } = installStore({ listMeetings });
@@ -81,6 +96,24 @@ describe("MeetingList", () => {
     expect(w.find(".archive-toggle").exists()).toBe(false);
   });
 
+  it("dentro das Arquivadas, a contagem do chip é renovada ao desarquivar", async () => {
+    let count = 2;
+    const listMeetings = vi.fn(async (_q?: string, archived?: boolean) =>
+      archived ? [item("z", "Antiga", "2026-09-01T10:00:00")] : [item("a", "Atual", "2026-10-19T14:00:00")],
+    );
+    const archivedCount = vi.fn(async () => ({ count }));
+    installStore({ listMeetings, archivedCount });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    await w.get(".archive-toggle").trigger("click");
+    await flushPromises();
+    expect(w.get(".archive-toggle").text()).toBe("Arquivadas · 2");
+    count = 1; // desarquivou uma
+    notifyMeetingsChanged();
+    await flushPromises();
+    expect(w.get(".archive-toggle").text()).toBe("Arquivadas · 1");
+  });
+
   it("switches to the archived list and back", async () => {
     const listMeetings = vi.fn(async (_q?: string, archived?: boolean) =>
       archived
@@ -91,13 +124,14 @@ describe("MeetingList", () => {
     installStore({ listMeetings, archivedCount });
     const w = mount(MeetingList, { props: { selectedId: null } });
     await flushPromises();
-    expect(w.get(".archive-toggle").text()).toBe("Arquivadas (1)");
+    expect(w.get(".archive-toggle").text()).toBe("Arquivadas · 1");
+    expect(w.get(".archive-toggle").attributes("aria-pressed")).toBe("false");
 
     await w.get(".archive-toggle").trigger("click");
     await flushPromises();
     expect(listMeetings).toHaveBeenLastCalledWith(undefined, true);
     expect(w.findAll(".item").map((i) => i.find("b").text())).toEqual(["Antiga"]);
-    expect(w.get(".archive-toggle").text()).toContain("Voltar às reuniões");
+    expect(w.get(".archive-toggle").attributes("aria-pressed")).toBe("true");
 
     await w.get("input").setValue("antiga");
     await w.get("input").trigger("input");
@@ -105,8 +139,63 @@ describe("MeetingList", () => {
     await flushPromises();
     expect(listMeetings).toHaveBeenLastCalledWith("antiga", true);
 
-    await w.get(".archive-toggle").trigger("click");
+    await w.findAll(".filter-chip")[0].trigger("click"); // Todas
     await flushPromises();
     expect(listMeetings).toHaveBeenLastCalledWith("antiga", undefined);
+    expect(w.get(".archive-toggle").attributes("aria-pressed")).toBe("false");
+  });
+
+  it("filters this week's meetings without asking the backend again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-21T15:00:00")); // quarta-feira
+    const listMeetings = vi.fn(async () => [
+      item("a", "Quarta", "2026-10-21T09:00:00"),
+      item("b", "Segunda", "2026-10-19T08:00:00"),
+      item("c", "Domingo passado", "2026-10-18T20:00:00"),
+    ]);
+    installStore({ listMeetings });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    const titles = () => w.findAll(".item").map((i) => i.find("b").text());
+    expect(titles()).toHaveLength(3);
+    expect(w.findAll(".filter-chip").map((c) => c.text())).toEqual(["Todas", "Esta semana"]);
+
+    await w.findAll(".filter-chip")[1].trigger("click");
+    await flushPromises();
+    expect(titles()).toEqual(["Quarta", "Segunda"]);
+    expect(listMeetings).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows live, processing and failed states on the cards", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-19T14:12:47"));
+    installStore({
+      listMeetings: vi.fn(async () => [
+        item("r", null, "2026-10-19T14:00:00", { status: "recording" }),
+        item("p", "P", "2026-10-19T13:00:00", { status: "processing" }),
+        item("f", "F", "2026-10-19T12:00:00", { status: "failed" }),
+      ]),
+    });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    const [rec, proc, failed] = w.findAll(".item");
+    expect(rec.classes()).toContain("live");
+    expect(rec.find(".rec-dot").exists()).toBe(true);
+    expect(rec.text()).toContain("gravando · 12:47");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(rec.text()).toContain("gravando · 12:49");
+    expect(proc.find(".loader").exists()).toBe(true);
+    expect(proc.text()).toContain("13:00 · processando…");
+    expect(failed.classes()).toContain("failed");
+    expect(failed.text()).toContain("12:00 · falhou");
+  });
+
+  it("focuses the search field on request", async () => {
+    installStore();
+    const w = mount(MeetingList, { props: { selectedId: null }, attachTo: document.body });
+    await flushPromises();
+    (w.vm as unknown as { focusSearch(): void }).focusSearch();
+    expect(document.activeElement).toBe(w.get("input.search").element);
+    w.unmount();
   });
 });

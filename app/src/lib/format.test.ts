@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupByDay, mmss, speakerColor } from "./format";
+import { groupByDay, mmss, speakerColor, startOfWeek } from "./format";
 
 describe("format", () => {
   it("mmss formats 3725 as 1:02:05 and 65 as 01:05", () => {
@@ -31,5 +31,13 @@ describe("format", () => {
     expect(speakerColor(0)).toBe("var(--speaker-0)");
     expect(speakerColor(7)).toBe("var(--speaker-7)");
     expect(speakerColor(8)).toBe("var(--speaker-0)");
+  });
+
+  it("startOfWeek starts on Monday at local midnight", () => {
+    const monday = new Date(2026, 9, 19, 0, 0);
+    expect(startOfWeek(new Date(2026, 9, 19, 15, 0))).toEqual(monday); // segunda
+    expect(startOfWeek(new Date(2026, 9, 21, 9, 30))).toEqual(monday); // quarta
+    expect(startOfWeek(new Date(2026, 9, 25, 23, 59))).toEqual(monday); // domingo
+    expect(startOfWeek(new Date(2026, 10, 1, 10, 0))).toEqual(new Date(2026, 9, 26)); // virada do mês
   });
 });

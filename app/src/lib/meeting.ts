@@ -56,6 +56,25 @@ export function segmentAt(segments: Segment[], atS: number): Segment | undefined
   return segments[Math.max(0, lo - 1)];
 }
 
+/**
+ * Id da fala que está tocando em `atS`: a última que começou até esse instante (as falas vêm em
+ * ordem de início); depois do fim da última fala, nenhuma. `null` sem tempo ou sem falas.
+ */
+export function playingSegmentId(segments: Segment[], atS: number | null | undefined): number | null {
+  if (atS == null || !Number.isFinite(atS) || !segments.length) return null;
+  let lo = 0;
+  let hi = segments.length; // primeiro índice com start_s > atS
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (segments[mid]!.start_s <= atS) lo = mid + 1;
+    else hi = mid;
+  }
+  const i = lo - 1;
+  if (i < 0) return null;
+  const seg = segments[i]!;
+  return i === segments.length - 1 && atS >= seg.end_s ? null : seg.id;
+}
+
 /** "< 1 min", "42 min", "1 h 05 min". */
 export function formatDuration(seconds: number): string {
   const minutes = Math.floor(Math.max(0, seconds) / 60);

@@ -7,6 +7,7 @@ import { useFocusScope } from "../composables/useFocusScope";
 import type { Segment, Speaker, Voice } from "../api/types";
 import { useStatus } from "../composables/useStatus";
 import { speakerName } from "../lib/meeting";
+import AppIcon from "./ui/AppIcon.vue";
 import SpeakerSamples from "./SpeakerSamples.vue";
 
 const props = defineProps<{
@@ -111,9 +112,9 @@ onBeforeUnmount(() => { window.removeEventListener("resize", updateViewport); re
         @play="emit('preview')"
       />
       <template v-if="mode === 'main'">
-        <button type="button" class="option" @click="go('rename')">Renomear nesta reunião</button>
-        <button type="button" class="option" @click="go('identify')">Identificar como…</button>
-        <button type="button" class="option" :disabled="!others.length" @click="go('merge')">Juntar com…</button>
+        <button type="button" class="option" @click="go('rename')"><AppIcon name="edit" :size="18" />Renomear nesta reunião</button>
+        <button type="button" class="option" @click="go('identify')"><AppIcon name="user-plus" :size="18" />Identificar como…</button>
+        <button type="button" class="option" :disabled="!others.length" @click="go('merge')"><AppIcon name="link" :size="18" />Juntar com…</button>
       </template>
 
       <form v-else-if="mode === 'rename' || mode === 'new-voice'" class="form" @submit.prevent="submitText">
@@ -122,7 +123,7 @@ onBeforeUnmount(() => { window.removeEventListener("resize", updateViewport); re
         </label>
         <input :id="`sm-${speaker.id}`" ref="input" v-model="text" maxlength="100" placeholder="Nome da pessoa" />
         <div class="row">
-          <button type="button" class="option" @click="go(mode === 'rename' ? 'main' : 'identify')">Voltar</button>
+          <button type="button" class="option back" @click="go(mode === 'rename' ? 'main' : 'identify')"><AppIcon name="arrow" :size="18" />Voltar</button>
           <button type="submit" class="option pri" :disabled="busy || !text.trim()">Salvar</button>
         </div>
       </form>
@@ -131,18 +132,18 @@ onBeforeUnmount(() => { window.removeEventListener("resize", updateViewport); re
         <p class="hint">Identificar como…</p>
         <p v-if="voices === null && !error" class="hint">Carregando vozes…</p>
         <button v-for="v in voices ?? []" :key="v.id" type="button" class="option" :disabled="busy" @click="identifyAs(v)">
-          {{ v.name }}
+          <AppIcon name="mic" :size="18" />{{ v.name }}
         </button>
-        <button type="button" class="option" @click="go('new-voice')">+ Nova voz…</button>
-        <button type="button" class="option" @click="go('main')">Voltar</button>
+        <button type="button" class="option" @click="go('new-voice')"><AppIcon name="plus" :size="18" />Nova voz…</button>
+        <button type="button" class="option back" @click="go('main')"><AppIcon name="arrow" :size="18" />Voltar</button>
       </template>
 
       <template v-else>
         <p class="hint">Juntar “{{ speakerName(speaker) }}” com…</p>
         <button v-for="s in others" :key="s.id" type="button" class="option" :disabled="busy" @click="mergeInto(s)">
-          {{ speakerName(s) }}
+          <AppIcon name="people" :size="18" />{{ speakerName(s) }}
         </button>
-        <button type="button" class="option" @click="go('main')">Voltar</button>
+        <button type="button" class="option back" @click="go('main')"><AppIcon name="arrow" :size="18" />Voltar</button>
       </template>
 
       <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -152,13 +153,16 @@ onBeforeUnmount(() => { window.removeEventListener("resize", updateViewport); re
 
 <style scoped>
 .speaker-menu {
-  position:fixed; inset:0; z-index:40;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
 }
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: 40;
 }
+/* Visual do AppMenu (superfície sólida, raio, sombra, itens em pílula) com a semântica de diálogo. */
 .panel {
   position: fixed;
   z-index: 41;
@@ -169,62 +173,115 @@ onBeforeUnmount(() => { window.removeEventListener("resize", updateViewport); re
   flex-direction: column;
   gap: 2px;
   padding: 6px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--surface-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-popover);
 }
 .option {
-  min-height:40px;
-  font-size:var(--font-control);
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  cursor: pointer;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
   text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast);
 }
-.option:hover:not(:disabled) {
-  background: var(--hover);
+.option svg {
+  color: var(--text-muted);
+}
+/* --selected, não --glass-strong: no tema Dia o segundo é quase branco sobre branco. */
+.option:hover:not(:disabled),
+.option:focus-visible {
+  background: var(--selected);
+  outline: none;
+}
+.option:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 .option:disabled {
   opacity: 0.5;
-  cursor: default;
+  cursor: not-allowed;
+}
+.option.back {
+  color: var(--text-muted);
 }
 .option.pri {
-  background: var(--accent);
+  justify-content: center;
+  border-radius: var(--radius-pill);
   color: var(--on-accent);
-  text-align: center;
+  background: linear-gradient(135deg, var(--accent-grad-from), var(--accent-grad-to));
+}
+.option.pri:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-grad-from), var(--accent-grad-to));
+  filter: brightness(1.08);
 }
 .form {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 4px;
+  gap: var(--space-2);
+  padding: var(--space-1);
 }
 .form input {
-  padding: 5px 8px;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: var(--surface);
+  min-height: var(--control-md);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+  background-color: var(--glass-strong);
   color: var(--text);
-  font-family: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.form input::placeholder {
+  color: var(--text-muted);
+}
+.form input:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow:
+    0 0 0 1px var(--focus-ring),
+    0 0 0 4px var(--selected);
 }
 .row {
   display: flex;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .hint {
   margin: 0;
-  padding: 4px 8px;
-  font-size: 0.78rem;
-  color: var(--muted);
+  padding: var(--space-2) 10px 6px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+label.hint {
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 13px;
+  line-height: 18px;
 }
 .error {
   margin: 0;
-  padding: 4px 8px;
-  font-size: 0.8rem;
+  padding: var(--space-1) 10px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .option {
+    transition: none;
+  }
 }
 </style>

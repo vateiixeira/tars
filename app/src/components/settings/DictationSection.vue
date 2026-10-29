@@ -42,8 +42,6 @@ async function savePaste(e: Event): Promise<void> {
 
 <template>
   <section v-if="form.settings.value" class="s-section">
-    <h2>Ditado</h2>
-
     <ToggleField
       :form="form"
       field="dictation_enabled"
@@ -58,36 +56,38 @@ async function savePaste(e: Event): Promise<void> {
       hint="Guarda o áudio e a transcrição de cada ditado neste computador para avaliação posterior. A colagem continua normalmente. Desligar interrompe a coleta e mantém os exemplos já salvos."
     />
 
-    <SettingField label="Atalho do microfone" for="dict-key" hint="Ex.: ctrl+super, KEY_RIGHTCTRL, alt+KEY_SPACE." :error="form.errors.key">
-      <input
-        id="dict-key"
-        class="s-input"
-        type="text"
-        :value="shown('key', form.settings.value.key)"
-        spellcheck="false"
-        @input="onInput('key', $event)"
-        @change="saveText('key', $event)"
-      />
-    </SettingField>
+    <div class="s-grid">
+      <SettingField label="Atalho do microfone" for="dict-key" hint="Ex.: ctrl+super, KEY_RIGHTCTRL, alt+KEY_SPACE." :error="form.errors.key">
+        <input
+          id="dict-key"
+          class="s-input mono"
+          type="text"
+          :value="shown('key', form.settings.value.key)"
+          spellcheck="false"
+          @input="onInput('key', $event)"
+          @change="saveText('key', $event)"
+        />
+      </SettingField>
 
-    <SettingField
-      label="Atalho do áudio do computador"
-      for="dict-output-key"
-      hint="Padrão: Ctrl esquerdo + Shift esquerdo. Segure para capturar a saída de áudio padrão do PC; solte para transcrever e colar. Outra tecla cancela a captura."
-      :error="form.errors.output_key"
-    >
-      <input
-        id="dict-output-key"
-        class="s-input"
-        type="text"
-        :value="shown('output_key', form.settings.value.output_key)"
-        spellcheck="false"
-        @input="onInput('output_key', $event)"
-        @change="saveText('output_key', $event)"
-      />
-    </SettingField>
+      <SettingField
+        label="Atalho do áudio do computador"
+        for="dict-output-key"
+        hint="Padrão: Ctrl esquerdo + Shift esquerdo. Segure para capturar a saída de áudio padrão do PC; solte para transcrever e colar. Outra tecla cancela a captura."
+        :error="form.errors.output_key"
+      >
+        <input
+          id="dict-output-key"
+          class="s-input mono"
+          type="text"
+          :value="shown('output_key', form.settings.value.output_key)"
+          spellcheck="false"
+          @input="onInput('output_key', $event)"
+          @change="saveText('output_key', $event)"
+        />
+      </SettingField>
+    </div>
 
-    <SettingField label="Colar com" for="dict-paste" :error="form.errors.paste">
+    <SettingField label="Colar com" for="dict-paste" class="s-narrow" :error="form.errors.paste">
       <select id="dict-paste" class="s-select" :value="form.settings.value.paste" @change="savePaste">
         <option v-for="opt in PASTE_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
       </select>
@@ -115,11 +115,11 @@ async function savePaste(e: Event): Promise<void> {
       hint="Acrescenta um espaço depois do texto colado."
     />
 
-    <div class="s-row seconds">
+    <div class="s-grid">
       <SettingField label="Duração mínima (s)" for="dict-min" :error="form.errors.min_sec">
         <input
           id="dict-min"
-          class="s-input short"
+          class="s-input"
           type="number"
           min="0"
           step="0.1"
@@ -131,7 +131,7 @@ async function savePaste(e: Event): Promise<void> {
       <SettingField label="Duração máxima (s)" for="dict-max" :error="form.errors.max_sec">
         <input
           id="dict-max"
-          class="s-input short"
+          class="s-input"
           type="number"
           min="1"
           step="10"
@@ -144,10 +144,3 @@ async function savePaste(e: Event): Promise<void> {
     <p class="s-note">Gravações mais curtas que o mínimo são descartadas; a gravação para sozinha no máximo.</p>
   </section>
 </template>
-
-<style scoped>
-.seconds {
-  align-items: flex-start;
-  gap: 20px;
-}
-</style>

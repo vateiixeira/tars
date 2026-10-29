@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppLoader from "./AppLoader.vue";
 withDefaults(
   defineProps<{
     size?: "sm" | "md" | "lg";
@@ -24,6 +25,12 @@ withDefaults(
     :disabled="disabled || busy"
     :aria-busy="busy || undefined"
   >
+    <!-- ocupado: a órbita pequena entra no lugar do ícone (base.css esconde o svg do slot) -->
+    <AppLoader
+      v-if="busy"
+      size="sm"
+      :tone="variant === 'primary' ? 'on-accent' : 'default'"
+    />
     <slot />
   </button>
 </template>

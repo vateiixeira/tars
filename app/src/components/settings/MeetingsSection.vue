@@ -154,199 +154,209 @@ async function removeToken(): Promise<void> {
 
 <template>
   <section v-if="form.settings.value" class="s-section">
-    <h2>Reuniões</h2>
-
-    <SettingField
-      label="Liberar memória dos modelos de reunião"
-      for="meet-model-idle"
-      hint="Libera o Whisper das reuniões e o separador de vozes após o prazo sem gravação ou processamento. O ditado continua pronto. Na próxima reunião, a gravação começa imediatamente e os modelos são recarregados quando necessários."
-      :error="form.errors.meeting_model_idle_sec"
-    >
-      <select id="meet-model-idle" class="s-select" :value="idleSeconds" :disabled="form.saving.meeting_model_idle_sec" @change="saveIdleTime">
-        <option v-for="o in idleOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-      </select>
-    </SettingField>
-
-    <ToggleField
-      :form="form"
-      field="auto_title"
-      label="Título automático"
-      hint="Ao terminar o processamento, o Claude sugere um título para a reunião."
-    />
-
-    <ToggleField
-      :form="form"
-      field="auto_summary"
-      label="Resumir automaticamente"
-      hint="Ao terminar o processamento, o Claude gera o resumo sem precisar clicar."
-    />
-
-    <SettingField
-      label="Prompt do resumo"
-      for="meet-summary"
-      hint="Instrução enviada ao Claude junto com a transcrição quando você pede o resumo."
-      :error="form.errors.summary_prompt"
-    >
-      <textarea
-        id="meet-summary"
-        class="s-textarea"
-        :value="summaryShown"
-        @input="summary = ($event.target as HTMLTextAreaElement).value; form.clearError('summary_prompt')"
-        @change="saveSummary"
-      ></textarea>
-      <div class="s-row">
-        <button class="s-btn" :disabled="isDefault" data-test="restore-summary" @click="restoreSummary">
-          Restaurar padrão
-        </button>
-      </div>
-    </SettingField>
-
-    <SettingField
-      label="Motor de separação de falantes"
-      for="meet-diarizer"
-      hint="O motor local funciona sem cadastro; os modelos são baixados na primeira reunião. A escolha vale a partir da próxima reunião ou reprocessamento."
-      :error="form.errors.diarizer"
-    >
-      <select
-        id="meet-diarizer"
-        class="s-select"
-        data-test="diarizer-select"
-        :value="diarizer"
-        :disabled="form.saving.diarizer"
-        @change="saveDiarizer"
+    <div class="s-card">
+      <h2>Memória dos modelos</h2>
+      <SettingField
+        label="Liberar memória dos modelos de reunião"
+        for="meet-model-idle"
+        hint="Libera o Whisper das reuniões e o separador de vozes após o prazo sem gravação ou processamento. O ditado continua pronto. Na próxima reunião, a gravação começa imediatamente e os modelos são recarregados quando necessários."
+        :error="form.errors.meeting_model_idle_sec"
       >
-        <option v-for="o in DIARIZER_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-      </select>
-    </SettingField>
+        <select id="meet-model-idle" class="s-select" :value="idleSeconds" :disabled="form.saving.meeting_model_idle_sec" @change="saveIdleTime">
+          <option v-for="o in idleOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+      </SettingField>
+    </div>
 
-    <SettingField
-      label="Limiar de reconhecimento de voz"
-      for="meet-threshold"
-      hint="Quanto maior, mais parecida a voz precisa ser para ser reconhecida como uma voz cadastrada. Vale para o motor escolhido."
-      :error="form.errors[thresholdKey]"
-    >
-      <div class="s-row">
-        <input
-          id="meet-threshold"
-          type="range"
-          min="0.1"
-          max="0.95"
-          step="0.01"
-          :value="threshold"
-          @input="form.clearError(thresholdKey)"
-          @change="saveThreshold"
-        />
-        <output for="meet-threshold" data-test="threshold-value">{{ thresholdText }}</output>
-      </div>
-    </SettingField>
-
-    <SettingField
-      label="Prints de tela"
-      for="meet-print-mode"
-      hint="Guarda imagens da tela durante a reunião para anexar às tarefas e ao resumo."
-      :error="form.errors.print_mode"
-    >
-      <select id="meet-print-mode" class="s-select" :value="printMode" :disabled="form.saving.print_mode" @change="savePrintMode">
-        <option value="off">Desligado</option>
-        <option value="flameshot">Flameshot</option>
-        <option value="native">Nativo</option>
-      </select>
-    </SettingField>
-
-    <SettingField
-      v-if="printMode === 'flameshot'"
-      label="Pasta dos prints"
-      for="meet-print-folder"
-      hint="Vazio usa a pasta de Imagens. Os arquivos criados durante a reunião são copiados ao finalizar; os originais não são alterados."
-      :error="form.errors.print_folder"
-    >
-      <input
-        id="meet-print-folder"
-        class="s-input"
-        type="text"
-        :value="printFolderShown"
-        spellcheck="false"
-        placeholder="Pasta de Imagens"
-        @input="onPrintInput('print_folder', $event)"
-        @change="savePrintFolder"
+    <div class="s-card">
+      <h2>Título e resumo</h2>
+      <ToggleField
+        :form="form"
+        field="auto_title"
+        label="Título automático"
+        hint="Ao terminar o processamento, o Claude sugere um título para a reunião."
       />
-    </SettingField>
 
-    <SettingField
-      v-if="printMode === 'native'"
-      label="Atalho do print"
-      for="meet-print-key"
-      hint="Funciona só durante uma reunião. Captura o monitor escolhido abaixo e toca um som curto."
-      :error="form.errors.print_key"
-    >
-      <input
-        id="meet-print-key"
-        class="s-input"
-        type="text"
-        :value="printKeyShown"
-        spellcheck="false"
-        @input="onPrintInput('print_key', $event)"
-        @change="savePrintKey"
+      <ToggleField
+        :form="form"
+        field="auto_summary"
+        label="Resumir automaticamente"
+        hint="Ao terminar o processamento, o Claude gera o resumo sem precisar clicar."
       />
-    </SettingField>
 
-    <SettingField
-      v-if="printMode === 'native'"
-      label="Monitor do print"
-      for="meet-print-monitor"
-      hint="Todos os monitores gera uma imagem só com todas as telas. Se o monitor escolhido estiver desconectado na hora, o print sai com a tela inteira."
-      :error="form.errors.print_monitor ?? monitorsError"
-    >
-      <select
-        id="meet-print-monitor"
-        class="s-select"
-        :value="monitorSelected"
-        :disabled="form.saving.print_monitor"
-        @change="savePrintMonitor"
+      <SettingField
+        label="Prompt do resumo"
+        for="meet-summary"
+        hint="Instrução enviada ao Claude junto com a transcrição quando você pede o resumo."
+        :error="form.errors.summary_prompt"
       >
-        <option value="">Todos os monitores</option>
-        <option v-for="m in monitors" :key="m.id" :value="m.id">{{ m.label }}</option>
-        <option v-if="savedMonitorOption" :value="savedMonitorOption.id">{{ savedMonitorOption.label }}</option>
-      </select>
-    </SettingField>
+        <textarea
+          id="meet-summary"
+          class="s-textarea"
+          :value="summaryShown"
+          @input="summary = ($event.target as HTMLTextAreaElement).value; form.clearError('summary_prompt')"
+          @change="saveSummary"
+        ></textarea>
+        <div class="s-row">
+          <button class="s-btn" :disabled="isDefault" data-test="restore-summary" @click="restoreSummary">
+            Restaurar padrão
+          </button>
+        </div>
+      </SettingField>
+    </div>
 
-    <SettingField
-      v-if="diarizer === 'pyannote'"
-      label="Token do Hugging Face"
-      for="meet-token"
-      :error="form.errors.hf_token"
-    >
-      <div class="s-row">
-        <input
-          id="meet-token"
-          v-model="token"
-          class="s-input token"
-          type="password"
-          autocomplete="off"
-          :placeholder="form.settings.value.hf_token_set ? 'Digite para trocar o token' : 'Cole o token aqui'"
-          @input="form.clearError('hf_token')"
-          @keydown.enter.prevent="saveToken"
-        />
-        <button class="s-btn primary" :disabled="!token.trim() || form.saving.hf_token" data-test="token-save" @click="saveToken">
-          Salvar token
-        </button>
-        <button
-          v-if="form.settings.value.hf_token_set"
-          class="s-btn danger"
-          :disabled="form.saving.hf_token"
-          data-test="token-remove"
-          @click="removeToken"
+    <div class="s-card">
+      <h2>Separação de falantes</h2>
+      <SettingField
+        label="Motor de separação de falantes"
+        for="meet-diarizer"
+        hint="O motor local funciona sem cadastro; os modelos são baixados na primeira reunião. A escolha vale a partir da próxima reunião ou reprocessamento."
+        :error="form.errors.diarizer"
+      >
+        <select
+          id="meet-diarizer"
+          class="s-select"
+          data-test="diarizer-select"
+          :value="diarizer"
+          :disabled="form.saving.diarizer"
+          @change="saveDiarizer"
         >
-          Remover token
-        </button>
-      </div>
-      <p v-if="form.settings.value.hf_token_set" class="s-ok" data-test="token-status">Token configurado</p>
-      <p v-else class="s-note" data-test="token-status">Nenhum token configurado</p>
-      <p class="s-note">
-        Necessário para separar as vozes com o pyannote. Exige o extra pyannote instalado (uv sync --extra pyannote). Crie um token de leitura no Hugging Face e aceite as condições do modelo em
-        <a :href="HF_MODEL_URL" data-test="hf-model-link" @click.prevent="openModelPage">pyannote/speaker-diarization-community-1</a>.
-      </p>
-    </SettingField>
+          <option v-for="o in DIARIZER_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+      </SettingField>
+
+      <SettingField
+        label="Limiar de reconhecimento de voz"
+        for="meet-threshold"
+        hint="Quanto maior, mais parecida a voz precisa ser para ser reconhecida como uma voz cadastrada. Vale para o motor escolhido."
+        :error="form.errors[thresholdKey]"
+      >
+        <div class="s-row">
+          <input
+            id="meet-threshold"
+            type="range"
+            min="0.1"
+            max="0.95"
+            step="0.01"
+            :value="threshold"
+            @input="form.clearError(thresholdKey)"
+            @change="saveThreshold"
+          />
+          <output for="meet-threshold" data-test="threshold-value">{{ thresholdText }}</output>
+        </div>
+      </SettingField>
+
+      <SettingField
+        v-if="diarizer === 'pyannote'"
+        label="Token do Hugging Face"
+        for="meet-token"
+        :error="form.errors.hf_token"
+      >
+        <div class="s-row">
+          <input
+            id="meet-token"
+            v-model="token"
+            class="s-input token"
+            type="password"
+            autocomplete="off"
+            :placeholder="form.settings.value.hf_token_set ? 'Digite para trocar o token' : 'Cole o token aqui'"
+            @input="form.clearError('hf_token')"
+            @keydown.enter.prevent="saveToken"
+          />
+          <button class="s-btn primary" :disabled="!token.trim() || form.saving.hf_token" data-test="token-save" @click="saveToken">
+            Salvar token
+          </button>
+          <button
+            v-if="form.settings.value.hf_token_set"
+            class="s-btn danger"
+            :disabled="form.saving.hf_token"
+            data-test="token-remove"
+            @click="removeToken"
+          >
+            Remover token
+          </button>
+        </div>
+        <p v-if="form.settings.value.hf_token_set" class="s-ok" data-test="token-status">Token configurado</p>
+        <p v-else class="s-note" data-test="token-status">Nenhum token configurado</p>
+        <p class="s-note">
+          Necessário para separar as vozes com o pyannote. Exige o extra pyannote instalado (uv sync --extra pyannote). Crie um token de leitura no Hugging Face e aceite as condições do modelo em
+          <a :href="HF_MODEL_URL" data-test="hf-model-link" @click.prevent="openModelPage">pyannote/speaker-diarization-community-1</a>.
+        </p>
+      </SettingField>
+    </div>
+
+    <div class="s-card">
+      <h2>Capturas durante a reunião</h2>
+      <SettingField
+        label="Prints de tela"
+        for="meet-print-mode"
+        hint="Guarda imagens da tela durante a reunião para anexar às tarefas e ao resumo."
+        :error="form.errors.print_mode"
+      >
+        <select id="meet-print-mode" class="s-select" :value="printMode" :disabled="form.saving.print_mode" @change="savePrintMode">
+          <option value="off">Desligado</option>
+          <option value="flameshot">Flameshot</option>
+          <option value="native">Nativo</option>
+        </select>
+      </SettingField>
+
+      <SettingField
+        v-if="printMode === 'flameshot'"
+        label="Pasta dos prints"
+        for="meet-print-folder"
+        hint="Vazio usa a pasta de Imagens. Os arquivos criados durante a reunião são copiados ao finalizar; os originais não são alterados."
+        :error="form.errors.print_folder"
+      >
+        <input
+          id="meet-print-folder"
+          class="s-input"
+          type="text"
+          :value="printFolderShown"
+          spellcheck="false"
+          placeholder="Pasta de Imagens"
+          @input="onPrintInput('print_folder', $event)"
+          @change="savePrintFolder"
+        />
+      </SettingField>
+
+      <SettingField
+        v-if="printMode === 'native'"
+        label="Atalho do print"
+        for="meet-print-key"
+        hint="Funciona só durante uma reunião. Captura o monitor escolhido abaixo e toca um som curto."
+        :error="form.errors.print_key"
+      >
+        <input
+          id="meet-print-key"
+          class="s-input mono"
+          type="text"
+          :value="printKeyShown"
+          spellcheck="false"
+          @input="onPrintInput('print_key', $event)"
+          @change="savePrintKey"
+        />
+      </SettingField>
+
+      <SettingField
+        v-if="printMode === 'native'"
+        label="Monitor do print"
+        for="meet-print-monitor"
+        hint="Todos os monitores gera uma imagem só com todas as telas. Se o monitor escolhido estiver desconectado na hora, o print sai com a tela inteira."
+        :error="form.errors.print_monitor ?? monitorsError"
+      >
+        <select
+          id="meet-print-monitor"
+          class="s-select"
+          :value="monitorSelected"
+          :disabled="form.saving.print_monitor"
+          @change="savePrintMonitor"
+        >
+          <option value="">Todos os monitores</option>
+          <option v-for="m in monitors" :key="m.id" :value="m.id">{{ m.label }}</option>
+          <option v-if="savedMonitorOption" :value="savedMonitorOption.id">{{ savedMonitorOption.label }}</option>
+        </select>
+      </SettingField>
+    </div>
   </section>
 </template>
 
@@ -366,6 +376,6 @@ output {
   min-width: 200px;
 }
 a {
-  color: var(--accent);
+  color: var(--text-accent);
 }
 </style>

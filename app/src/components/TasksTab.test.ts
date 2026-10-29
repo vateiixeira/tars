@@ -141,6 +141,15 @@ describe("TasksTab", () => {
     expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
   });
 
+  it("informa a contagem de tarefas não descartadas depois de carregar", async () => {
+    const { w, emit, listTasks } = await mountTab(payload([task(), task({ id: "t2", discarded: true })]));
+    expect(w.emitted("count")).toEqual([[1]]);
+    listTasks.mockResolvedValue(payload([task(), task({ id: "t2" }), task({ id: "t3" })]));
+    emit({ type: "tasks_changed", meeting_id: "m1" });
+    await flushPromises();
+    expect(w.emitted("count")?.slice(-1)[0]).toEqual([3]);
+  });
+
   it("deixa o botão de levantamento desabilitado até a primeira carga terminar", async () => {
     let finish!: (p: TasksPayload) => void;
     const listTasks = vi.fn(() => new Promise<TasksPayload>((resolve) => { finish = resolve; }));
@@ -349,7 +358,7 @@ describe("TasksTab", () => {
     const t = task({ create_state: "failed", create_error: "Equipe inválida no MCP de issues" });
     const { w } = await mountTab(payload([t]), { createTasks });
     expect(w.text()).toContain("A revisar (1)");
-    expect(row(w, "t1").text()).toContain("falhou");
+    expect(row(w, "t1").text()).toContain("Falhou");
     expect(w.get('[data-task-id="t1"]').text()).toContain("Equipe inválida no MCP de issues");
     expect(btn(w, "Criar issue").attributes("disabled")).toBeUndefined();
     await btn(w, "Criar issue").trigger("click");
@@ -405,7 +414,7 @@ describe("TasksTab", () => {
     expect(listTasks.mock.calls.length).toBeGreaterThan(before);
     expect(openId(w)).toBe("t2");
     expect(w.text()).toContain("A revisar (2)");
-    expect(row(w, "t1").text()).toContain("criando…");
+    expect(row(w, "t1").text()).toContain("Criando…");
   });
 
   it("Criar no último pendente abre o anterior", async () => {
@@ -529,7 +538,8 @@ describe("TasksTab", () => {
     expect(w.get(".evidence").text()).toContain("Miguel");
     // texto do Claude/da conversa é texto puro
     expect(w.get(".evidence").text()).toContain("<b>Eu pego</b> isso");
-    expect(w.find(".evidence b").exists()).toBe(false);
+    // só o <b> do orador (am-evidence): o <b> que veio no texto não vira elemento
+    expect(w.findAll(".evidence b").map((b) => b.text())).toEqual(["Miguel"]);
     await w.get(".evidence .play").trigger("click");
     expect(w.emitted("play")).toEqual([[61, 80]]);
   });
@@ -688,11 +698,13 @@ describe("TasksTab", () => {
       expect(row(w, "p1").text()).toContain("Bug fix");
       expect(row(w, "p1").text()).toContain("Primeira");
       expect(row(w, "p2").text()).toContain("(sem título)");
-      expect(row(w, "p2").text()).toContain("falhou");
-      expect(row(w, "c1").text()).toContain("#217");
-      expect(row(w, "c2").text()).toContain("criando…");
-      expect(row(w, "c3").text()).toContain("conferir no MCP de issues");
+      expect(row(w, "p2").text()).toContain("Falhou");
+      expect(row(w, "c1").text()).toContain("Criada #217");
+      expect(row(w, "c2").text()).toContain("Criando…");
+      expect(row(w, "c3").text()).toContain("Verificar");
       expect(row(w, "c4").get(".rtitle").classes()).toContain("struck");
+      expect(row(w, "c4").text()).toContain("Descartada");
+      expect(row(w, "p1").text()).toContain("A revisar");
     });
 
     it("clicar numa linha abre o item à direita (inclusive concluído)", async () => {
@@ -840,7 +852,7 @@ describe("TasksTab", () => {
       await flushPromises();
       patch.reject(new Error("falha ao salvar"));
       await flushPromises();
-      expect(row(w, "t1").text()).toContain("criando…");
+      expect(row(w, "t1").text()).toContain("Criando…");
       expect(w.text()).not.toContain("falha ao salvar");
     });
 
@@ -875,7 +887,7 @@ describe("TasksTab", () => {
       await flushPromises();
       expect(openId(w)).toBe("t2");
       expect(w.text()).toContain("A revisar (1)");
-      expect(row(w, "t1").text()).toContain("criando…");
+      expect(row(w, "t1").text()).toContain("Criando…");
       await btn(w, "Criar issue").trigger("click"); // t2 em voo: não volta para t1
       await flushPromises();
       expect(createTasks).toHaveBeenCalledTimes(2);
@@ -944,7 +956,7 @@ describe("TasksTab", () => {
       expect(w.find(".detail [data-task-id]").exists()).toBe(true);
     });
 
-    it("criando no clique: cartão esmaecido e tag da lista com spinner", async () => {
+    it("criando no clique: cartão esmaecido e selo da lista com loader", async () => {
       let finish!: (v: unknown) => void;
       const createTasks = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
       const { w } = await mountTab(payload([task()]), { createTasks });
@@ -953,7 +965,7 @@ describe("TasksTab", () => {
       await btn(w, "Criar issue").trigger("click");
       expect(w.find(".card-wrap.busy").exists()).toBe(true);
       expect(w.get(".card-overlay").text()).toContain("Criando a issue no MCP de issues…");
-      expect(row(w, "t1").get(".tag").find(".spinner").exists()).toBe(true);
+      expect(row(w, "t1").get(".pill").find(".loader").exists()).toBe(true);
       finish({ accepted: ["t1"], rejected: [] });
       await flushPromises();
     });

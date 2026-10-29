@@ -9,8 +9,10 @@ import { usePrintThumbs } from "../composables/usePrintThumbs";
 import { useStatus } from "../composables/useStatus";
 import { mmss } from "../lib/format";
 import { segmentAt, speakerName } from "../lib/meeting";
+import AppBanner from "./ui/AppBanner.vue";
 import AppDialog from "./ui/AppDialog.vue";
 import AppIcon from "./ui/AppIcon.vue";
+import StatusPill from "./ui/StatusPill.vue";
 
 const props = defineProps<{
   meetingId: string;
@@ -163,9 +165,9 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <p v-if="it.segment" class="said"><span class="who">{{ it.who }}:</span> {{ it.segment.text }}</p>
-          <p v-if="!it.print.sent_to_claude" class="warn">Não enviado ao Claude (limite de 20)</p>
+          <StatusPill v-if="!it.print.sent_to_claude" class="warn" tone="warn" icon="warning">Não enviado ao Claude (limite de 20)</StatusPill>
           <div class="actions">
-            <button type="button" class="btn ghost danger" @click="askDelete(it.print)">Apagar</button>
+            <button type="button" class="btn btn-sm ghost danger" @click="askDelete(it.print)"><AppIcon name="trash" :size="15" />Apagar</button>
           </div>
         </div>
       </li>
@@ -173,7 +175,7 @@ onBeforeUnmount(() => {
 
     <AppDialog v-if="viewing" class="viewer" :title="`Print ${viewing.label} · ${mmss(viewing.at_s)}`" @close="closeViewer">
       <img v-if="viewUrl" class="full" :src="viewUrl" :alt="`Print ${viewing.label} em tamanho real`" />
-      <p v-else-if="viewError" class="error" role="alert">{{ viewError }}</p>
+      <AppBanner v-else-if="viewError" class="error" role="alert">{{ viewError }}</AppBanner>
       <p v-else class="muted" role="status">Carregando imagem…</p>
     </AppDialog>
 
@@ -181,7 +183,7 @@ onBeforeUnmount(() => {
       <p>
         Apagar o print {{ confirming.label }} ({{ mmss(confirming.at_s) }}) da reunião? Esta ação não pode ser desfeita.
       </p>
-      <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>
+      <AppBanner v-if="deleteError" class="error" role="alert">{{ deleteError }}</AppBanner>
       <div class="dialog-actions">
         <button type="button" class="btn" data-dialog-cancel @click="cancelDelete">Cancelar</button>
         <button type="button" class="btn btn-danger" :disabled="deleting" @click="confirmDelete">Apagar</button>
@@ -191,28 +193,31 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.prints { height: 100%; overflow-y: auto; padding: 16px var(--page-gutter) 32px; }
-.list { list-style: none; margin: 0; padding: 0; max-width: var(--read-max); display: flex; flex-direction: column; gap: 14px; }
-.print { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-raised); }
-.print.focused { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-.thumb { display: grid; place-items: center; min-height: 112px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--hover); overflow: hidden; cursor: zoom-in; }
+.prints { height: 100%; overflow-y: auto; padding: var(--space-4) var(--page-gutter) var(--space-8); }
+.list { list-style: none; margin: 0; padding: 0; max-width: var(--read-max); display: flex; flex-direction: column; gap: var(--space-4); }
+/* Cartão do print; o focado (vindo do selo da transcrição) ganha o anel accent-glow. */
+.print { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--space-4); padding: var(--space-3); border: 1px solid var(--glass-border); border-radius: var(--radius-lg); background: var(--glass); }
+.print.focused { border-color: transparent; box-shadow: 0 0 0 2px var(--accent-glow); }
+.thumb { display: grid; place-items: center; min-height: 112px; padding: 0; border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--glass-strong); overflow: hidden; cursor: zoom-in; transition: box-shadow var(--duration-fast); }
+.thumb:hover:not(:disabled) { box-shadow: 0 0 0 2px var(--selected-border); }
 .thumb:disabled { cursor: default; }
 .thumb img { display: block; width: 100%; height: auto; }
-.placeholder { padding: 8px; color: var(--muted); font-size: var(--font-meta); text-align: center; }
+.placeholder { padding: var(--space-2); color: var(--text-muted); font-size: 13px; font-weight: 600; text-align: center; }
 .info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.line { display: flex; align-items: center; gap: 10px; }
-.time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: var(--font-meta); }
-.icon { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--muted); min-width: 32px; min-height: 32px; border-radius: var(--radius-sm); cursor: pointer; }
-.icon:hover { color: var(--accent); background: var(--hover); }
-.said { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
-.who { font-weight: 600; }
-.warn { margin: 0; color: var(--muted); font-size: var(--font-meta); }
-.actions { margin-top: auto; display: flex; gap: 8px; }
+.line { display: flex; align-items: center; gap: var(--space-3); }
+.line strong { font-weight: 700; }
+.time { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; }
+.icon { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; }
+.icon:hover { color: var(--text); background: var(--selected); }
+.said { margin: 0; line-height: 24px; overflow-wrap: anywhere; }
+.who { font-weight: 700; }
+.info .warn { align-self: flex-start; height: auto; min-height: 28px; white-space: normal; }
+.actions { margin-top: auto; display: flex; gap: var(--space-2); }
 .danger { color: var(--danger); }
 .viewer :deep(.app-dialog) { width: min(1100px, 100%); }
-.full { display: block; max-width: 100%; max-height: 70dvh; margin: 0 auto; }
-.error { color: var(--danger); margin: 0 0 10px; }
-.muted { color: var(--muted); }
-.dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.full { display: block; max-width: 100%; max-height: 70dvh; margin: 0 auto; border-radius: var(--radius-md); }
+.error { margin: 0 0 var(--space-3); }
+.muted { color: var(--text-muted); }
+.dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
 @media (max-width: 640px) { .print { grid-template-columns: minmax(0, 1fr); } }
 </style>

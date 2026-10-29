@@ -56,7 +56,8 @@ onUpdated(associate);
   gap: var(--space-2);
 }
 .label {
-  font-size: var(--font-control);
-  font-weight: 550;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
 }
 </style>

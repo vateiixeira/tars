@@ -136,7 +136,8 @@ describe("Overlay", () => {
     expect(win.show).toHaveBeenCalled();
     expect(pill().text()).toContain("Ditando");
     expect(wrapper!.find("[data-test=timer]").exists()).toBe(false);
-    expect(wrapper!.find(".dot").classes()).not.toContain("blink");
+    expect(wrapper!.find(".dot").exists()).toBe(false); // ditando: o orbe, não o ponto de gravação
+    expect(wrapper!.find(".orb").exists()).toBe(true);
 
     // gravando e ditando: mostra a gravação com o ponto piscando
     await emit({ type: "status", ...recording(), dictation: { ...idle.dictation, active: true } });

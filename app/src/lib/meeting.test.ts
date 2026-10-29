@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MeetingDetail, Segment } from "../api/types";
-import { alertLines, exportFileName, formatDuration, segmentAt, speakerSamples, transcriptText } from "./meeting";
+import { alertLines, exportFileName, formatDuration, playingSegmentId, segmentAt, speakerSamples, transcriptText } from "./meeting";
 
 const speakers = [
   { id: "s1", label: "Você", voice_id: null, is_me: true, color_index: 0 },
@@ -76,5 +76,21 @@ describe("meeting helpers", () => {
     expect(alertLines(m as MeetingDetail)).toEqual([
       "pyannote não usado: falta o token do Hugging Face. Falantes separados pelo motor local",
     ]);
+  });
+
+  it("playingSegmentId acha a fala tocando: a última iniciada, e nenhuma depois do fim da última", () => {
+    const seg = (id: number): Segment => ({
+      id, speaker_id: "s1", source: "mic", start_s: id * 3, end_s: id * 3 + 2, text: "x", dictated: false,
+    });
+    const segs = [seg(0), seg(1), seg(2)]; // 0-2, 3-5, 6-8
+    expect(playingSegmentId(segs, 0)).toBe(0);
+    expect(playingSegmentId(segs, 4)).toBe(1);
+    expect(playingSegmentId(segs, 5.5)).toBe(1); // entre falas: fica na última iniciada
+    expect(playingSegmentId(segs, 7)).toBe(2);
+    expect(playingSegmentId(segs, 8)).toBeNull(); // fim da última fala
+    expect(playingSegmentId(segs, -1)).toBeNull();
+    expect(playingSegmentId(segs, null)).toBeNull();
+    expect(playingSegmentId(segs, Number.NaN)).toBeNull();
+    expect(playingSegmentId([], 1)).toBeNull();
   });
 });

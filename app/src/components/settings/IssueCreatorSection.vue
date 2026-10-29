@@ -69,8 +69,6 @@ async function testConnection(): Promise<void> {
 
 <template>
   <section v-if="form.settings.value" class="s-section">
-    <h2>Criador de issues</h2>
-
     <ToggleField
       :form="form"
       field="issues_enabled"
@@ -95,40 +93,42 @@ async function testConnection(): Promise<void> {
       />
     </SettingField>
 
-    <SettingField
-      label="Endereço do MCP de issues"
-      hint="Informe a URL HTTPS do seu MCP, com as ferramentas listar_opcoes e criar_issue."
-      for="issues-url"
-      :error="form.errors.issues_mcp_url"
-    >
-      <input
-        id="issues-url"
-        class="s-input"
-        type="text"
-        autocomplete="off"
-        :value="urlShown"
-        @input="url = ($event.target as HTMLInputElement).value; form.clearError('issues_mcp_url')"
-        @change="saveUrl"
-      />
-    </SettingField>
+    <div class="s-grid">
+      <SettingField
+        label="Endereço do MCP de issues"
+        hint="Informe a URL HTTPS do seu MCP, com as ferramentas listar_opcoes e criar_issue."
+        for="issues-url"
+        :error="form.errors.issues_mcp_url"
+      >
+        <input
+          id="issues-url"
+          class="s-input"
+          type="text"
+          autocomplete="off"
+          :value="urlShown"
+          @input="url = ($event.target as HTMLInputElement).value; form.clearError('issues_mcp_url')"
+          @change="saveUrl"
+        />
+      </SettingField>
 
-    <SettingField
-      label="Nome do servidor MCP"
-      for="issues-server"
-      hint="Use o mesmo nome configurado no Claude Code para aproveitar o login. Padrão: issues."
-      :error="form.errors.issues_mcp_name"
-    >
-      <input
-        id="issues-server"
-        class="s-input"
-        type="text"
-        autocomplete="off"
-        spellcheck="false"
-        :value="serverShown"
-        @input="server = ($event.target as HTMLInputElement).value; form.clearError('issues_mcp_name')"
-        @change="saveServer"
-      />
-    </SettingField>
+      <SettingField
+        label="Nome do servidor MCP"
+        for="issues-server"
+        hint="Use o mesmo nome configurado no Claude Code para aproveitar o login. Padrão: issues."
+        :error="form.errors.issues_mcp_name"
+      >
+        <input
+          id="issues-server"
+          class="s-input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          :value="serverShown"
+          @input="server = ($event.target as HTMLInputElement).value; form.clearError('issues_mcp_name')"
+          @change="saveServer"
+        />
+      </SettingField>
+    </div>
 
     <SettingField label="Conexão com o MCP de issues">
       <div class="s-row">

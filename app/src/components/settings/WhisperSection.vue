@@ -20,23 +20,23 @@ async function save(key: "model" | "compute_type", event: Event): Promise<void> 
 
 <template>
   <section v-if="form.settings.value" class="s-section">
-    <h2>Whisper</h2>
     <p class="s-note">Modelo local de transcrição usado pelo ditado e pelas reuniões. As opções abaixo reconhecem português.</p>
 
-    <SettingField label="Modelo de transcrição" for="whisper-model" :hint="modelHint" :error="form.errors.model">
-      <select id="whisper-model" class="s-select" :value="model" :disabled="form.saving.model" @change="save('model', $event)">
-        <option v-for="o in WHISPER_MODELS" :key="o.value" :value="o.value">{{ o.label }}</option>
-        <option v-if="!knownModel" :value="model">{{ model }} (personalizado)</option>
-      </select>
-    </SettingField>
+    <div class="s-grid">
+      <SettingField label="Modelo de transcrição" for="whisper-model" :hint="modelHint" :error="form.errors.model">
+        <select id="whisper-model" class="s-select" :value="model" :disabled="form.saving.model" @change="save('model', $event)">
+          <option v-for="o in WHISPER_MODELS" :key="o.value" :value="o.value">{{ o.label }}</option>
+          <option v-if="!knownModel" :value="model">{{ model }} (personalizado)</option>
+        </select>
+      </SettingField>
 
-    <SettingField label="Uso de memória do modelo" for="whisper-precision" :hint="precisionHint" :error="form.errors.compute_type">
-      <select id="whisper-precision" class="s-select" :value="precision" :disabled="form.saving.compute_type" @change="save('compute_type', $event)">
-        <option v-for="o in WHISPER_PRECISIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-        <option v-if="!knownPrecision" :value="precision">{{ precision }} (personalizada)</option>
-      </select>
-    </SettingField>
-
+      <SettingField label="Uso de memória do modelo" for="whisper-precision" :hint="precisionHint" :error="form.errors.compute_type">
+        <select id="whisper-precision" class="s-select" :value="precision" :disabled="form.saving.compute_type" @change="save('compute_type', $event)">
+          <option v-for="o in WHISPER_PRECISIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+          <option v-if="!knownPrecision" :value="precision">{{ precision }} (personalizada)</option>
+        </select>
+      </SettingField>
+    </div>
     <p class="s-note">O ditado troca de modelo em segundo plano. As reuniões em andamento continuam com o modelo atual; a troca acontece quando ficam ociosas.</p>
     <p class="s-note">Na primeira escolha de um modelo, o serviço pode precisar baixá-lo. O modelo anterior continua atendendo o ditado até o novo estar pronto.</p>
     <p class="s-note">Para liberar a memória das reuniões quando não estiverem em uso, ajuste o prazo na seção Reuniões.</p>

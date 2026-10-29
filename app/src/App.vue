@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, provide, ref } from "vue";
 import MeetingList from "./components/MeetingList.vue";
 import RecordButton from "./components/RecordButton.vue";
 import VersionLine from "./components/VersionLine.vue";
-import AppearanceControl from "./components/ui/AppearanceControl.vue";
+import TopBar from "./components/shell/TopBar.vue";
 import AppIcon from "./components/ui/AppIcon.vue";
 import { useStatus } from "./composables/useStatus";
 import { textDraftsKey, type TextDraft } from "./composables/textDrafts";
@@ -16,6 +16,10 @@ const selectedId = ref<string | null>(null);
 const libraryOpen = ref(false);
 const tasksFocused = ref(false);
 const section = ref("dictation");
+const list = ref<InstanceType<typeof MeetingList> | null>(null);
+const recordButton = ref<InstanceType<typeof RecordButton> | null>(null);
+// Reuniões no app (arquivadas inclusive); `null` até a primeira carga da biblioteca.
+const meetingCount = ref<number | null>(null);
 const viewport = window.matchMedia?.("(max-width: 1023px)");
 const compact = ref(viewport?.matches ?? false);
 const onResize = (event: MediaQueryListEvent) => {
@@ -23,7 +27,12 @@ const onResize = (event: MediaQueryListEvent) => {
   libraryOpen.value = false;
 };
 viewport?.addEventListener("change", onResize);
-const { connected, connection, connectionError, status } = useStatus();
+// Janela estreita ou tarefas abertas: a biblioteca recolhe e abre por cima pelo botão "Reuniões".
+const collapsed = computed(() => compact.value || tasksFocused.value);
+const libraryVisible = computed(
+  () => route.value === "meetings" && (!collapsed.value || libraryOpen.value),
+);
+const { status, connected, connectionError } = useStatus();
 const drafts = new Map<string, TextDraft>();
 provide(textDraftsKey, drafts);
 provide("meeting-tabs", new Map<string, string>());
@@ -47,21 +56,41 @@ function openMeeting(id: string): void {
   });
 }
 function onDeleted(id: string): void {
-  if (selectedId.value === id) selectedId.value = null;
-  libraryOpen.value = compact.value;
+  if (selectedId.value === id) {
+    selectedId.value = null;
+    tasksFocused.value = false;
+  }
+  libraryOpen.value = collapsed.value;
 }
 function openSettings(target = "dictation") {
+  // o detalhe desmonta: ao voltar, ele avisa de novo se reabrir em Tarefas
+  tasksFocused.value = false;
   section.value = target;
   route.value = "settings";
   libraryOpen.value = false;
 }
-const connectionLabel = computed(() =>
-  connected.value
-    ? "Serviço conectado"
-    : connection.value === "open"
-      ? "Conectando…"
-      : "Serviço desconectado",
-);
+function onTasksView(active: boolean): void {
+  tasksFocused.value = active;
+  libraryOpen.value = false;
+}
+// Botão Buscar: volta à biblioteca (abrindo o painel se ela estiver recolhida) e foca a busca.
+function focusSearch(): void {
+  route.value = "meetings";
+  if (collapsed.value) libraryOpen.value = true;
+  void nextTick(() => list.value?.focusSearch());
+}
+// Abre ou fecha o painel sobreposto; ao abrir, o foco vai para a busca (o painel estava escondido).
+function toggleLibrary(): void {
+  libraryOpen.value = !libraryOpen.value;
+  if (libraryOpen.value) void nextTick(() => list.value?.focusSearch());
+}
+// Painel sobreposto: Esc fecha e devolve o foco ao botão "Reuniões".
+function onLibraryKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || !collapsed.value || !libraryOpen.value) return;
+  if (event.defaultPrevented) return; // um diálogo ou menu dentro do painel já tratou
+  libraryOpen.value = false;
+  void nextTick(() => document.querySelector<HTMLElement>(".library-toggle")?.focus());
+}
 const KEY_NAMES: Record<string, string> = {
   ctrl: "Ctrl",
   super: "Super",
@@ -83,70 +112,41 @@ const dictationLabel = computed(() => {
     class="shell"
     :class="{
       'settings-route': route === 'settings',
+      'library-collapsed': collapsed,
       'library-open': libraryOpen,
-      'tasks-route': route === 'meetings' && tasksFocused,
     }"
   >
     <a class="skip-link" href="#main-content">Ir para o conteúdo</a>
-    <header v-show="route === 'settings' || (compact && !tasksFocused)" class="appbar">
-      <button
-        type="button"
-        class="btn ghost"
-        @click="
-          route === 'settings'
-            ? (route = 'meetings')
-            : (libraryOpen = !libraryOpen)
-        "
-      >
-        <AppIcon :name="libraryOpen ? 'close' : 'arrow'" :size="17" />{{
-          route === "settings"
-            ? "Voltar à reunião"
-            : libraryOpen
-              ? "Fechar biblioteca"
-              : "Reuniões"
-        }}
-      </button>
-      <div id="capture-global" />
-      <AppearanceControl />
-    </header>
+    <TopBar
+      :route="route"
+      :library-toggle="collapsed"
+      :library-open="libraryOpen"
+      :compact="compact"
+      @back="route = 'meetings'"
+      @toggle-library="toggleLibrary"
+      @search="focusSearch"
+      @audio-check="openSettings('audio')"
+      @settings="openSettings()"
+    >
+      <RecordButton ref="recordButton" @started="openMeeting" @stopped="openMeeting" />
+    </TopBar>
     <div class="workspace">
       <aside
-        v-show="route === 'meetings' && !tasksFocused"
-        class="sidebar"
+        v-show="libraryVisible"
+        id="library"
+        class="library"
         aria-label="Biblioteca de reuniões"
+        @keydown="onLibraryKeydown"
       >
-        <div class="brand">
-          <span class="brand-mark"><AppIcon name="mic" :size="22" /></span
-          ><span>TARS<small>Reuniões de equipe</small></span>
-        </div>
-        <div id="capture-sidebar" />
-        <button
-          type="button"
-          class="audio-check"
-          @click="openSettings('audio')"
-        >
-          <AppIcon name="headphones" :size="16" />Conferir áudio
-        </button>
-        <MeetingList :selected-id="selectedId" @select="openMeeting" />
-        <footer class="sidebar-footer">
+        <MeetingList
+          ref="list"
+          :selected-id="selectedId"
+          @select="openMeeting"
+          @count="meetingCount = $event"
+        />
+        <footer class="library-footer">
           <div class="dictation">
-            <AppIcon name="mic" :size="16" />{{ dictationLabel }}
-          </div>
-          <button
-            type="button"
-            class="settings-link"
-            aria-label="Configurações"
-            @click="openSettings()"
-          >
-            <AppIcon name="settings" :size="18" />Configurações
-          </button>
-          <AppearanceControl v-if="!compact" />
-          <div
-            class="conn"
-            :class="{ ok: connected }"
-            :title="connectionError ?? undefined"
-          >
-            <span class="status-dot" aria-hidden="true" />{{ connectionLabel }}
+            <AppIcon name="keyboard" :size="15" />{{ dictationLabel }}
           </div>
           <VersionLine />
         </footer>
@@ -169,11 +169,14 @@ const dictationLabel = computed(() => {
               </p>
             </div>
           </div>
+          <!-- "Iniciar reunião" do estado vazio usa a mesma ação (e os mesmos guardas) da cápsula -->
           <MeetingsView
             v-if="route === 'meetings'"
             :meeting-id="selectedId"
+            :has-meetings="meetingCount !== 0"
             @deleted="onDeleted"
-            @tasks-view="tasksFocused = $event; libraryOpen = false"
+            @tasks-view="onTasksView"
+            @start="recordButton?.start()"
           />
           <SettingsView
             v-else
@@ -183,13 +186,6 @@ const dictationLabel = computed(() => {
         </template>
       </main>
     </div>
-    <Teleport
-      defer
-      :to="
-        route === 'settings' || compact ? '#capture-global' : '#capture-sidebar'
-      "
-      ><RecordButton @started="openMeeting" @stopped="openMeeting"
-    /></Teleport>
   </div>
 </template>
 <style scoped>
@@ -197,112 +193,45 @@ const dictationLabel = computed(() => {
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
 }
 .workspace {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
+  gap: 18px;
+  padding: 0 var(--space-7) var(--space-6);
 }
-.sidebar {
-  width: var(--nav-width);
+/* Vidro sem backdrop-filter: o painel tem diálogo (VersionLine) com position fixed (Ruling R2). */
+.library {
+  width: var(--list-width);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  padding: 28px 16px 16px;
-  background: var(--panel);
-  border-right: 1px solid var(--border);
+  gap: var(--space-4);
   min-height: 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-xl);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
 }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 8px 28px;
-  font-weight: 650;
-  font-size: 1.125rem;
-  letter-spacing: -0.025em;
-  line-height: 1.1;
-}
-.brand small {
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 400;
-  margin-top: 5px;
-  letter-spacing: 0;
-}
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 44px;
-  border-radius: 12px;
-  color: var(--on-accent);
-  background: var(--accent);
-}
-.audio-check {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 8px;
-  margin: 4px 0 16px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--font-meta);
-}
-.audio-check:hover {
-  color: var(--accent);
-}
-.sidebar-footer {
+.library-footer {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 20px;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-2) 0;
+  border-top: 1px solid var(--glass-border);
 }
 .dictation {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 0.75rem;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
   overflow-wrap: anywhere;
-}
-.settings-link {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px;
-  background: transparent;
-  color: var(--text);
-  border: 0;
-  border-radius: var(--radius-md);
-  text-align: left;
-  font-size: var(--font-control);
-}
-.settings-link:hover {
-  background: var(--hover);
-}
-.conn {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.6875rem;
-  color: var(--muted);
-  padding: 14px 0 0;
-  border-top: 1px solid var(--border);
-}
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--warn);
-}
-.conn.ok .status-dot {
-  background: var(--success);
 }
 .main {
   flex: 1;
@@ -321,13 +250,14 @@ const dictationLabel = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 32px;
-  color: var(--muted);
+  gap: var(--space-4);
+  padding: var(--space-8);
+  color: var(--text-muted);
   text-align: center;
 }
 .connecting h1 {
-  font-size: var(--font-h2);
+  font-size: 20px;
+  line-height: 26px;
   color: var(--text);
 }
 .connecting p {
@@ -335,86 +265,53 @@ const dictationLabel = computed(() => {
   max-width: 65ch;
 }
 .connection-banner {
-  padding: 12px 24px;
+  padding: var(--space-3) var(--space-6);
+  margin-bottom: var(--space-3);
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  border-radius: var(--radius-lg);
   background: var(--warning-surface);
-  color: var(--warn);
-  font-size: var(--font-meta);
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
 }
 .connection-banner p {
   margin: 4px 0 0;
-}
-.appbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 56px;
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-#capture-global {
-  max-width: 300px;
 }
 .skip-link {
   position: fixed;
   z-index: 100;
   top: -80px;
-  left: 16px;
-  padding: 12px;
-  background: var(--surface);
-  color: var(--accent);
+  left: var(--space-4);
+  padding: var(--space-3);
+  background: var(--surface-solid);
+  color: var(--text-accent);
   border: 1px solid var(--accent);
   border-radius: var(--radius-md);
 }
 .skip-link:focus {
-  top: 12px;
+  top: var(--space-3);
+}
+/* Recolhida, a biblioteca abre como painel sobreposto ao detalhe: superfície opaca, já que o
+   vidro deixaria o conteúdo de trás vazar. */
+.library-collapsed .library {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  bottom: var(--space-6);
+  left: var(--space-7);
+  width: min(var(--list-width), calc(100% - 2 * var(--space-7)));
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-popover);
 }
 @media (max-width: 1023px) {
-  .sidebar {
-    display: none;
+  .workspace {
+    padding: 0 var(--space-4) var(--space-4);
   }
-  .library-open .sidebar {
-    display: flex;
-    width: 100%;
-  }
-  .library-open:not(.settings-route) .main {
-    display: none;
-  }
-  .appbar :deep(.rec small) {
-    display: none;
-  }
-  .appbar :deep(.rec) {
-    padding: 8px 12px;
-    min-height: 40px;
-  }
-  .appbar .btn {
-    font-size: 0.75rem;
-    padding: 8px;
-  }
-  .appbar {
-    padding: 8px 12px;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .appbar :deep(.appearance-control select) {
-    max-width: 150px;
-  }
-}
-@media (max-width: 540px) {
-  .appbar {
-    align-items: center;
-  }
-  .appbar :deep(.appearance-control) {
-    margin-left: auto;
-  }
-  #capture-global {
-    order: 3;
-    width: 100%;
-    max-width: none;
+  .library-collapsed .library {
+    bottom: var(--space-4);
+    left: var(--space-4);
   }
 }
 </style>

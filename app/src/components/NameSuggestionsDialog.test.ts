@@ -103,7 +103,7 @@ describe("NameSuggestionsDialog", () => {
 
   it("emits close from the close button", async () => {
     const { w } = await mountDialog();
-    await w.findAll("button").find((b) => b.text() === "Fechar")!.trigger("click");
+    await w.get('[aria-label="Fechar diálogo"]').trigger("click");
     expect(w.emitted("close")).toHaveLength(1);
   });
 });

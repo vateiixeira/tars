@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Tela de configurações: navegação por seções à esquerda e a seção ativa à direita. Só a seção
 // ativa fica montada (o monitor de níveis da seção Áudio depende disso).
-import { inject, onMounted, provide, ref, watch } from "vue";
+import { computed, inject, onMounted, provide, ref, watch } from "vue";
 import IssueCreatorSection from "../components/settings/IssueCreatorSection.vue";
 import ClaudeSection from "../components/settings/ClaudeSection.vue";
 import AudioSection from "../components/settings/AudioSection.vue";
@@ -54,6 +54,18 @@ watch(
 );
 watch(active, (value) => emit("update:section", value));
 
+/** Grupo da seção ativa: o rótulo do último item com grupo até ela. */
+const activeGroup = computed(() => {
+  const index = sections.findIndex((s) => s.id === active.value);
+  for (let i = index; i >= 0; i--) {
+    const group = sections[i]?.group;
+    if (group) return group;
+  }
+  return "";
+});
+const activeLabel = computed(() => sections.find((s) => s.id === active.value)?.label ?? "");
+
+
 onMounted(() => form.load());
 // Pausar/retomar o ditado pela bandeja muda a configuração por fora desta tela: recarrega para
 // "Ditado ligado" não ficar divergente (só nas mudanças; o primeiro status não conta).
@@ -67,27 +79,28 @@ watch(
 
 <template>
   <section class="settings">
-    <header class="settings-title">
-      <span>Preferências do aplicativo</span>
-      <h1>Configurações</h1>
-    </header>
+    <nav class="snav" aria-label="Seções das configurações">
+      <template v-for="s in sections" :key="s.id">
+        <div v-if="s.group" class="snav-group">{{ s.group }}</div>
+        <button
+          class="snav-item"
+          :class="{ active: active === s.id }"
+          :aria-current="active === s.id ? 'page' : undefined"
+          :data-section="s.id"
+          @click="active = s.id"
+        >
+          {{ s.label }}
+        </button>
+      </template>
+    </nav>
 
-    <div class="layout">
-      <nav class="sections" aria-label="Seções das configurações">
-        <template v-for="s in sections" :key="s.id">
-          <span v-if="s.group" class="section-group">{{ s.group }}</span>
-          <button
-            :class="{ active: active === s.id }"
-            :aria-current="active === s.id ? 'page' : undefined"
-            :data-section="s.id"
-            @click="active = s.id"
-          >
-            {{ s.label }}
-          </button>
-        </template>
-      </nav>
+    <div class="panel">
+      <header class="panel-head">
+        <span class="eyebrow">{{ activeGroup }}</span>
+        <h1>{{ activeLabel }}</h1>
+      </header>
 
-      <div class="content">
+      <div class="panel-body">
         <div
           v-if="form.loadError.value"
           class="s-error load-error"
@@ -133,117 +146,134 @@ watch(
 </template>
 
 <style scoped>
+/* Navegação e painel em vidro, sem backdrop-filter (Ruling R2). */
 .settings {
   flex: 1;
   min-height: 0;
+  display: grid;
+  grid-template-columns: var(--settings-nav-width) minmax(0, 1fr);
+  gap: 18px;
+}
+.snav {
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-}
-.settings-title {
-  padding: 28px 32px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.settings-title span {
-  display: block;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  margin-bottom: 8px;
-}
-.settings-title h1 {
-  margin: 0;
-}
-.layout {
-  display: flex;
-  flex: 1;
+  gap: 2px;
   min-height: 0;
-}
-.sections {
-  width: var(--nav-width);
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 24px 16px;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
+  padding: var(--space-4);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
   overflow-y: auto;
 }
-.sections button {
-  text-align: left;
-  padding: 10px 12px;
-  min-height: 42px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--muted);
-  font-size: var(--font-control);
-  cursor: pointer;
-}
-.sections button:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-.sections button.active {
-  background: var(--selected);
-  color: var(--selected-text);
-  font-weight: 600;
-}
-.content {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 32px;
-}
-.load-error {
-  margin-bottom: 16px;
-}
-@media (max-width: 800px) {
-  .sections {
-    width: 190px;
-    padding: 16px 10px;
-  }
-  .content {
-    padding: 24px;
-  }
-}
-@media (max-width: 620px) {
-  .settings-title {
-    padding: 20px;
-  }
-  .layout {
-    flex-direction: column;
-  }
-  .sections {
-    width: 100%;
-    flex-direction: row;
-    flex-shrink: 0;
-    gap: 4px;
-    padding: 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-  }
-  .sections button {
-    white-space: nowrap;
-  }
-  .content {
-    padding: 20px;
-  }
-}
-.section-group {
-  margin: 14px 12px 5px;
-  color: var(--muted);
-  font-size: 0.6875rem;
-  letter-spacing: 0.08em;
+.snav-group {
+  margin: var(--space-4) 12px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.section-group:first-child {
+.snav-group:first-child {
   margin-top: 0;
 }
+.snav-item {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast);
+}
+.snav-item:hover {
+  background: var(--selected);
+  color: var(--text);
+}
+.snav-item[aria-current="page"] {
+  background: var(--selected);
+  border-color: var(--selected-border);
+  color: var(--text-accent);
+}
+.panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: var(--space-6) var(--space-7);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  overflow-y: auto;
+}
+.panel-head {
+  flex-shrink: 0;
+  max-width: var(--form-max);
+}
+.eyebrow {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.panel-head h1 {
+  margin: var(--space-1) 0 0;
+}
+.panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.load-error {
+  max-width: var(--form-max);
+}
+@media (prefers-reduced-motion: reduce) {
+  .snav-item {
+    transition: none;
+  }
+}
+@media (max-width: 800px) {
+  .settings {
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+  .panel {
+    padding: var(--space-5);
+  }
+}
+/* Estreita, a navegação vira uma faixa horizontal de pílulas acima do painel. */
 @media (max-width: 620px) {
-  .section-group {
+  .settings {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .snav {
+    flex-direction: row;
+    gap: var(--space-1);
+    padding: var(--space-3);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .snav-group {
     display: none;
+  }
+  .snav-item {
+    white-space: nowrap;
   }
 }
 </style>

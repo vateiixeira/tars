@@ -24,13 +24,19 @@ import {
   tasksExportFileName,
   tasksMarkdown,
 } from "../lib/tasks";
+import AppBanner from "./ui/AppBanner.vue";
 import AppIcon from "./ui/AppIcon.vue";
-import AppSpinner from "./ui/AppSpinner.vue";
+import AppLoader from "./ui/AppLoader.vue";
+import StatusPill from "./ui/StatusPill.vue";
 import ScanContextPrompt from "./ScanContextPrompt.vue";
 import TaskCard from "./TaskCard.vue";
 
 const props = defineProps<{ meetingId: string; startedAt: string; prints: MeetingPrint[] }>();
-const emit = defineEmits<{ play: [start: number, end: number] }>();
+const emit = defineEmits<{
+  play: [start: number, end: number];
+  /** Tarefas não descartadas, depois de carregar (o contador da aba). */
+  count: [n: number];
+}>();
 
 const { client, events, connected } = useStatus();
 
@@ -151,6 +157,10 @@ void load();
 // -- lista ----------------------------------------------------------------------------------
 
 const running = computed(() => scan.value?.state === "running");
+const activeCount = computed(() => items.value.filter((t) => !t.discarded).length);
+watch([loaded, activeCount], ([ready, n]) => {
+  if (ready) emit("count", n);
+});
 const pending = computed(() => items.value.filter(isPending));
 const creating = computed(() =>
   items.value.filter(
@@ -162,17 +172,19 @@ const creating = computed(() =>
 const uncertain = computed(() =>
   items.value.filter((t) => !t.discarded && t.create_state === "uncertain"),
 );
-const otherGroups = computed(() => [
-  { label: "Em criação", items: creating.value },
-  { label: "Verificar", items: uncertain.value },
-  {
-    label: "Criadas",
-    items: items.value.filter(
-      (t) => !t.discarded && t.create_state === "created",
-    ),
-  },
-  { label: "Descartadas", items: items.value.filter((t) => t.discarded) },
-]);
+const otherGroups = computed(() =>
+  [
+    { label: "Em criação", items: creating.value },
+    { label: "Verificar", items: uncertain.value },
+    {
+      label: "Criadas",
+      items: items.value.filter(
+        (t) => !t.discarded && t.create_state === "created",
+      ),
+    },
+    { label: "Descartadas", items: items.value.filter((t) => t.discarded) },
+  ].filter((g) => g.items.length > 0),
+);
 function presentationLabel(t: TaskSuggestion): string {
   return t.discarded
     ? "Descartada"
@@ -216,15 +228,24 @@ const openCreating = computed(
     (open.value.create_state === "creating" || isBusy(`create:${open.value.id}`)),
 );
 
-const ROW_STATE: Partial<Record<TaskSuggestion["create_state"], string>> = {
-  creating: "criando…",
-  uncertain: "conferir no MCP de issues",
-};
-function rowState(t: TaskSuggestion): string | null {
-  if (t.discarded) return null;
-  if (isBusy(`create:${t.id}`)) return "criando…";
-  if (t.create_state === "created") return `#${t.issue_number}`;
-  return ROW_STATE[t.create_state] ?? null;
+/** Pílula de estado da linha da lista. Resultado incerto continua "Verificar": nada de falso sucesso. */
+interface Pill {
+  tone: "neutral" | "ok" | "accent" | "warn" | "danger";
+  label: string;
+  icon?: string;
+  busy?: boolean;
+}
+function pillFor(t: TaskSuggestion): Pill {
+  if (t.discarded) return { tone: "neutral", label: "Descartada" };
+  if (t.create_state === "creating" || isBusy(`create:${t.id}`))
+    return { tone: "accent", label: "Criando…", busy: true };
+  if (t.create_state === "created")
+    return { tone: "ok", label: `Criada #${t.issue_number}`, icon: "check" };
+  if (t.create_state === "uncertain")
+    return { tone: "warn", label: "Verificar", icon: "warning" };
+  if (t.create_state === "failed")
+    return { tone: "danger", label: "Falhou", icon: "warning" };
+  return { tone: "warn", label: "A revisar" };
 }
 
 /** Depois de tirar `t` dos pendentes: o que ocupa o mesmo lugar na lista nova, ou o anterior se era o último. */
@@ -421,7 +442,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
     <div class="toolbar">
       <button
         type="button"
-        class="btn"
+        class="btn btn-sm"
         :disabled="!connected || !loaded || !enabled || running || isBusy('scan') || isBusy('cancel-scan')"
         :title="enabled ? undefined : 'O criador de issues está desligado'"
         @click="rescan"
@@ -431,16 +452,16 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       </button>
       <button
         type="button"
-        class="btn"
+        class="btn btn-sm"
         :disabled="!connected || isBusy('add')"
         @click="addManual"
       >
         <AppIcon name="plus" :size="16" /> Adicionar tarefa
       </button>
-      <button type="button" class="btn" @click="copy">
+      <button type="button" class="btn btn-sm" @click="copy">
         <AppIcon name="copy" :size="16" /> {{ copied ? "Copiado" : "Copiar" }}
       </button>
-      <button type="button" class="btn" @click="exportMarkdown">
+      <button type="button" class="btn btn-sm" @click="exportMarkdown">
         <AppIcon name="export" :size="16" /> Exportar .md
       </button>
     </div>
@@ -470,26 +491,27 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       </p>
     </details>
 
-    <p v-if="loadError" class="error" role="alert">{{ loadError }}</p>
-    <p v-if="actionError" class="error" role="alert">{{ actionError }}</p>
-    <p v-if="showOptionsError" class="warn">
+    <AppBanner v-if="loadError" class="error" role="alert">{{ loadError }}</AppBanner>
+    <AppBanner v-if="actionError" class="error" role="alert">{{ actionError }}</AppBanner>
+    <AppBanner v-if="showOptionsError" tone="warn" class="warn">
       Não foi possível carregar as opções do MCP de issues: {{ optionsError }}
-      <button type="button" class="btn" @click="loadOptions(true)">
-        Tentar de novo
-      </button>
-    </p>
+      <template #action>
+        <button type="button" class="btn btn-sm" @click="loadOptions(true)">
+          Tentar de novo
+        </button>
+      </template>
+    </AppBanner>
 
     <div v-if="running" class="scan-box">
-      <AppSpinner :size="20" />
+      <AppLoader size="sm" />
       <div class="scan-text" role="status">
         {{ isBusy('cancel-scan') ? "Cancelando levantamento…" : "Levantando tarefas…" }}
         <small>O Claude está lendo a transcrição e os prints. Isso pode levar alguns minutos.</small>
         <div class="scan-bar" aria-hidden="true"><i></i></div>
       </div>
-      <span class="spacer"></span>
       <button
         type="button"
-        class="btn"
+        class="btn btn-sm"
         :disabled="!connected || isBusy('cancel-scan')"
         @click="cancelScan"
       >
@@ -500,17 +522,19 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
     <p v-else-if="scan?.state === 'cancelled'" class="muted" role="status">
       Levantamento cancelado.
     </p>
-    <p v-else-if="scan?.state === 'error'" class="error">
+    <AppBanner v-else-if="scan?.state === 'error'" class="error">
       O levantamento de tarefas falhou: {{ scan.error ?? "erro desconhecido" }}
-      <button
-        type="button"
-        class="btn"
-        :disabled="!connected || !enabled || running || isBusy('scan')"
-        @click="rescan"
-      >
-        Tentar de novo
-      </button>
-    </p>
+      <template #action>
+        <button
+          type="button"
+          class="btn btn-sm"
+          :disabled="!connected || !enabled || running || isBusy('scan')"
+          @click="rescan"
+        >
+          Tentar de novo
+        </button>
+      </template>
+    </AppBanner>
 
     <div v-if="running && items.length === 0" class="skeleton" aria-hidden="true">
       <div class="sk-list">
@@ -539,11 +563,11 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
       </p>
     </template>
 
-    <p v-if="uncertain.length" class="uncertain-notice" role="status">
-      <AppIcon name="warning" :size="17" />{{ uncertain.length }}
+    <AppBanner v-if="uncertain.length" tone="warn" class="uncertain-notice" role="status">
+      {{ uncertain.length }}
       {{ uncertain.length === 1 ? "criação precisa" : "criações precisam" }} de
       conferência. Confira antes de reenviar.
-    </p>
+    </AppBanner>
     <label v-if="items.length" class="compact-task-select"
       >Tarefa em revisão<select
         :value="openId ?? ''"
@@ -556,30 +580,28 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
     >
     <div v-if="items.length > 0" class="panes">
       <nav class="list" aria-label="Tarefas">
-        <h3>A revisar ({{ pending.length }})</h3>
-        <button
-          v-for="t in pending"
-          :key="t.id"
-          type="button"
-          class="row"
-          :class="{ open: t.id === openId }"
-          :aria-current="t.id === openId ? 'true' : undefined"
-          :data-row-id="t.id"
-          @click="openId = t.id"
-        >
-          <span class="kind">
-            {{ KIND_LABELS[t.kind] ?? t.kind }}
-            <span v-if="t.create_state === 'failed'" class="tag bad"
-              >falhou</span
-            >
-          </span>
-          <span class="rtitle">{{ t.title || "(sem título)" }}</span>
-        </button>
+        <div class="group">
+          <h3>A revisar ({{ pending.length }})</h3>
+          <button
+            v-for="t in pending"
+            :key="t.id"
+            type="button"
+            class="row"
+            :class="{ open: t.id === openId }"
+            :aria-current="t.id === openId ? 'true' : undefined"
+            :data-row-id="t.id"
+            @click="openId = t.id"
+          >
+            <span class="top">
+              <span class="kind">{{ KIND_LABELS[t.kind] ?? t.kind }}</span>
+              <StatusPill class="pill" :tone="pillFor(t).tone" :icon="pillFor(t).icon" :busy="pillFor(t).busy">{{ pillFor(t).label }}</StatusPill>
+            </span>
+            <span class="rtitle">{{ t.title || "(sem título)" }}</span>
+          </button>
+        </div>
 
-        <template v-for="group in otherGroups" :key="group.label">
-          <h3 v-if="group.items.length">
-            {{ group.label }} ({{ group.items.length }})
-          </h3>
+        <div v-for="group in otherGroups" :key="group.label" class="group">
+          <h3>{{ group.label }} ({{ group.items.length }})</h3>
           <button
             v-for="t in group.items"
             :key="t.id"
@@ -590,23 +612,15 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
             :data-row-id="t.id"
             @click="openId = t.id"
           >
-            <span class="kind"
-              >{{ KIND_LABELS[t.kind] ?? t.kind
-              }}<span
-                v-if="rowState(t)"
-                class="tag"
-                :class="{
-                  ok: t.create_state === 'created',
-                  warn: t.create_state === 'uncertain',
-                }"
-                ><AppSpinner v-if="isBusy(`create:${t.id}`) || t.create_state === 'creating'" :size="10" />{{ rowState(t) }}</span
-              ></span
-            >
+            <span class="top">
+              <span class="kind">{{ KIND_LABELS[t.kind] ?? t.kind }}</span>
+              <StatusPill class="pill" :tone="pillFor(t).tone" :icon="pillFor(t).icon" :busy="pillFor(t).busy">{{ pillFor(t).label }}</StatusPill>
+            </span>
             <span class="rtitle" :class="{ struck: t.discarded }">{{
               t.title || "(sem título)"
             }}</span>
           </button>
-        </template>
+        </div>
       </nav>
 
       <section v-if="open" class="detail">
@@ -627,29 +641,29 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
             @resolve="onResolve"
           />
           <div v-if="openCreating" class="card-overlay" role="status">
-            <AppSpinner :size="20" />Criando a issue no MCP de issues…
+            <AppLoader size="sm" />Criando a issue no MCP de issues…
           </div>
         </div>
         <div v-if="isPending(open)" class="actions">
           <button
             type="button"
-            class="btn"
+            class="icon-button"
             aria-label="Tarefa anterior"
             title="Anterior"
             :disabled="openIndex <= 0"
             @click="step(-1)"
           >
-            ←
+            <AppIcon name="arrow" :size="18" />
           </button>
           <button
             type="button"
-            class="btn"
+            class="icon-button next"
             aria-label="Próxima tarefa"
             title="Próxima"
             :disabled="openIndex < 0 || openIndex >= pending.length - 1"
             @click="step(1)"
           >
-            →
+            <AppIcon name="arrow" :size="18" />
           </button>
           <span class="spacer"></span>
           <button type="button" class="btn" @click="onDiscard(open)">
@@ -666,7 +680,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
             @click="createInIssue(open)"
           >
             <template v-if="isBusy(`create:${open.id}`)"
-              ><AppSpinner :size="14" /> Criando…</template
+              ><AppLoader size="sm" tone="on-accent" /> Criando…</template
             >
             <template v-else>Criar issue</template>
           </button>
@@ -681,18 +695,20 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 12px var(--page-gutter) 0;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--page-gutter) 0;
   min-height: 0;
   container: tasks / inline-size;
   overflow-y: auto;
+}
+.tasks > * {
+  flex-shrink: 0;
 }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
-  flex-shrink: 0;
+  gap: var(--space-2);
 }
 .spacer {
   flex: 1;
@@ -701,28 +717,34 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin-bottom: 14px;
-  padding: 14px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg, 12px);
-  background: var(--surface-raised);
-  color: var(--accent);
-  flex-shrink: 0;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+}
+.scan-box .btn {
+  margin-left: auto;
 }
 .scan-text {
-  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-accent);
+  font-size: 14px;
+  font-weight: 700;
 }
 .scan-text small {
-  display: block;
-  color: var(--muted);
-  font-size: var(--font-meta);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
 }
 .scan-bar {
   width: min(260px, 100%);
   height: 4px;
-  margin-top: 6px;
-  border-radius: 4px;
+  margin-top: var(--space-1);
+  border-radius: var(--radius-pill);
   background: var(--selected);
   overflow: hidden;
 }
@@ -730,8 +752,8 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
   display: block;
   width: 35%;
   height: 100%;
-  border-radius: 4px;
-  background: var(--accent);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--accent-grad-from), var(--accent-grad-to));
   animation: scan-slide 1.4s ease-in-out infinite;
 }
 @keyframes scan-slide {
@@ -744,46 +766,47 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
 }
 .skeleton {
   display: grid;
-  grid-template-columns: minmax(220px, 25%) minmax(0, 1fr);
-  gap: 24px;
-  flex-shrink: 0;
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  gap: var(--space-6);
 }
 .sk-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .sk-list .sk {
-  height: 38px;
+  height: 76px;
+  border-radius: var(--radius-lg);
 }
 .sk-card {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-raised);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--glass);
 }
 .sk {
-  border-radius: 6px;
-  background: linear-gradient(90deg, var(--selected) 0%, var(--surface) 50%, var(--selected) 100%);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--selected) 0%, var(--glass-strong) 50%, var(--selected) 100%);
   background-size: 200% 100%;
   animation: sk-shimmer 1.3s linear infinite;
 }
 .sk-title {
   width: 60%;
-  height: 18px;
-  margin-bottom: 12px;
+  height: 20px;
+  margin-bottom: var(--space-3);
 }
 .sk-body {
   height: 90px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .sk-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--space-3);
 }
 .sk-fields .sk {
-  height: 32px;
+  height: var(--control-lg);
+  border-radius: var(--radius-pill);
 }
 @keyframes sk-shimmer {
   to {
@@ -805,114 +828,132 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
   }
 }
 .scan-context {
-  flex-shrink: 0;
-  margin-bottom: 14px;
-  font-size: var(--font-control);
+  font-size: 14px;
 }
 .scan-context summary {
   width: fit-content;
   max-width: 100%;
-  padding: 6px 0;
+  padding: var(--space-2) 0;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--text-muted);
+  font-weight: 700;
 }
 .scan-context summary:hover {
   color: var(--text);
 }
 .scan-context label {
   display: block;
-  margin: 8px 0 6px;
-  font-weight: 500;
+  margin: var(--space-2) 0;
+  font-size: 13px;
+  font-weight: 700;
 }
 .scan-context textarea {
   display: block;
   width: 100%;
-  min-height: 80px;
+  min-height: 88px;
   max-height: 160px;
   resize: vertical;
-  padding: 8px 12px;
+  padding: 14px var(--space-5);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background-color: var(--glass-strong);
   color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+}
+.scan-context textarea::placeholder {
+  color: var(--text-muted);
+}
+.scan-context textarea:focus {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow:
+    0 0 0 1px var(--focus-ring),
+    0 0 0 5px var(--selected);
 }
 .scan-context textarea:disabled {
-  opacity: 0.55;
+  opacity: 0.6;
 }
 .scan-context p {
   max-width: 75ch;
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: var(--font-meta);
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
 }
 .panes {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(220px, 25%) minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  gap: var(--space-6);
 }
 .list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-4);
   min-height: 0;
   overflow-y: auto;
 }
-.list h3 {
-  margin: 8px 0 2px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--muted);
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.group h3 {
+  margin: 0 var(--space-1);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  color: var(--text-muted);
 }
-.list h3:first-child {
-  margin-top: 0;
-}
+/* Cartão da lista (am-task). */
 .row {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
+  gap: 6px;
+  width: 100%;
+  padding: 14px;
   text-align: left;
-  background: transparent;
-  border: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
   color: var(--text);
   cursor: pointer;
+  transition: background var(--duration-fast);
 }
 .row:hover {
-  background: var(--hover);
+  background: var(--selected);
 }
 .row.open {
-  background: var(--surface);
-  border-color: var(--selected);
+  background: var(--selected);
+  border-color: var(--selected-border);
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 .kind {
-  display: flex;
-  gap: 6px;
-  font-size: 0.7rem;
-  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  color: var(--text-muted);
 }
-.tag:has(.spinner) {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.tag.ok {
-  color: var(--accent);
-  font-weight: 600;
-}
-.tag.warn {
-  color: var(--warn);
-}
-.tag.bad {
-  color: var(--danger);
-  font-weight: 600;
+.row .pill {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  margin-left: auto;
 }
 .rtitle {
-  font-size: 0.85rem;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -922,12 +963,12 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
 }
 .rtitle.struck {
   text-decoration: line-through;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .detail {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
   min-height: 0;
   overflow-y: auto;
 }
@@ -951,70 +992,73 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  color: var(--accent);
-  font-weight: 600;
-  font-size: 0.9rem;
+  gap: var(--space-2);
+  color: var(--text-accent);
+  font-size: 14px;
+  font-weight: 700;
 }
 .note {
   margin: 0;
-  color: var(--muted);
-  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
 }
 .actions {
   position: sticky;
   bottom: 0;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding: 12px 0;
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2);
+  background: var(--surface-solid);
+  border-top: 1px solid var(--glass-border);
+}
+.icon-button.next svg {
+  transform: rotate(180deg);
 }
 .muted {
-  color: var(--muted);
+  margin: 0;
+  color: var(--text-muted);
+  font-weight: 600;
 }
-.error {
-  color: var(--danger);
-  margin: 0 0 10px;
-}
-.warn {
-  color: var(--warn);
-  margin: 0 0 10px;
-  font-size: 0.85rem;
+.error,
+.warn,
+.uncertain-notice {
+  max-width: var(--read-max);
 }
 .compact-task-select {
   display: none;
-  flex-shrink: 0;
-  font-size: var(--font-meta);
-  color: var(--muted);
-  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 .compact-task-select select {
   display: block;
-  flex: 1;
-  min-width: 0;
   width: 100%;
-  min-height: 40px;
-  padding: 8px 12px;
-  margin-top: 8px;
+  min-height: var(--control-lg);
+  padding: 0 44px 0 var(--space-5);
+  margin-top: var(--space-2);
   border: 1px solid var(--border-control);
-  border-radius: var(--radius-md);
-  background: var(--surface);
+  border-radius: var(--radius-pill);
+  background-color: var(--glass-strong);
   color: var(--text);
   font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 24px) 50%,
+    calc(100% - 19px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
 }
-.uncertain-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--warning-surface);
-  color: var(--warn);
-  border-radius: var(--radius-md);
-  font-size: var(--font-meta);
-  margin: 0 0 14px;
+.compact-task-select select option {
+  background: var(--surface-solid);
+  color: var(--text);
 }
 @container tasks (max-width:920px) {
   .panes {
@@ -1024,23 +1068,15 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
     display: none;
   }
   .compact-task-select {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    display: block;
   }
   .compact-task-select select {
-    margin: 0;
+    margin-top: var(--space-2);
   }
 }
 @container tasks (max-width:380px) {
   .actions {
     flex-wrap: wrap;
-  }
-  .toolbar {
-    gap: 4px;
-  }
-  .toolbar .btn {
-    font-size: 0.75rem;
   }
 }
 </style>
