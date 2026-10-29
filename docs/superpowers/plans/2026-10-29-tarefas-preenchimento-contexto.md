@@ -57,7 +57,7 @@
   - `IssueOptions.coherent(person_id: int, team_id: int | None, product_id: int | None) -> bool`
   - `to_json()` **não muda** (pessoas continuam só `{id, name}`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_parse_options_keeps_people_teams_and_products():
@@ -80,10 +80,10 @@ def test_coherent():
     assert opts.coherent(77, 3, 4)               # pessoa desconhecida: existência é checada em outro lugar
 ```
 
-- [ ] **Step 2: Run** `uv run --frozen pytest tests/issues/test_client.py -q -k "people_teams or coherent"` → FAIL.
-- [ ] **Step 3: Implement** in `client.py`. Em `_parse_options`, só para `"pessoas"`, ler `equipes`/`produtos` mantendo apenas `int` que não seja `bool`. `coherent`: pessoa desconhecida ou sem listas → `True`; ids informados (`not None`) vazios → `True`; senão `team_id in p.teams or product_id in p.products`.
-- [ ] **Step 4: Run** `uv run --frozen pytest -q` → PASS (inclui os testes existentes de opções/`to_json`).
-- [ ] **Step 5: Commit** `[Feat] Guardar equipes e produtos das pessoas nas opções de issues`
+- [x] **Step 2: Run** `uv run --frozen pytest tests/issues/test_client.py -q -k "people_teams or coherent"` → FAIL.
+- [x] **Step 3: Implement** in `client.py`. Em `_parse_options`, só para `"pessoas"`, ler `equipes`/`produtos` mantendo apenas `int` que não seja `bool`. `coherent`: pessoa desconhecida ou sem listas → `True`; ids informados (`not None`) vazios → `True`; senão `team_id in p.teams or product_id in p.products`.
+- [x] **Step 4: Run** `uv run --frozen pytest -q` → PASS (inclui os testes existentes de opções/`to_json`).
+- [x] **Step 5: Commit** `[Feat] Guardar equipes e produtos das pessoas nas opções de issues`
 
 ---
 
@@ -99,7 +99,7 @@ def test_coherent():
 - Consumes: `Option.teams`, `Option.products`, `IssueOptions.coherent` (Task 1).
 - Produces: `ScanItem` **sem** o campo `project`; `as_store_item()["fields"]` sem `"project"`.
 
-- [ ] **Step 1: Write the failing tests** (ajuste os testes atuais que usam `project`/`"projeto"`):
+- [x] **Step 1: Write the failing tests** (ajuste os testes atuais que usam `project`/`"projeto"`):
 
 ```python
 def test_prompt_lists_people_with_teams_and_products():
@@ -127,15 +127,15 @@ def test_previous_default_prompt_is_legacy():
     assert is_legacy_prompt(OLD_DEFAULT)  # OLD_DEFAULT = cópia literal do DEFAULT_TASKS_PROMPT de antes desta task
 ```
 
-- [ ] **Step 2: Run** `uv run --frozen pytest tests/issues/test_scan.py -q` → FAIL.
-- [ ] **Step 3: Implement.**
+- [x] **Step 2: Run** `uv run --frozen pytest tests/issues/test_scan.py -q` → FAIL.
+- [x] **Step 3: Implement.**
   - `legacy.py`: antes de mudar o prompt, acrescente a `LEGACY_PROMPT_HASHES` o `sha256(DEFAULT_TASKS_PROMPT.strip())` atual (assim quem estava no padrão migra para o novo).
   - `DEFAULT_TASKS_PROMPT`: tire `## Projeto` da lista de seções; troque "Identifique os projetos ... pasta raiz" por "Use as informações da reunião e os arquivos CLAUDE.md da pasta raiz para entender os projetos e cite na descrição os repositórios envolvidos. Não presuma nomes de repositórios, produtos, pessoas ou equipes."; troque a linha "Use somente os ids ..." por: "Use somente os ids das opções retornadas pelo MCP. Cada pessoa traz as equipes e os produtos de que participa: escolha responsável e equipe entre quem participa do produto da issue (de preferência também da equipe); se alguém foi citado como responsável na conversa, prefira essa pessoa. Deixe o id vazio só quando nenhuma escolha coerente existir e registre a sugestão em texto. Não invente ids."
   - `SCAN_SYSTEM`: remova a chave `"projeto"` da lista de chaves.
   - `build_scan_prompt`: pessoas como `{"id", "name", "equipes": list(p.teams), "produtos": list(p.products)}` (nessa ordem de chaves); equipes e produtos seguem `{id, name}`.
   - `scan.py`: remova `project` de `ScanItem`, `_item` e `as_store_item`; em `_item`, depois de calcular os ids: se `assignee_id` e `options` e `not options.coherent(assignee_id, team_id, product_id)` → `assignee_id = None`.
-- [ ] **Step 4: Run** `uv run --frozen pytest -q` → PASS.
-- [ ] **Step 5: Commit** `[Feat] Orientar o levantamento por equipes e produtos de cada pessoa`
+- [x] **Step 4: Run** `uv run --frozen pytest -q` → PASS.
+- [x] **Step 5: Commit** `[Feat] Orientar o levantamento por equipes e produtos de cada pessoa`
 
 ---
 
@@ -169,7 +169,7 @@ Regras do `autofill` (o que os testes fixam):
 - `after_patch`: `assignee_id`/`team_id` em `changed` → `propagate` desses campos (com o valor atual de `task`); `product_id` em `changed` → `fill_from_sources(..., [task.id])` e depois `propagate` dos campos manuais de `task` para os outros cartões do novo produto.
 - Gravação sempre via `fill_task` com o `updated_at` lido; `False` → ignora o cartão (o operador mexeu nele).
 
-- [ ] **Step 1: Write the failing tests.** Store:
+- [x] **Step 1: Write the failing tests.** Store:
 
 ```python
 def test_update_task_marks_assignee_and_team_manual(store, mid):
@@ -207,13 +207,13 @@ def test_fill_loses_race_to_operator_edit(...)            # Review Focus 1: fill
 API (`tests/test_api_tasks.py`): `test_patch_assignee_propagates_and_notifies` — dois cartões do produto 4 na reunião; PATCH `assignee_id=9` no primeiro → o segundo fica com 9 e `suggested.fill.assignee_id == "last"`; um evento `tasks_changed` publicado; resposta do PATCH reflete o próprio cartão relido.
 Jobs (`tests/issues/test_jobs.py`): `test_scan_fills_from_history` (resultado do levantamento sem responsável recebe o da tarefa criada) e `test_created_issue_propagates_to_siblings`.
 
-- [ ] **Step 2: Run** os arquivos acima → FAIL.
-- [ ] **Step 3: Implement** store (`update_task`, `tasks_for_product`, `fill_task`), depois `autofill.py`, depois os ganchos:
+- [x] **Step 2: Run** os arquivos acima → FAIL.
+- [x] **Step 3: Implement** store (`update_task`, `tasks_for_product`, `fill_task`), depois `autofill.py`, depois os ganchos:
   - `api_tasks.patch_task`: depois de `update_task`, `autofill.after_patch(store, ctx.issue_options.peek(), task, set(body.changes()))`; relê com `store.get_task` antes de responder.
   - `jobs._scan`: dentro do `with self._claim_lock`, logo depois de `replace_scan_tasks`, `autofill.fill_from_sources(self._store, options, meeting_id)`.
   - `jobs._create_one`: depois de `finish_create` com `outcome.state == "created"`, `autofill.propagate(self._store, self._options.peek(), self._store.get_task(task_id))` em `try/except Exception: log.exception(...)` (nunca pode afetar o estado da criação). `_create_all` já publica `tasks_changed`.
-- [ ] **Step 4: Run** `uv run --frozen pytest -q` → PASS.
-- [ ] **Step 5: Commit** `[Feat] Preencher responsável e equipe pelo último usado do produto`
+- [x] **Step 4: Run** `uv run --frozen pytest -q` → PASS.
+- [x] **Step 5: Commit** `[Feat] Preencher responsável e equipe pelo último usado do produto`
 
 ---
 
@@ -231,15 +231,15 @@ Jobs (`tests/issues/test_jobs.py`): `test_scan_fills_from_history` (resultado do
   - `TaskFields` **sem** `project`; `TaskSuggestion` mantém `project: string | null` (legado, não exibido) — assim fixtures existentes continuam válidas.
   - `TaskSuggestion.suggested`: `{ product_id?: number | null; assignee_id?: number | null; team_id?: number | null; assignee_hint?: string | null; team_hint?: string | null; fill?: Partial<Record<"assignee_id" | "team_id", "last" | "manual">> } | null`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
   - TaskCard: não existe `[aria-label="Projeto"]`.
   - TaskCard: com `assignee_id: 2` e `suggested: { fill: { assignee_id: "last" } }`, a opção selecionada do seletor Responsável tem texto `Miguel (último usado)`; com `fill.assignee_id: "manual"` o texto é só `Miguel`; a sugestão do Claude continua `"(sugestão)"`.
   - Mesmo para Equipe (`team_id`).
   - tasks.ts: `taskFields(t)` não tem a chave `project`; `tasksMarkdown` não contém `**Projeto:**`.
-- [ ] **Step 2: Run** `cd app && pnpm test -- TaskCard tasks` → FAIL.
-- [ ] **Step 3: Implement.** Em `TaskCard.vue`, remover o `<label>Projeto`, `draft.project`, o `watch` e `saveProject`; em `choices()`, para o item selecionado cujo `task.suggested?.fill?.[key] === "last"` (só `assignee_id`/`team_id`), rótulo `${name} (último usado)`; o "(sugestão)" do Claude continua como hoje e tem precedência se coincidir. Ajustar o comentário do topo (tirar "projeto"). Os `assigneeHint`/`teamHint` devem continuar funcionando com `suggested` sem as chaves de dica (use `?? null`).
-- [ ] **Step 4: Run** `cd app && pnpm test && pnpm build` → PASS.
-- [ ] **Step 5: Commit** `[UI] Remover o campo Projeto e indicar o último usado no cartão`
+- [x] **Step 2: Run** `cd app && pnpm test -- TaskCard tasks` → FAIL.
+- [x] **Step 3: Implement.** Em `TaskCard.vue`, remover o `<label>Projeto`, `draft.project`, o `watch` e `saveProject`; em `choices()`, para o item selecionado cujo `task.suggested?.fill?.[key] === "last"` (só `assignee_id`/`team_id`), rótulo `${name} (último usado)`; o "(sugestão)" do Claude continua como hoje e tem precedência se coincidir. Ajustar o comentário do topo (tirar "projeto"). Os `assigneeHint`/`teamHint` devem continuar funcionando com `suggested` sem as chaves de dica (use `?? null`).
+- [x] **Step 4: Run** `cd app && pnpm test && pnpm build` → PASS.
+- [x] **Step 5: Commit** `[UI] Remover o campo Projeto e indicar o último usado no cartão`
 
 ---
 
@@ -259,14 +259,14 @@ Comportamento (mockup aprovado, seções 2 e 3 de `.superpowers/brainstorm/42488
 - **Criando:** botão `Criar issue` mostra `<AppSpinner>` + `Criando…` quando ocupado; tag `criando…` da lista ganha spinner; o `TaskCard` aberto fica dentro de `.card-wrap` que, quando `open` está em criação (`create_state === "creating"` ou `isBusy("create:<id>")`), recebe classe `busy` (esmaecido) e um overlay `.card-overlay` com spinner e `Criando a issue no MCP de issues…`.
 - Cores só com tokens existentes (`--accent`, `--selected`, `--surface`, `--surface-raised`, `--border`, `--muted`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
   - Rodando: `.scan-box` contém `Levantando tarefas…` e `O Claude está lendo a transcrição e os prints. Isso pode levar alguns minutos.` e um `[role="status"]`; sem itens existe `.skeleton`; com itens não existe.
   - Criando: com `create_state: "creating"` no item aberto, existe `.card-wrap.busy` e `.card-overlay` com `Criando a issue no MCP de issues…`; sem criação, não existe.
   - O teste atual "mostra 'Levantando tarefas…' com o levantamento rodando" continua passando.
-- [ ] **Step 2: Run** `cd app && pnpm test -- TasksTab` → FAIL.
-- [ ] **Step 3: Implement** `AppSpinner.vue` e as mudanças em `TasksTab.vue`.
-- [ ] **Step 4: Run** `cd app && pnpm test && pnpm build` → PASS.
-- [ ] **Step 5: Commit** `[UI] Mostrar carregamento no levantamento e na criação de issues`
+- [x] **Step 2: Run** `cd app && pnpm test -- TasksTab` → FAIL.
+- [x] **Step 3: Implement** `AppSpinner.vue` e as mudanças em `TasksTab.vue`.
+- [x] **Step 4: Run** `cd app && pnpm test && pnpm build` → PASS.
+- [x] **Step 5: Commit** `[UI] Mostrar carregamento no levantamento e na criação de issues`
 
 ---
 
@@ -295,13 +295,13 @@ Regras em `TasksTab.vue`:
 - Fora disso, o `<details>` atual continua, com summary `Orientar as sugestões (opcional)` / `Orientar as sugestões (preenchido)`. O mesmo `scanContext` alimenta os dois.
 - `disabled` = `!connected || !enabled || running || isBusy('scan')`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
   - ScanContextPrompt: clicar `Ignore assuntos de infraestrutura` com campo `"Foque no checkout."` emite `update:modelValue` com `"Foque no checkout.\nIgnore assuntos de infraestrutura."`; com campo vazio, só o texto; `Gerar tarefas` emite `generate`; `Agora não` emite `dismiss`; `disabled` desabilita textarea, chips e botões.
   - TasksTab: substituir o teste "antes do primeiro levantamento mostra o botão Levantar tarefas e o campo de contexto" por: com `scan: null` aparece `Quer orientar as sugestões de tarefas?`, não aparece `.scan-context`; preencher `"  Foque no checkout.  "` e clicar `Gerar tarefas` chama `scanTasks("m1", "Foque no checkout.")`.
   - TasksTab: `Agora não` esconde a caixa e mostra `.scan-context` com summary `Orientar as sugestões (preenchido)` quando havia texto, e `Revise os prints e clique em Levantar tarefas.`.
   - TasksTab: com `scan.state === "done"` a caixa não aparece; summary `Orientar as sugestões (opcional)`.
   - TasksTab: com o fluxo desligado a caixa não aparece.
-- [ ] **Step 2: Run** `cd app && pnpm test -- ScanContextPrompt TasksTab` → FAIL.
-- [ ] **Step 3: Implement** o componente (visual: borda esquerda `--accent`, fundo `--surface-raised`, ícone em quadrado `--selected`/`--selected-text`, chips com borda tracejada `--border-control`), o ícone `sparkle` em `AppIcon.vue` e a integração.
-- [ ] **Step 4: Run** `cd app && pnpm test && pnpm build` → PASS.
-- [ ] **Step 5: Commit** `[UI] Destacar o contexto do levantamento antes da primeira análise`
+- [x] **Step 2: Run** `cd app && pnpm test -- ScanContextPrompt TasksTab` → FAIL.
+- [x] **Step 3: Implement** o componente (visual: borda esquerda `--accent`, fundo `--surface-raised`, ícone em quadrado `--selected`/`--selected-text`, chips com borda tracejada `--border-control`), o ícone `sparkle` em `AppIcon.vue` e a integração.
+- [x] **Step 4: Run** `cd app && pnpm test && pnpm build` → PASS.
+- [x] **Step 5: Commit** `[UI] Destacar o contexto do levantamento antes da primeira análise`

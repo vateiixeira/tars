@@ -352,3 +352,88 @@ def test_recover_interrupted_fails_sending_attach(store, mid):
     store.recover_interrupted()
     got = store.get_task(t.id)
     assert (got.attach_state, got.attach_error) == ("failed", store_mod._RESTART_JOB_ERROR)
+
+
+# -- preenchimento pelo último usado ----------------------------------------------
+
+
+def test_update_task_marks_assignee_and_team_manual(store, mid):
+    t = store.add_task(mid, {**BASE}, origin="manual")
+    t = store.update_task(t.id, {"assignee_id": 9})
+    assert t.suggested["fill"] == {"assignee_id": "manual"} and t.edited
+    t = store.update_task(t.id, {"team_id": None})
+    assert t.suggested["fill"] == {"assignee_id": "manual", "team_id": "manual"}
+
+
+def test_update_task_mark_only_keeps_edited_and_moves_updated_at(store, mid):
+    t = store.add_task(mid, {**BASE, "assignee_id": 9}, origin="claude",
+                       suggested={"assignee_id": 9, "assignee_hint": "Miguel"})
+    got = store.update_task(t.id, {"assignee_id": 9})  # mesmo valor: só a marca muda
+    assert got.suggested == {"assignee_id": 9, "assignee_hint": "Miguel",
+                             "fill": {"assignee_id": "manual"}}
+    assert not got.edited and got.updated_at != t.updated_at
+    again = store.update_task(t.id, {"assignee_id": 9})  # nada muda: nem `updated_at`
+    assert again.updated_at == got.updated_at
+    assert store.update_task(t.id, {"title": "B"}).suggested["fill"] == {"assignee_id": "manual"}
+
+
+def test_fill_task_is_compare_and_set_and_keeps_edited(store, mid):
+    t = store.add_task(mid, {**BASE, "product_id": 4}, origin="claude")
+    assert store.fill_task(t.id, {"assignee_id": 9}, t.updated_at)
+    got = store.get_task(t.id)
+    assert got.assignee_id == 9 and got.suggested["fill"] == {"assignee_id": "last"} and not got.edited
+    assert not store.fill_task(t.id, {"team_id": 3}, t.updated_at)  # updated_at antigo
+    assert store.get_task(t.id).team_id is None
+
+
+def test_fill_task_only_pending_and_only_fill_fields(store, mid):
+    t = store.add_task(mid, {**BASE, "product_id": 4}, origin="claude")
+    with pytest.raises(ValueError):
+        store.fill_task(t.id, {"title": "x"}, t.updated_at)
+    gone = store.update_task(t.id, {"discarded": True})
+    assert not store.fill_task(t.id, {"assignee_id": 9}, gone.updated_at)
+    c = store.add_task(mid, {**BASE, "product_id": 4}, origin="claude")
+    store.claim_tasks_for_create([c.id])
+    assert not store.fill_task(c.id, {"assignee_id": 9}, store.get_task(c.id).updated_at)
+    store.finish_create(c.id, "failed", error="x")
+    failed = store.get_task(c.id)
+    assert store.fill_task(c.id, {"assignee_id": 9}, failed.updated_at)
+    assert not store.fill_task("nada", {"assignee_id": 9}, failed.updated_at)
+
+
+def test_clear_filled_only_clears_last_marks_with_compare_and_set(store, mid):
+    t = store.add_task(mid, {**BASE, "product_id": 4}, origin="claude", suggested={"assignee_hint": "Miguel"})
+    store.fill_task(t.id, {"assignee_id": 9, "team_id": 3}, t.updated_at)
+    filled = store.get_task(t.id)
+    assert not store.clear_filled(t.id, ["assignee_id"], t.updated_at)  # updated_at antigo
+    assert store.clear_filled(t.id, ["assignee_id"], filled.updated_at)
+    got = store.get_task(t.id)
+    assert (got.assignee_id, got.team_id) == (None, 3) and not got.edited
+    assert got.suggested == {"assignee_hint": "Miguel", "fill": {"team_id": "last"}}
+    manual = store.update_task(t.id, {"team_id": 5})
+    assert not store.clear_filled(t.id, ["team_id"], manual.updated_at)  # escolha do operador fica
+    claude = store.add_task(mid, {**BASE, "product_id": 4, "assignee_id": 10}, origin="claude")
+    assert not store.clear_filled(claude.id, ["assignee_id"], claude.updated_at)  # sugestão do Claude fica
+    assert store.get_task(claude.id).assignee_id == 10 and store.get_task(t.id).team_id == 5
+    with pytest.raises(ValueError):
+        store.clear_filled(t.id, ["title"], manual.updated_at)
+
+
+def test_clear_filled_only_pending(store, mid):
+    t = store.add_task(mid, {**BASE, "product_id": 4}, origin="claude")
+    store.fill_task(t.id, {"assignee_id": 9}, t.updated_at)
+    store.claim_tasks_for_create([t.id])
+    assert not store.clear_filled(t.id, ["assignee_id"], store.get_task(t.id).updated_at)
+    assert store.get_task(t.id).assignee_id == 9
+
+
+def test_tasks_for_product_most_recent_first(store, mid):
+    a = store.add_task(mid, {**BASE, "product_id": 4}, origin="claude")
+    b = store.add_task(mid, {**BASE, "product_id": 4}, origin="claude")
+    store.add_task(mid, {**BASE, "product_id": 6}, origin="claude")
+    other = store.create_meeting(T0).id
+    c = store.add_task(other, {**BASE, "product_id": 4}, origin="claude")
+    store.update_task(a.id, {"title": "mexida"})
+    assert [t.id for t in store.tasks_for_product(4)] == [a.id, c.id, b.id]
+    assert [t.id for t in store.tasks_for_product(4, limit=1)] == [a.id]
+    assert store.tasks_for_product(99) == []

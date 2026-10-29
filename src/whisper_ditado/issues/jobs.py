@@ -23,7 +23,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from whisper_ditado.issues import runner
+from whisper_ditado.issues import autofill, runner
 from whisper_ditado.issues.client import IssueClient, IssueError, OptionsCache, issue_fields_from
 from whisper_ditado.issues.scan import run_scan
 from whisper_ditado.prints.files import print_path
@@ -199,6 +199,7 @@ class PostMeetingJobs:
                 with self._claim_lock:
                     cancellation.check()
                     self._store.replace_scan_tasks(meeting_id, [i.as_store_item(stage_id, ci.labels) for i in items])
+                    self._fill_after_scan(meeting_id, options)
                     self._finish_scan(meeting_id, cancellation, "done")
         except ProcessCancelled:
             pass  # cancel_scan já publicou o estado; mantém as sugestões anteriores
@@ -209,6 +210,13 @@ class PostMeetingJobs:
             with self._claim_lock:
                 self._finish_scan(meeting_id, cancellation, "error", SCAN_UNEXPECTED)
             self._log_unexpected(meeting_id, "Falha no levantamento de %s")
+
+    def _fill_after_scan(self, meeting_id: str, options) -> None:
+        """Completa pelo último usado os cartões novos; uma falha aqui não derruba o levantamento."""
+        try:
+            autofill.fill_from_sources(self._store, options, meeting_id)
+        except Exception:
+            log.exception("Falha ao preencher pelo último usado as sugestões de %s", meeting_id)
 
     def _finish_scan(self, meeting_id: str, cancellation: Cancellation, state: str,
                      error: str | None = None) -> None:
@@ -254,6 +262,8 @@ class PostMeetingJobs:
             log.exception("Falha ao criar a sugestão %s", task_id)
             self._store.finish_create(task_id, "uncertain", error=CREATE_UNEXPECTED)
             return task.meeting_id
+        if outcome.state == "created":
+            self._propagate_created(task_id)
         if outcome.state == "created" and outcome.number is not None:
             try:
                 self._attach(task_id, outcome.number, outcome.url)
@@ -262,6 +272,15 @@ class PostMeetingJobs:
                 log.exception("Falha inesperada no anexo dos prints da sugestão %s", task_id)
                 self._fail_sending_attach(task_id)
         return task.meeting_id
+
+    def _propagate_created(self, task_id: str) -> None:
+        """Leva responsável e equipe da issue criada aos cartões irmãos (nunca afeta a criação)."""
+        try:
+            task = self._store.get_task(task_id)
+            if task is not None:
+                autofill.propagate(self._store, self._options.peek(), task)
+        except Exception:
+            log.exception("Falha ao propagar o responsável e a equipe da sugestão %s", task_id)
 
     def _attach(self, task_id: str, number: int, url: str | None) -> None:
         """Anexa à issue criada os prints da sugestão que ainda existem em disco (melhor esforço)."""

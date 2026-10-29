@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Cartão de uma tarefa sugerida: tipo, título, descrição (Markdown cru num textarea), projeto,
+// Cartão de uma tarefa sugerida: tipo, título, descrição (Markdown cru num textarea),
 // seletores do MCP de issues, trecho que justifica, estado de criação. Só apresenta e emite: quem salva,
 // cria e descarta é o `TasksTab`. Texto do Claude é sempre interpolado como texto (nada de HTML bruto).
 import { computed, reactive, ref, watch } from "vue";
@@ -54,7 +54,6 @@ const noOptions = computed(() => props.options === null);
 const draft = reactive({
   title: props.task.title,
   description: props.task.description,
-  project: props.task.project ?? "",
 });
 watch(
   () => props.task.title,
@@ -69,10 +68,6 @@ watch(
   () => props.task.description,
   (v) => (draft.description = v),
 );
-watch(
-  () => props.task.project,
-  (v) => (draft.project = v ?? ""),
-);
 
 function saveTitle(): void {
   if (draft.title !== props.task.title)
@@ -82,11 +77,6 @@ function saveDescription(): void {
   if (draft.description !== props.task.description)
     emit("update", props.task.id, { description: draft.description });
 }
-function saveProject(): void {
-  const next = draft.project.trim() === "" ? null : draft.project;
-  if (next !== props.task.project)
-    emit("update", props.task.id, { project: next });
-}
 
 type IdKey = "assignee_id" | "team_id" | "product_id" | "stage_id";
 interface Choice {
@@ -95,15 +85,24 @@ interface Choice {
   selected: boolean;
 }
 
-/** Opções da lista + o valor atual (`#id`) quando ele não está na lista; marca a sugestão do Claude. */
+/** Opções da lista + o valor atual (`#id`) quando ele não está na lista; marca a sugestão do Claude
+ * e, no responsável e na equipe, o valor preenchido sozinho com o último usado. A sugestão tem precedência. */
 function choices(list: IssueOption[] | undefined, key: IdKey): Choice[] {
   const current = props.task[key];
   const suggested =
     props.task.suggested?.[key as "assignee_id" | "team_id" | "product_id"] ??
     null;
+  const fromLast =
+    (key === "assignee_id" || key === "team_id") &&
+    props.task.suggested?.fill?.[key] === "last";
+  const label = (o: IssueOption): string => {
+    if (o.id === suggested) return `${o.name} (sugestão)`;
+    if (fromLast && o.id === current) return `${o.name} (último usado)`;
+    return o.name;
+  };
   const out: Choice[] = (list ?? []).map((o) => ({
     id: o.id,
-    label: o.id === suggested ? `${o.name} (sugestão)` : o.name,
+    label: label(o),
     selected: o.id === current,
   }));
   if (current !== null && !out.some((o) => o.id === current))
@@ -134,14 +133,14 @@ function onPriority(ev: Event): void {
 // Dica do Claude que não casou com ninguém do MCP de issues (o id veio vazio).
 const assigneeHint = computed(() => {
   const s = props.task.suggested;
-  return s && s.assignee_id === null && props.task.assignee_id === null
-    ? s.assignee_hint
+  return s && (s.assignee_id ?? null) === null && props.task.assignee_id === null
+    ? (s.assignee_hint ?? null)
     : null;
 });
 const teamHint = computed(() => {
   const s = props.task.suggested;
-  return s && s.team_id === null && props.task.team_id === null
-    ? s.team_hint
+  return s && (s.team_id ?? null) === null && props.task.team_id === null
+    ? (s.team_hint ?? null)
     : null;
 });
 
@@ -294,15 +293,6 @@ function informNumber(): void {
     </label>
 
     <div class="grid">
-      <label
-        >Projeto
-        <input
-          v-model="draft.project"
-          aria-label="Projeto"
-          :disabled="locked"
-          @change="saveProject"
-        />
-      </label>
       <label
         >Produto *
         <select

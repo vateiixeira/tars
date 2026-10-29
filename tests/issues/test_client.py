@@ -685,3 +685,25 @@ def test_attach_no_calls_and_claude_error_is_failed(env, jpgs):
     env.scenario(final="SEM_SUPORTE", final_is_error=True)
     out = env.client.attach_prints(217, None, jpgs)
     assert out.state == "failed" and "não concluiu" in out.error
+
+
+def test_parse_options_keeps_people_teams_and_products():
+    from whisper_ditado.issues.client import _parse_options
+    raw = json.dumps({"voce": {"id": 1, "username": "vi"},
+        "pessoas": [{"id": 9, "username": "miguel", "equipes": [3, True, "x"], "produtos": [4]},
+                    {"id": 10, "username": "ana"}],
+        "equipes": [{"id": 3, "name": "Dev"}], "produtos": [{"id": 4, "name": "dash"}], "etapas": []})
+    opts = _parse_options(raw)
+    assert opts.person(9).teams == (3,) and opts.person(9).products == (4,)
+    assert opts.person(10).teams == () and opts.person(10).products == ()
+    assert opts.to_json()["people"][0] == {"id": 9, "name": "miguel"}
+
+
+def test_coherent():
+    opts = IssueOptions("vi", people=[Option(9, "M", teams=(3,), products=(4,)), Option(10, "A")],
+                        teams=[], products=[], stages=[], fetched_at=datetime.now())
+    assert opts.coherent(9, 3, None) and opts.coherent(9, None, 4) and opts.coherent(9, 99, 4)
+    assert not opts.coherent(9, 99, 98)
+    assert opts.coherent(9, None, None)          # nada para comparar
+    assert opts.coherent(10, 99, 98)             # pessoa sem listas (outro MCP)
+    assert opts.coherent(77, 3, 4)               # pessoa desconhecida: existência é checada em outro lugar

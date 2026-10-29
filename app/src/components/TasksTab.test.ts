@@ -93,19 +93,52 @@ const row = (w: ReturnType<typeof mount>, id: string) => w.get(`[data-row-id="${
 const openId = (w: ReturnType<typeof mount>) => w.get(".detail [data-task-id]").attributes("data-task-id");
 
 describe("TasksTab", () => {
-  it("antes do primeiro levantamento mostra o botão Levantar tarefas e o campo de contexto", async () => {
+  it("antes do primeiro levantamento mostra a caixa de contexto em destaque e gera com o texto", async () => {
     const scanTasks = vi.fn(async () => ({ state: "running" as const }));
     const { w } = await mountTab(payload([], { scan: null }), { scanTasks });
-    expect(w.text()).toContain("Revise os prints e clique em Levantar tarefas.");
+    expect(w.text()).toContain("Quer orientar as sugestões de tarefas?");
+    expect(w.find(".scan-context").exists()).toBe(false);
+    expect(w.text()).not.toContain("Revise os prints e clique em Levantar tarefas.");
     expect(w.text()).not.toContain("Refazer sugestões");
-    expect(w.get(".scan-context summary").text()).toBe("Contexto para o levantamento (opcional)");
+    await w.get("textarea").setValue("  Foque no checkout.  ");
+    await btn(w, "Gerar tarefas").trigger("click");
+    await flushPromises();
+    expect(scanTasks).toHaveBeenCalledWith("m1", "Foque no checkout.");
+  });
+
+  it("'Agora não' esconde a caixa e deixa o contexto recolhido, preservando o texto", async () => {
+    const { w } = await mountTab(payload([], { scan: null }));
+    await w.get("textarea").setValue("Foque no checkout.");
+    await btn(w, "Agora não").trigger("click");
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
+    expect(w.get(".scan-context summary").text()).toBe("Orientar as sugestões (preenchido)");
+    expect((w.get(".scan-context textarea").element as HTMLTextAreaElement).value).toBe("Foque no checkout.");
+    expect(w.text()).toContain("Revise os prints e clique em Levantar tarefas.");
+  });
+
+  it("'Agora não' sem texto deixa o resumo como opcional", async () => {
+    const { w } = await mountTab(payload([], { scan: null }));
+    await btn(w, "Agora não").trigger("click");
+    expect(w.get(".scan-context summary").text()).toBe("Orientar as sugestões (opcional)");
+  });
+
+  it("depois do levantamento a caixa não aparece e o contexto fica recolhido", async () => {
+    const { w } = await mountTab(payload([task()]));
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
+    expect(w.get(".scan-context summary").text()).toBe("Orientar as sugestões (opcional)");
     expect(w.get(".scan-context").text()).toContain(
       "O texto será usado junto com a transcrição e os prints ao levantar as tarefas. Tarefas editadas, descartadas ou já enviadas são preservadas.",
     );
-    await w.get(".scan-context textarea").setValue("  Foque no checkout.  ");
-    await btn(w, "Levantar tarefas").trigger("click");
-    await flushPromises();
-    expect(scanTasks).toHaveBeenCalledWith("m1", "Foque no checkout.");
+  });
+
+  it("com o fluxo desligado a caixa não aparece", async () => {
+    const { w } = await mountTab(payload([], { enabled: false, scan: null }));
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
+  });
+
+  it("com o levantamento rodando a caixa não aparece", async () => {
+    const { w } = await mountTab(payload([], { scan: { state: "running", error: null, updated_at: "x" } }));
+    expect(w.text()).not.toContain("Quer orientar as sugestões de tarefas?");
   });
 
   it("deixa o botão de levantamento desabilitado até a primeira carga terminar", async () => {
@@ -167,7 +200,7 @@ describe("TasksTab", () => {
     await flushPromises();
     expect(w.text()).toContain("Levantamento cancelado.");
     expect(w.text()).toContain(task().title);
-    expect(w.find(".scan-status").exists()).toBe(false);
+    expect(w.find(".scan-box").exists()).toBe(false);
     expect(btn(w, "Refazer sugestões").attributes("disabled")).toBeUndefined();
     expect(context.attributes("disabled")).toBeUndefined();
     expect((context.element as HTMLTextAreaElement).value).toBe("Foque no checkout.");
@@ -265,6 +298,19 @@ describe("TasksTab", () => {
     expect(updateTask).toHaveBeenLastCalledWith("t1", { assignee_id: null });
   });
 
+  it.each([
+    ["Responsável", "assignee_id", "2", "Miguel"],
+    ["Equipe", "team_id", "11", "Frontend"],
+  ] as const)("%s trocado à mão perde o '(último usado)' antes de recarregar", async (label, key, value, name) => {
+    const updateTask = vi.fn(() => new Promise<never>(() => {})); // o servidor ainda não respondeu
+    const t = task({ suggested: { fill: { [key]: "last" } } });
+    const { w } = await mountTab(payload([t]), { updateTask });
+    await field(w, label).setValue(value);
+    await flushPromises();
+    const select = field(w, label).element as HTMLSelectElement;
+    expect(select.selectedOptions[0].text).toBe(name);
+  });
+
   it("dica sem id: 'Sugestão do Claude: Miguel — não encontrado no MCP de issues'", async () => {
     const t = task({
       assignee_id: null,
@@ -349,7 +395,6 @@ describe("TasksTab", () => {
         kind: "feature",
         title: "Título novo",
         description: "## Problema\n\nHoje é um por um.",
-        project: "ecommerce",
         product_id: 20,
         assignee_id: 1,
         team_id: 10,
@@ -412,7 +457,7 @@ describe("TasksTab", () => {
     expect(link.text()).toBe("#217");
     await link.trigger("click");
     expect(openUrl).toHaveBeenCalledWith("https://issues.example.test/issues/217");
-    for (const label of ["Título", "Descrição (Markdown)", "Projeto", "Responsável", "Equipe", "Produto", "Etapa", "Prioridade", "Tipo"]) {
+    for (const label of ["Título", "Descrição (Markdown)", "Responsável", "Equipe", "Produto", "Etapa", "Prioridade", "Tipo"]) {
       expect(field(w, label).attributes("disabled"), label).toBeDefined();
     }
     expect(row(w, "t1").text()).toContain("#217");
@@ -852,6 +897,72 @@ describe("TasksTab", () => {
       (input.element as HTMLInputElement).value = " ";
       await input.trigger("input");
       expect(w.get('[data-task-id="t1"]').text()).toContain("Falta: título");
+    });
+  });
+  describe("carregamento", () => {
+    const RUNNING = { state: "running" as const, error: null, updated_at: "x" };
+
+    it("levantando: caixa com spinner, subtítulo, barra e esqueleto sem itens", async () => {
+      const { w } = await mountTab(payload([], { scan: RUNNING }));
+      const box = w.get(".scan-box");
+      expect(box.text()).toContain("Levantando tarefas…");
+      expect(box.text()).toContain("O Claude está lendo a transcrição e os prints. Isso pode levar alguns minutos.");
+      expect(box.find('[role="status"]').exists()).toBe(true);
+      expect(box.find(".scan-bar").exists()).toBe(true);
+      expect(box.text()).toContain("Cancelar levantamento");
+      expect(w.get(".skeleton").attributes("aria-hidden")).toBe("true");
+    });
+
+    it("levantando com itens: sem esqueleto, com a lista", async () => {
+      const { w } = await mountTab(payload([task()], { scan: RUNNING }));
+      expect(w.find(".scan-box").exists()).toBe(true);
+      expect(w.find(".skeleton").exists()).toBe(false);
+      expect(w.find(".panes").exists()).toBe(true);
+    });
+
+    it("sem levantamento rodando não há caixa nem esqueleto", async () => {
+      const { w } = await mountTab(payload([]));
+      expect(w.find(".scan-box").exists()).toBe(false);
+      expect(w.find(".skeleton").exists()).toBe(false);
+    });
+
+    it("cancelando: a caixa diz 'Cancelando levantamento…'", async () => {
+      let finish!: (v: unknown) => void;
+      const cancelTasksScan = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+      const { w } = await mountTab(payload([], { scan: RUNNING }), { cancelTasksScan });
+      await btn(w, "Cancelar levantamento").trigger("click");
+      expect(w.get(".scan-box").text()).toContain("Cancelando levantamento…");
+      finish({ scan: RUNNING });
+      await flushPromises();
+    });
+
+    it("criação em andamento no servidor: cartão esmaecido com a mensagem por cima", async () => {
+      const { w } = await mountTab(payload([task({ create_state: "creating" })]));
+      expect(w.find(".card-wrap.busy").exists()).toBe(true);
+      expect(w.get(".card-overlay").text()).toContain("Criando a issue no MCP de issues…");
+      expect(w.get(".card-overlay").attributes("role")).toBe("status");
+      expect(w.find(".detail [data-task-id]").exists()).toBe(true);
+    });
+
+    it("criando no clique: cartão esmaecido e tag da lista com spinner", async () => {
+      let finish!: (v: unknown) => void;
+      const createTasks = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+      const { w } = await mountTab(payload([task()]), { createTasks });
+      expect(w.find(".card-wrap.busy").exists()).toBe(false);
+      expect(w.find(".card-overlay").exists()).toBe(false);
+      await btn(w, "Criar issue").trigger("click");
+      expect(w.find(".card-wrap.busy").exists()).toBe(true);
+      expect(w.get(".card-overlay").text()).toContain("Criando a issue no MCP de issues…");
+      expect(row(w, "t1").get(".tag").find(".spinner").exists()).toBe(true);
+      finish({ accepted: ["t1"], rejected: [] });
+      await flushPromises();
+    });
+
+    it("sem criação não há overlay", async () => {
+      const { w } = await mountTab(payload([task()]));
+      expect(w.find(".card-wrap").exists()).toBe(true);
+      expect(w.find(".card-wrap.busy").exists()).toBe(false);
+      expect(w.find(".card-overlay").exists()).toBe(false);
     });
   });
 });
