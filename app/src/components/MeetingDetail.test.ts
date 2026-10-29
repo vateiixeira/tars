@@ -178,11 +178,12 @@ describe("MeetingDetail", () => {
 
   it("mostra a aba Prints (N) entre Transcrição e Tarefas só quando há prints", async () => {
     const { w } = await mountDetail(detail());
-    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição"]);
+    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição", "Tarefas"]);
 
     const printBlob = vi.fn(async () => new Blob(["i"]));
     const { w: w2 } = await mountDetail(detail({ prints: [aPrint(), aPrint({ id: "p2", label: "P2", at_s: 40 })] }), { printBlob });
-    expect(w2.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição", "Prints (2)"]);
+    expect(w2.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição", "Prints2", "Tarefas"]);
+    expect(w2.get("#tab-prints .count").text()).toBe("2");
     await w2.get("#tab-prints").trigger("click");
     await flushPromises();
     expect(w2.findAll(".print")).toHaveLength(2);
@@ -233,9 +234,9 @@ describe("MeetingDetail", () => {
     await w.get(".print-badge").trigger("click");
     await flushPromises();
     expect(w.find(".print.focused").exists()).toBe(true);
-    await w.get("#open-tasks").trigger("click");
+    await w.get("#tab-tasks").trigger("click");
     await flushPromises();
-    await w.get(".tasks-head button").trigger("click");
+    await w.get("#tab-prints").trigger("click");
     await flushPromises();
     expect(w.get("#tab-prints").attributes("aria-selected")).toBe("true");
     expect(w.find(".print").exists()).toBe(true);
@@ -357,6 +358,25 @@ describe("MeetingDetail", () => {
     await flushPromises();
     expect(w.get(".md h2").text()).toBe("Pontos");
     expect(w.emitted("changed")?.[0]).toEqual(["m1"]);
+  });
+
+  it("a aba Resumo tem Copiar, Refazer e Exportar nas ações", async () => {
+    let finish!: () => void;
+    const summarize = vi.fn(() => new Promise<{ summary: string }>((r) => (finish = () => r({ summary: "## Novo" }))));
+    const { w } = await mountDetail(detail({ summary: "## Pontos" }), { summarize });
+    expect(w.get("#tab-summary").attributes("aria-selected")).toBe("true");
+    const btn = (label: string) => w.get(".actions").findAll("button").find((b) => b.text().includes(label));
+    expect(w.get(".actions").findAll("button").map((b) => b.text())).toEqual(["Copiar", "Refazer", "Exportar .md", "Ouvir áudio"]);
+    await btn("Copiar")!.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("## Pontos");
+    expect(btn("Copiado")).toBeDefined();
+    expect(w.text()).toContain("Resumo copiado.");
+    await btn("Refazer")!.trigger("click");
+    expect(summarize).toHaveBeenCalledWith("m1");
+    expect(btn("Refazer")!.attributes("disabled")).toBeDefined();
+    finish();
+    await flushPromises();
   });
 
   it("Summary shows backend error message", async () => {
@@ -573,29 +593,65 @@ describe("MeetingDetail", () => {
     expect(w.text()).not.toContain("separando vozes");
   });
 
-  it("opens tasks as a full page and returns to the previous meeting tab", async () => {
-    const listTasks = vi.fn(async () => ({ enabled: false, scan: null, items: [] }));
+  it("Tarefas é uma aba do mesmo tablist, carregada só ao abrir e com o contador da aba", async () => {
+    const item = {
+      id: "t1", meeting_id: "m1", origin: "claude" as const, position: 0, kind: "feature" as const,
+      title: "Emitir NFSe em lote", description: "", project: null, product_id: null, assignee_id: null,
+      team_id: null, stage_id: null, priority: "medium" as const, suggested: null, evidence: [],
+      edited: false, discarded: false, create_state: "none" as const, create_error: null,
+      issue_number: null, issue_url: null, repeats_number: null,
+      print_ids: [], attach_state: "none", attach_error: null,
+    };
+    const listTasks = vi.fn(async () => ({ enabled: true, scan: null, items: [item, { ...item, id: "t2" }] }));
     const issueOptions = vi.fn(async () => {
       throw new Error("desligado");
     });
     const { w } = await mountDetail(detail(), { listTasks, issueOptions });
     expect(listTasks).not.toHaveBeenCalled();
-    const tabs = w.findAll('[role="tab"]').map((t) => t.text());
-    expect(tabs).toEqual(["Resumo", "Transcrição"]);
-    await w.get('#tab-summary').trigger("click");
-    await w.get('#open-tasks').trigger("click");
+    expect(w.find("#open-tasks").exists()).toBe(false);
+    const summary = w.get("#tab-summary");
+    await summary.trigger("keydown", { key: "End" });
     await flushPromises();
+    const tasks = w.get("#tab-tasks");
+    expect(tasks.attributes("aria-selected")).toBe("true");
+    expect(tasks.attributes("aria-controls")).toBe("panel-tasks");
+    expect(w.get("#panel-tasks").attributes("role")).toBe("tabpanel");
+    expect(w.get("#panel-tasks").attributes("aria-labelledby")).toBe("tab-tasks");
     expect(listTasks).toHaveBeenCalledWith("m1");
-    expect(w.text()).toContain("O criador de issues está desligado");
-    expect(w.get('.tasks-head').isVisible()).toBe(true);
-    expect(w.get('.head').isVisible()).toBe(false);
-    expect(w.get('.tabs-row').isVisible()).toBe(false);
-    expect(w.emitted('tasksView')?.slice(-1)[0]).toEqual([true]);
-    await w.get('.tasks-head button').trigger("click");
+    expect(w.get("#tab-tasks .count").text()).toBe("2");
+    // cabeçalho e abas continuam à vista; o App só recolhe a biblioteca
+    expect(w.get(".head").isVisible()).toBe(true);
+    expect(w.find(".tasks-head").exists()).toBe(false);
+    expect(w.emitted("tasksView")?.slice(-1)[0]).toEqual([true]);
+    await tasks.trigger("keydown", { key: "Home" });
+    expect(w.get("#tab-summary").attributes("aria-selected")).toBe("true");
+    expect(w.emitted("tasksView")?.slice(-1)[0]).toEqual([false]);
+    // a aba continua montada (sem recarregar) ao voltar
+    await w.get("#tab-summary").trigger("keydown", { key: "ArrowLeft" });
     await flushPromises();
-    expect(w.get('#tab-summary').attributes('aria-selected')).toBe('true');
-    expect(w.get('.head').attributes('style')).not.toContain('display: none');
-    expect(w.emitted('tasksView')?.slice(-1)[0]).toEqual([false]);
+    expect(w.get("#tab-tasks").attributes("aria-selected")).toBe("true");
+    expect(listTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it("lembra a aba de cada reunião, inclusive Tarefas", async () => {
+    const listTasks = vi.fn(async () => ({ enabled: false, scan: null, items: [] }));
+    const issueOptions = vi.fn(async () => {
+      throw new Error("desligado");
+    });
+    const getMeeting = vi.fn(async (id: string) => detail({ id }));
+    installStore({ getMeeting, listTasks, issueOptions });
+    const tabs = new Map<string, string>();
+    const w = mount(MeetingDetail, { props: { meetingId: "m1" }, global: { provide: { "meeting-tabs": tabs } } });
+    await flushPromises();
+    await w.get("#tab-tasks").trigger("click");
+    await w.setProps({ meetingId: "m2" });
+    await flushPromises();
+    expect(w.get("#tab-transcript").attributes("aria-selected")).toBe("true");
+    await w.setProps({ meetingId: "m1" });
+    await flushPromises();
+    expect(w.get("#tab-tasks").attributes("aria-selected")).toBe("true");
+    expect(listTasks).toHaveBeenLastCalledWith("m1");
+    expect(w.emitted("tasksView")?.slice(-1)[0]).toEqual([true]);
   });
 
   it("preserves tasks and context when going back to the meeting and reopening tasks", async () => {
@@ -617,15 +673,15 @@ describe("MeetingDetail", () => {
       throw new Error("desligado");
     });
     const { w } = await mountDetail(detail(), { listTasks, updateTask, issueOptions });
-    await w.get('#open-tasks').trigger("click");
+    await w.get('#tab-tasks').trigger("click");
     await flushPromises();
     await w.get('.scan-context textarea').setValue('Priorize o checkout.');
     await w.findAll("button").find((b) => b.text() === "Descartar")!.trigger("click");
     await flushPromises();
-    await w.get('.tasks-head button').trigger("click");
+    await w.get('#tab-transcript').trigger("click");
     await flushPromises();
     expect(w.text()).toContain("Bom dia");
-    await w.get('#open-tasks').trigger("click");
+    await w.get('#tab-tasks').trigger("click");
     await flushPromises();
     expect(w.findAll("button").some((b) => b.text() === "Desfazer")).toBe(true);
     expect(listTasks).toHaveBeenCalledTimes(1);
@@ -642,14 +698,14 @@ describe("MeetingDetail", () => {
     void ctx;
     const w = mount(MeetingDetail, { props: { meetingId: "m1" } });
     await flushPromises();
-    await w.get('#open-tasks').trigger("click");
+    await w.get('#tab-tasks').trigger("click");
     await flushPromises();
     expect(listTasks).toHaveBeenCalledWith("m1");
     await w.setProps({ meetingId: "m2" });
     await flushPromises();
     expect(listTasks).toHaveBeenCalledTimes(1); // aba volta à Transcrição: a nova reunião não carrega tarefas
     expect(w.emitted('tasksView')?.slice(-1)[0]).toEqual([false]);
-    await w.get('#open-tasks').trigger("click");
+    await w.get('#tab-tasks').trigger("click");
     await flushPromises();
     expect(listTasks).toHaveBeenLastCalledWith("m2");
   });
@@ -689,7 +745,7 @@ describe("MeetingDetail", () => {
       username: "vi", people: [], teams: [], products: [], stages: [], fetched_at: "2026-10-20T10:00:00",
     }));
     const { w } = await mountDetail(detail(), { audioBlob, listTasks, issueOptions });
-    await w.get('#open-tasks').trigger("click");
+    await w.get('#tab-tasks').trigger("click");
     await flushPromises();
     await w.get(".evidence .play").trigger("click");
     await flushPromises();

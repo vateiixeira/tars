@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // Aba "Resumo": estados sem resumo / carregando / erro / resumo em Markdown. Só apresenta: quem
-// chama o Claude por clique é o `MeetingDetail`, que recebe `summarize`. O resumo também pode vir
-// automático ao fim do processamento (`job`: rodando, ou falhou sem deixar resumo).
-import { computed, onBeforeUnmount, ref } from "vue";
+// chama o Claude por clique é o `MeetingDetail`, que recebe `summarize` (Copiar e Refazer ficam
+// nas ações da aba, no detalhe). O resumo também pode vir automático ao fim do processamento
+// (`job`: rodando, ou falhou sem deixar resumo).
+import { computed } from "vue";
 import AppIcon from "./ui/AppIcon.vue";
 import MarkdownIt from "markdown-it";
 import type { JobState } from "../api/types";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 const props = defineProps<{ summary: string | null; loading: boolean; error: string | null; job: JobState | null }>();
 const emit = defineEmits<{ summarize: [] }>();
@@ -24,43 +24,16 @@ const autoError = computed(() =>
 );
 
 const rendered = computed(() => (props.summary ? md.render(props.summary) : ""));
-
-const copied = ref(false);
-const copyError = ref<string | null>(null);
-let copiedTimer: ReturnType<typeof setTimeout> | undefined;
-
-async function copy(): Promise<void> {
-  if (!props.summary) return;
-  try {
-    await writeText(props.summary);
-    copyError.value = null;
-    copied.value = true;
-    clearTimeout(copiedTimer);
-    copiedTimer = setTimeout(() => (copied.value = false), 2000);
-  } catch (e) {
-    copyError.value = e instanceof Error ? e.message : String(e);
-  }
-}
-
-onBeforeUnmount(() => clearTimeout(copiedTimer));
 </script>
 
 <template>
   <div class="summary">
-    <span class="sr-only" role="status">{{ copied ? 'Resumo copiado.' : '' }}</span>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="autoError" class="error" role="alert">{{ autoError }}</p>
-    <p v-if="copyError" class="error" role="alert">{{ copyError }}</p>
 
     <div v-if="busy" class="summary-busy" role="status"><p class="muted">O Claude está resumindo…</p><button type="button" class="btn" disabled aria-busy="true">Resumindo…</button></div>
 
-    <template v-if="summary">
-      <div class="tools">
-        <button type="button" class="btn" :disabled="busy" @click="copy"><AppIcon name="copy" :size="16" /> {{ copied ? "Copiado" : "Copiar" }}</button>
-        <button type="button" class="btn" :disabled="busy" @click="emit('summarize')"><AppIcon name="refresh" :size="16" /> Refazer</button>
-      </div>
-      <div class="md" v-html="rendered"></div>
-    </template>
+    <div v-if="summary" class="md" v-html="rendered"></div>
     <template v-else-if="!busy">
       <p class="muted">Nenhum resumo ainda.</p>
       <button type="button" class="btn pri" @click="emit('summarize')"><AppIcon name="file" :size="16" /> Resumir</button>
@@ -80,11 +53,6 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
 .error {
   color: var(--danger);
   margin: 0 0 10px;
-}
-.tools {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
 }
 .md {
   line-height: 1.7;

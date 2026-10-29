@@ -28,6 +28,7 @@ import type {
 import { notifyMeetingsChanged } from "../composables/useMeetingsRevision";
 import { useStatus } from "../composables/useStatus";
 import { alertLines, exportFileName, transcriptText } from "../lib/meeting";
+import AppButton from "./ui/AppButton.vue";
 import AppIcon from "./ui/AppIcon.vue";
 import AppDialog from "./ui/AppDialog.vue";
 import SkeletonLines from "./ui/SkeletonLines.vue";
@@ -86,40 +87,26 @@ function errorText(e: unknown): string {
 const stage = ref<ProgressStage | null>(null);
 type MeetingTab = "transcript" | "summary" | "prints" | "tasks";
 const tab = ref<MeetingTab>("transcript");
-const previousTab = ref<"transcript" | "summary" | "prints">("transcript");
+// Aba Tarefas aberta: o App recolhe a biblioteca para dar largura às duas colunas das tarefas.
 const tasksActive = computed(() => tab.value === "tasks" && meeting.value?.status === "ready");
-const tasksBack = ref<HTMLButtonElement | null>(null);
-function openTasks(): void {
-  if (tab.value !== "tasks") previousTab.value = tab.value;
-  printFocus.value = null; // ao voltar, a aba Prints não deve rolar de novo até o print antigo
-  speakerMenu.value = null;
-  tab.value = "tasks";
-}
-function closeTasks(): void {
-  tab.value = previousTab.value;
-}
-watch(tasksActive, (active, previous) => {
-  emit("tasksView", active);
-  void nextTick(() => {
-    if (active) tasksBack.value?.focus();
-    else if (previous) document.getElementById("open-tasks")?.focus();
-  });
-});
+watch(tasksActive, (active) => emit("tasksView", active));
 const tabMemory = inject<Map<string, string>>("meeting-tabs", new Map());
 let didChooseTab = false;
-const detailTabs = computed<{ id: MeetingTab; label: string }[]>(() => {
-  const tabs: { id: MeetingTab; label: string }[] = [
+// Tarefas da reunião (não descartadas), informadas pela aba depois que ela carrega.
+const tasksCount = ref<number | null>(null);
+const detailTabs = computed<{ id: MeetingTab; label: string; count?: number }[]>(() => {
+  const tabs: { id: MeetingTab; label: string; count?: number }[] = [
     { id: "summary", label: "Resumo" },
     { id: "transcript", label: "Transcrição" },
   ];
-  const count = meeting.value?.prints.length ?? 0;
-  if (count) tabs.push({ id: "prints", label: `Prints (${count})` });
+  const prints = meeting.value?.prints.length ?? 0;
+  if (prints) tabs.push({ id: "prints", label: "Prints", count: prints });
+  tabs.push({ id: "tasks", label: "Tarefas", count: tasksCount.value || undefined });
   return tabs;
 });
 // Sem prints (ex.: o último foi apagado) a aba some: volta para a transcrição.
 watch(detailTabs, (tabs) => {
-  if (!tabs.some((t) => t.id === tab.value) && tab.value !== "tasks") tab.value = "transcript";
-  if (previousTab.value === "prints" && !tabs.some((t) => t.id === "prints")) previousTab.value = "transcript";
+  if (!tabs.some((t) => t.id === tab.value)) tab.value = "transcript";
 });
 const printFocus = ref<string | null>(null);
 function openPrint(id: string): void {
@@ -162,7 +149,6 @@ async function load(): Promise<void> {
     meeting.value = result;
     if (!didChooseTab) {
       didChooseTab = true;
-      previousTab.value = result.summary ? "summary" : "transcript";
       const remembered = tabMemory.get(props.meetingId) as MeetingTab | undefined;
       tab.value =
         remembered && (remembered !== "prints" || result.prints.length)
@@ -229,7 +215,8 @@ function cancelDelete(): void {
 
 // -- ações ----------------------------------------------------------------------------------
 
-const copied = ref(false);
+// O que acabou de ser copiado (o botão mostra "Copiado" por 2 s).
+const copied = ref<"transcript" | "summary" | null>(null);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 // Ações em andamento (várias podem rodar juntas; cada uma só habilita o próprio botão ao terminar).
 // A chave leva o id da reunião: uma ação que ficou para trás ao trocar de reunião não trava os
@@ -272,16 +259,21 @@ async function run(name: string, fn: () => Promise<void>): Promise<void> {
   }
 }
 
-function copyTranscript(): Promise<void> {
-  return run("copy", async () => {
-    const m = meeting.value;
-    if (!m) return;
-    await writeText(transcriptText(m.segments, m.speakers));
-    copied.value = true;
+function copyText(what: "transcript" | "summary", text: () => string | null): Promise<void> {
+  return run(`copy-${what}`, async () => {
+    const value = text();
+    if (!value) return;
+    await writeText(value);
+    copied.value = what;
     clearTimeout(copiedTimer);
-    copiedTimer = setTimeout(() => (copied.value = false), 2000);
+    copiedTimer = setTimeout(() => (copied.value = null), 2000);
   });
 }
+const copyTranscript = () =>
+  copyText("transcript", () => (meeting.value ? transcriptText(meeting.value.segments, meeting.value.speakers) : null));
+const copySummary = () => copyText("summary", () => meeting.value?.summary ?? null);
+// Resumindo: por clique ou pelo resumo automático (job rodando).
+const summarizing = computed(() => isBusy("summarize") || meeting.value?.summary_job?.state === "running");
 
 /** Com prints, exporta o .zip (markdown + imagens); sem prints, só o .md. */
 function exportMeeting(): Promise<void> {
@@ -432,7 +424,7 @@ watch(
     tab.value = "transcript";
     printFocus.value = null;
     tasksOpenedFor.value = null;
-    previousTab.value = "transcript";
+    tasksCount.value = null;
     stopAudio();
     void load();
   },
@@ -450,7 +442,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="detail" :class="{ 'tasks-page': tasksActive }">
+  <section class="detail">
     <div v-if="loadError && !meeting" class="state">
       <p class="banner error" role="alert">
         <AppIcon name="warning" :size="18" /><span>{{ loadError }}</span>
@@ -463,7 +455,6 @@ onBeforeUnmount(() => {
     </div>
     <template v-else>
       <MeetingHeader
-        v-show="!tasksActive"
         ref="header"
         :meeting="meeting"
         :connected="connected"
@@ -580,89 +571,55 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <template v-else>
-        <header v-show="tasksActive" class="tasks-head">
-          <button ref="tasksBack" type="button" class="btn ghost" @click="closeTasks">
-            <AppIcon name="arrow" :size="18" />Voltar à reunião
-          </button>
-          <div class="tasks-heading">
-            <h1 id="tasks-heading">Tarefas</h1>
-            <p>{{ title }}</p>
-          </div>
-        </header>
-        <div v-show="!tasksActive" class="tabs-row">
-          <div class="tabs" role="tablist" aria-label="Conteúdo da reunião">
-            <button
-              v-for="(item, index) in detailTabs"
-              :id="`tab-${item.id}`"
-              :key="item.id"
-              type="button"
-              role="tab"
-              class="tab"
-              :class="{ on: tab === item.id }"
-              :aria-selected="tab === item.id"
-              :aria-controls="`panel-${item.id}`"
-              :tabindex="tab === item.id ? 0 : -1"
-              @click="selectTab(item.id)"
-              @keydown="onTabKey($event, index)"
-            >
-              {{ item.label }}
-            </button>
-          </div>
-          <button id="open-tasks" type="button" class="btn ghost tasks-link" @click="openTasks">
-            <AppIcon name="file" :size="16" />Tarefas<AppIcon name="chevron" :size="16" />
+        <div class="tabs" role="tablist" aria-label="Conteúdo da reunião">
+          <button
+            v-for="(item, index) in detailTabs"
+            :id="`tab-${item.id}`"
+            :key="item.id"
+            type="button"
+            role="tab"
+            class="tab"
+            :class="{ on: tab === item.id }"
+            :aria-selected="tab === item.id"
+            :aria-controls="`panel-${item.id}`"
+            :tabindex="tab === item.id ? 0 : -1"
+            @click="selectTab(item.id)"
+            @keydown="onTabKey($event, index)"
+          >
+            {{ item.label }}<span v-if="item.count" class="count">{{ item.count }}</span>
           </button>
         </div>
         <div v-if="tab !== 'tasks'" class="actions">
-          <template v-if="tab === 'transcript'"
-            ><button
-              type="button"
-              class="btn ghost"
-              :disabled="isBusy('copy')"
-              @click="copyTranscript"
-            >
-              <AppIcon name="copy" :size="16" />{{
-                copied ? "Copiado" : "Copiar transcrição"
-              }}</button
-            ><button
-              type="button"
-              class="btn ghost"
-              :disabled="!connected"
-              @click="suggesting = true"
-            >
-              <AppIcon name="people" :size="16" />Sugerir nomes</button
-            ><button
-              type="button"
-              class="btn ghost"
-              :disabled="isBusy('summarize') || !connected"
-              @click="onSummarize"
-            >
-              <AppIcon name="file" :size="16" />{{
-                isBusy("summarize") ? "Resumindo…" : "Resumir"
-              }}
-            </button></template
-          >
-          <span v-else-if="tab === 'summary'" class="section-caption"
-            >Resumo da reunião</span
-          ><span v-else-if="tab === 'prints'" class="section-caption"
-            >Prints de tela tirados durante a reunião.</span
-          ><span v-else class="section-caption"
-            >Revise antes de criar no MCP de issues.</span
-          >
+          <template v-if="tab === 'transcript'">
+            <AppButton size="sm" :disabled="isBusy('copy-transcript')" @click="copyTranscript">
+              <AppIcon name="copy" :size="15" />{{ copied === "transcript" ? "Copiado" : "Copiar transcrição" }}
+            </AppButton>
+            <AppButton size="sm" :disabled="!connected" @click="suggesting = true">
+              <AppIcon name="user-plus" :size="15" />Sugerir nomes
+            </AppButton>
+            <AppButton size="sm" :busy="isBusy('summarize')" :disabled="!connected" @click="onSummarize">
+              <AppIcon name="spark" :size="15" />{{ isBusy("summarize") ? "Resumindo…" : "Resumir" }}
+            </AppButton>
+          </template>
+          <template v-else-if="tab === 'summary' && meeting.summary">
+            <AppButton size="sm" :disabled="summarizing || isBusy('copy-summary')" @click="copySummary">
+              <AppIcon name="copy" :size="15" />{{ copied === "summary" ? "Copiado" : "Copiar" }}
+            </AppButton>
+            <AppButton size="sm" :disabled="summarizing || !connected" @click="onSummarize">
+              <AppIcon name="refresh" :size="15" />Refazer
+            </AppButton>
+          </template>
+          <span v-else-if="tab === 'prints'" class="section-caption">Prints de tela tirados durante a reunião.</span>
+          <AppButton size="sm" :busy="isBusy('export')" :disabled="!connected" @click="exportMeeting">
+            <AppIcon name="export" :size="15" />Exportar {{ exportExtension }}
+          </AppButton>
           <button
             type="button"
-            class="btn ghost"
-            :disabled="isBusy('export') || !connected"
-            @click="exportMeeting"
-          >
-            <AppIcon name="export" :size="16" />Exportar {{ exportExtension }}
-          </button>
-          <button
-            type="button"
-            class="btn ghost audio-action"
+            class="btn ghost btn-sm audio-action"
             :disabled="isBusy('audio') || !connected"
             @click="playAudio()"
           >
-            <AppIcon name="play" :size="16" />Ouvir áudio
+            <AppIcon name="play" :size="15" />Ouvir áudio
           </button>
         </div>
         <ul v-if="alerts.length && tab === 'transcript'" class="alerts">
@@ -728,8 +685,8 @@ onBeforeUnmount(() => {
           <div
             v-show="tab === 'tasks'"
             id="panel-tasks"
-            role="region"
-            aria-labelledby="tasks-heading"
+            role="tabpanel"
+            aria-labelledby="tab-tasks"
             class="tab-panel"
             tabindex="0"
           >
@@ -740,6 +697,7 @@ onBeforeUnmount(() => {
               :started-at="meeting.started_at"
               :prints="meeting.prints"
               @play="playAudio"
+              @count="tasksCount = $event"
             />
           </div>
         </div>
@@ -752,7 +710,7 @@ onBeforeUnmount(() => {
           controls
         />
         <span class="sr-only" role="status">{{
-          copied ? "Transcrição copiada." : ""
+          copied === "transcript" ? "Transcrição copiada." : copied === "summary" ? "Resumo copiado." : ""
         }}</span>
       </template>
       <SpeakerMenu
@@ -812,41 +770,6 @@ onBeforeUnmount(() => {
   min-height: 0;
   container: detail / inline-size;
 }
-.tasks-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px 24px;
-  padding: 16px var(--page-gutter);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.tasks-heading {
-  min-width: 0;
-  flex: 1;
-}
-.tasks-heading h1 {
-  font-size: var(--font-h2);
-}
-.tasks-heading p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tabs-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 var(--page-gutter);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.tasks-link {
-  margin-left: auto;
-}
 .confirm {
   display: flex;
   flex-direction: column;
@@ -864,20 +787,16 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
-  padding: 8px var(--page-gutter);
-}
-.actions .btn {
-  font-size: 0.75rem;
-  min-height: 36px;
-  padding: 6px 4px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--page-gutter) var(--space-2);
 }
 .audio-action {
   margin-left: auto;
 }
 .section-caption {
-  color: var(--muted);
-  font-size: var(--font-meta);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
 }
 .player {
   width: calc(100% - 2 * var(--page-gutter));
@@ -885,24 +804,60 @@ onBeforeUnmount(() => {
   height: 42px;
   flex-shrink: 0;
 }
+/* Abas (am-tab): sublinhado em gradiente na selecionada e contador em pílula. */
 .tabs {
   display: flex;
   flex-shrink: 0;
-  gap: 28px;
+  gap: 22px;
+  margin: 0 var(--page-gutter);
+  border-bottom: 1px solid var(--glass-border);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .tab {
-  padding: 14px 0;
-  min-height: 48px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 10px 0;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
-  color: var(--muted);
-  font-size: var(--font-control);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text);
 }
 .tab.on {
   color: var(--text);
-  font-weight: 600;
-  border-bottom-color: var(--accent);
+}
+.tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--text-accent), var(--accent));
+}
+.tab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -3px 0 var(--focus-ring);
+}
+.count {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--selected);
+  color: var(--text-accent);
+  font-size: 11px;
+  line-height: 16px;
 }
 .alerts {
   margin: 0;
@@ -1035,12 +990,21 @@ meter {
   width: 100%;
   accent-color: var(--audio-color);
 }
-@container detail (max-width:560px) {
+/* do mais largo para o mais estreito: a regra mais estreita vence */
+@container detail (max-width:900px) {
   .tabs {
-    padding: 0 20px;
+    margin: 0 var(--space-6);
   }
   .actions {
-    padding: 8px 20px;
+    padding: var(--space-2) var(--space-6);
+  }
+}
+@container detail (max-width:560px) {
+  .tabs {
+    margin: 0 var(--space-5);
+  }
+  .actions {
+    padding: var(--space-2) var(--space-5);
   }
   .actions .audio-action {
     margin-left: 0;
@@ -1048,18 +1012,6 @@ meter {
   .capture-levels label {
     grid-template-columns: 1fr;
     text-align: left;
-  }
-}
-@container detail (max-width:900px) {
-  .tabs {
-    padding: 0 24px;
-  }
-  .tab {
-    padding: 11px 0;
-    min-height: 44px;
-  }
-  .actions {
-    padding: 4px 24px;
   }
 }
 </style>

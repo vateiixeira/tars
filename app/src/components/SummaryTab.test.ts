@@ -1,15 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
-
-const writeText = vi.fn(async (_t: string) => {});
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: (t: string) => writeText(t) }));
-
+import { describe, expect, it } from "vitest";
+import { mount } from "@vue/test-utils";
 import SummaryTab from "./SummaryTab.vue";
 
 const props = (extra: Record<string, unknown> = {}) => ({ summary: null, loading: false, error: null, job: null, ...extra });
 const job = (state: "running" | "done" | "error", error: string | null = null) => ({ state, error, updated_at: "2026-10-20T10:00:00" });
-
-beforeEach(() => vi.clearAllMocks());
 
 describe("SummaryTab", () => {
   it("without a summary offers Resumir", async () => {
@@ -37,16 +31,10 @@ describe("SummaryTab", () => {
     expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
   });
 
-  it("with a summary shows Copiar and Refazer", async () => {
+  it("with a summary shows only the summary (Copiar and Refazer are in the detail actions)", () => {
     const w = mount(SummaryTab, { props: props({ summary: "# Resumo\n\nTexto" }) });
-    const btn = (l: string) => w.findAll("button").find((b) => b.text().includes(l))!;
-    expect(w.findAll("button").some((b) => b.text().includes("Resumir"))).toBe(false);
-    await btn("Copiar").trigger("click");
-    await flushPromises();
-    expect(writeText).toHaveBeenCalledWith("# Resumo\n\nTexto");
-    expect(btn("Copiado")).toBeDefined();
-    await btn("Refazer").trigger("click");
-    expect(w.emitted("summarize")).toHaveLength(1);
+    expect(w.findAll("button")).toHaveLength(0);
+    expect(w.get(".md h1").text()).toBe("Resumo");
   });
 
   it("shows loading and disables the buttons", () => {

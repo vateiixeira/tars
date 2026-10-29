@@ -108,6 +108,15 @@ describe("TasksTab", () => {
     expect(scanTasks).toHaveBeenCalledWith("m1", "Foque no checkout.");
   });
 
+  it("informa a contagem de tarefas não descartadas depois de carregar", async () => {
+    const { w, emit, listTasks } = await mountTab(payload([task(), task({ id: "t2", discarded: true })]));
+    expect(w.emitted("count")).toEqual([[1]]);
+    listTasks.mockResolvedValue(payload([task(), task({ id: "t2" }), task({ id: "t3" })]));
+    emit({ type: "tasks_changed", meeting_id: "m1" });
+    await flushPromises();
+    expect(w.emitted("count")?.slice(-1)[0]).toEqual([3]);
+  });
+
   it("deixa o botão de levantamento desabilitado até a primeira carga terminar", async () => {
     let finish!: (p: TasksPayload) => void;
     const listTasks = vi.fn(() => new Promise<TasksPayload>((resolve) => { finish = resolve; }));

@@ -28,7 +28,11 @@ import AppIcon from "./ui/AppIcon.vue";
 import TaskCard from "./TaskCard.vue";
 
 const props = defineProps<{ meetingId: string; startedAt: string; prints: MeetingPrint[] }>();
-const emit = defineEmits<{ play: [start: number, end: number] }>();
+const emit = defineEmits<{
+  play: [start: number, end: number];
+  /** Tarefas não descartadas, depois de carregar (o contador da aba). */
+  count: [n: number];
+}>();
 
 const { client, events, connected } = useStatus();
 
@@ -147,6 +151,10 @@ void load();
 // -- lista ----------------------------------------------------------------------------------
 
 const running = computed(() => scan.value?.state === "running");
+const activeCount = computed(() => items.value.filter((t) => !t.discarded).length);
+watch([loaded, activeCount], ([ready, n]) => {
+  if (ready) emit("count", n);
+});
 const pending = computed(() => items.value.filter(isPending));
 const creating = computed(() =>
   items.value.filter(
