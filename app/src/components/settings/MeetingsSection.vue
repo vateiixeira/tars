@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // Seção Reuniões: título e resumo automáticos, prompt do resumo, motor de separação de falantes, limiar de voz por motor, prints de tela e token do Hugging Face.
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DEFAULT_SUMMARY_PROMPT, HF_MODEL_URL, MEETING_MODEL_IDLE_OPTIONS } from "./constants";
-import type { Diarizer, PrintMode } from "../../api/types";
+import type { Diarizer, PrintMode, PrintMonitor } from "../../api/types";
 import SettingField from "./SettingField.vue";
 import ToggleField from "./ToggleField.vue";
 import type { SettingsForm } from "./useSettingsForm";
@@ -25,6 +25,56 @@ const printMode = computed<PrintMode>(() => props.form.settings.value?.print_mod
 async function savePrintMode(event: Event): Promise<void> {
   const select = event.target as HTMLSelectElement;
   if (!(await props.form.save("print_mode", select.value as PrintMode))) select.value = printMode.value;
+}
+
+/** Monitores ligados, carregados ao entrar no modo Nativo (fora do GNOME a lista vem vazia). */
+const monitors = ref<PrintMonitor[]>([]);
+const monitorsState = ref<"loading" | "loaded" | "error">("loading");
+const monitorsError = ref<string | undefined>();
+const printMonitor = computed(() => props.form.settings.value?.print_monitor ?? "");
+
+/** Fabricante|modelo|série, sem a porta: o mesmo monitor em outra porta continua sendo ele. */
+const modelOf = (id: string): string => id.slice(0, id.lastIndexOf("|"));
+
+/** Item da lista que corresponde ao monitor salvo, com a mesma regra do backend (`find_monitor`). */
+const matchedMonitor = computed(() => {
+  const id = printMonitor.value;
+  if (!id) return null;
+  const exact = monitors.value.find((m) => m.id === id);
+  if (exact) return exact;
+  const same = monitors.value.filter((m) => modelOf(m.id) === modelOf(id));
+  return same.length === 1 ? same[0] : null;
+});
+
+const monitorSelected = computed(() => matchedMonitor.value?.id ?? printMonitor.value);
+
+/** Monitor salvo fora da lista: continua selecionado. Só é "desconectado" depois que a lista carregou. */
+const savedMonitorOption = computed(() => {
+  const id = printMonitor.value;
+  if (!id || matchedMonitor.value) return null;
+  const [vendor = "", product = ""] = id.split("|");
+  const name = `${vendor} ${product}`.trim() || "Monitor";
+  return { id, label: `${name} (${monitorsState.value === "loaded" ? "desconectado" : "salvo"})` };
+});
+
+async function loadMonitors(): Promise<void> {
+  monitorsState.value = "loading";
+  monitorsError.value = undefined;
+  try {
+    monitors.value = (await props.form.client.monitors()).monitors;
+    monitorsState.value = "loaded";
+  } catch {
+    monitors.value = [];
+    monitorsState.value = "error";
+    monitorsError.value = "Não foi possível listar os monitores. Para trocar, escolha Todos os monitores ou reabra as configurações.";
+  }
+}
+
+watch(printMode, (mode) => { if (mode === "native") void loadMonitors(); }, { immediate: true });
+
+async function savePrintMonitor(event: Event): Promise<void> {
+  const select = event.target as HTMLSelectElement;
+  if (!(await props.form.save("print_monitor", select.value === "" ? null : select.value))) select.value = monitorSelected.value;
 }
 
 /** Rascunho dos campos de texto dos prints: o valor recusado pelo backend continua visível, com o erro embaixo. */
@@ -199,7 +249,7 @@ async function removeToken(): Promise<void> {
       <select id="meet-print-mode" class="s-select" :value="printMode" :disabled="form.saving.print_mode" @change="savePrintMode">
         <option value="off">Desligado</option>
         <option value="flameshot">Flameshot</option>
-        <option value="native">Nativo (tela inteira)</option>
+        <option value="native">Nativo</option>
       </select>
     </SettingField>
 
@@ -226,7 +276,7 @@ async function removeToken(): Promise<void> {
       v-if="printMode === 'native'"
       label="Atalho do print"
       for="meet-print-key"
-      hint="Funciona só durante uma reunião. Captura todos os monitores e toca um som curto."
+      hint="Funciona só durante uma reunião. Captura o monitor escolhido abaixo e toca um som curto."
       :error="form.errors.print_key"
     >
       <input
@@ -238,6 +288,26 @@ async function removeToken(): Promise<void> {
         @input="onPrintInput('print_key', $event)"
         @change="savePrintKey"
       />
+    </SettingField>
+
+    <SettingField
+      v-if="printMode === 'native'"
+      label="Monitor do print"
+      for="meet-print-monitor"
+      hint="Todos os monitores gera uma imagem só com todas as telas. Se o monitor escolhido estiver desconectado na hora, o print sai com a tela inteira."
+      :error="form.errors.print_monitor ?? monitorsError"
+    >
+      <select
+        id="meet-print-monitor"
+        class="s-select"
+        :value="monitorSelected"
+        :disabled="form.saving.print_monitor"
+        @change="savePrintMonitor"
+      >
+        <option value="">Todos os monitores</option>
+        <option v-for="m in monitors" :key="m.id" :value="m.id">{{ m.label }}</option>
+        <option v-if="savedMonitorOption" :value="savedMonitorOption.id">{{ savedMonitorOption.label }}</option>
+      </select>
     </SettingField>
 
     <SettingField

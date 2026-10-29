@@ -505,6 +505,21 @@ def test_print_key_must_differ_from_dictation_keys(settings):
         settings.update({"key": "ctrl+alt+KEY_P"})
 
 
+def test_print_monitor_defaults_and_validation(settings, monkeypatch):
+    assert settings.get("print_monitor") is None
+    monkeypatch.setenv("DITADO_PRINT_MONITOR", "lixo")
+    assert settings.get("print_monitor") is None  # inválido no ambiente: loga e usa o padrão
+    monkeypatch.setenv("DITADO_PRINT_MONITOR", "SAM|LU28R55|HX5X901044|HDMI-1")
+    assert settings.get("print_monitor") == "SAM|LU28R55|HX5X901044|HDMI-1"
+    monkeypatch.delenv("DITADO_PRINT_MONITOR")
+    mid = "GSM|LG FULL HD|0x01010101|DP-3"
+    assert settings.update({"print_monitor": mid})["print_monitor"] == mid
+    assert settings.update({"print_monitor": ""})["print_monitor"] is None
+    for bad in ("DP-3", "a|b|c|d|e", 3):
+        with pytest.raises(ValueError, match="Monitor do print"):
+            settings.update({"print_monitor": bad})
+
+
 def test_print_mode_env_is_validated(settings, monkeypatch):
     monkeypatch.setenv("DITADO_PRINT_MODE", "native")
     assert settings.get("print_mode") == "native"

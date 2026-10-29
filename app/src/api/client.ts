@@ -10,6 +10,7 @@ import type {
   MeetingDetail,
   MeetingListItem,
   NameSuggestion,
+  PrintMonitor,
   Settings,
   SettingsUpdate,
   Status,
@@ -193,6 +194,7 @@ export function createClient(getInfo: () => Promise<ApiInfo>, fetchFn: typeof fe
     putText: async (kind: TextKind, text: string): Promise<string> =>
       (await json<{ text: string }>("PUT", `/${kind}`, { text })).text,
     devices: () => json<Devices>("GET", "/devices"),
+    monitors: () => json<{ monitors: PrintMonitor[] }>("GET", "/monitors"),
   };
 }
 

@@ -174,6 +174,8 @@ export interface Settings {
   print_mode: PrintMode;
   print_folder: string | null;
   print_key: string;
+  /** Monitor do print nativo (id de `GET /monitors`); `null` = todos os monitores. */
+  print_monitor: string | null;
 }
 
 /** Corpo de `PUT /settings`: qualquer subconjunto; `hf_token` só é aceito na escrita. */
@@ -186,6 +188,15 @@ export type SettingsUpdate = Partial<Omit<Settings, "hf_token_set" | "tasks_prom
 export interface AudioDevice {
   name: string;
   description: string;
+}
+
+/** Item de `GET /monitors`: `width`/`height` em pixels reais do monitor. */
+export interface PrintMonitor {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+  primary: boolean;
 }
 
 /** `GET /devices`. */

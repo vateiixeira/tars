@@ -58,6 +58,7 @@ from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.memory import release_unused_memory
 from whisper_ditado.prints.files import store_print
 from whisper_ditado.prints.flameshot import import_folder, resolve_folder
+from whisper_ditado.prints.monitors import crop_saved_monitor
 from whisper_ditado.prints.portal import capture_screen
 from whisper_ditado.prints.timing import ClockMarks
 from whisper_ditado.settings import Settings
@@ -193,6 +194,7 @@ class MeetingManager:
         gpu_gate: Callable[[], None] | None = None,
         on_ready: Callable[[str], None] | None = None,
         capture: Callable[[], Path] = capture_screen,
+        crop_monitor: Callable[[Path, str], None] = crop_saved_monitor,
         print_sound: Callable[[bool], object] = play_print_sound,
         notify_fn: Callable[[str], None] = notify_error,
     ) -> None:
@@ -217,6 +219,7 @@ class MeetingManager:
         self._vad = vad
         self._own_pids = own_pids if own_pids is not None else {os.getpid()}
         self._capture = capture
+        self._crop_monitor = crop_monitor
         self._print_sound = print_sound
         self._notify_fn = notify_fn
         self._print_lock = threading.Lock()  # uma captura por vez
@@ -366,6 +369,7 @@ class MeetingManager:
         try:
             try:
                 shot = self._capture()
+                self._crop_to_monitor(shot)
                 p = store_print(self._store, mid, shot, at_s=at_s, source="native", move=True)
             except Exception as exc:
                 log.warning("Falha ao tirar o print da reunião %s: %s", mid, exc)
@@ -378,6 +382,16 @@ class MeetingManager:
                 self._bus.publish({"type": "print_captured", "meeting_id": mid, "print_id": p.id})
         finally:
             self._print_lock.release()
+
+    def _crop_to_monitor(self, shot: Path) -> None:
+        """Recorta no monitor escolhido; sem escolha ou com falha, fica a tela inteira."""
+        monitor_id = self._settings.get("print_monitor")
+        if not monitor_id:
+            return
+        try:
+            self._crop_monitor(shot, monitor_id)
+        except Exception:
+            log.exception("Falha ao recortar o print no monitor %s; fica a tela inteira", monitor_id)
 
     @staticmethod
     def _safely(fn: Callable, *args) -> None:

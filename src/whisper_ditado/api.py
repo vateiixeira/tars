@@ -50,6 +50,7 @@ from whisper_ditado.meeting.session import MeetingStateError
 from whisper_ditado.prints import export as print_export
 from whisper_ditado.prints import files as print_files
 from whisper_ditado.prints import images as print_images
+from whisper_ditado.prints import monitors as print_monitors
 from whisper_ditado.store import MeetingBusy, Store, Voice
 
 log = logging.getLogger("ditado")
@@ -668,6 +669,20 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
             "default_source": found.default_source,
             "default_sink": found.default_sink,
         }
+
+    @router.get("/monitors")
+    def list_monitors() -> dict:
+        """Monitores ligados, para escolher onde o print nativo é recortado (vazio fora do GNOME)."""
+        try:
+            found = print_monitors.list_monitors()
+        except print_monitors.MonitorsError as exc:
+            log.info("Monitores indisponíveis para o print: %s", exc)
+            found = []
+        return {"monitors": [
+            {"id": m.id, "label": m.label, "width": m.pixel_width, "height": m.pixel_height,
+             "primary": m.primary}
+            for m in found
+        ]}
 
     router.include_router(claude_router(ctx))
     router.include_router(tasks_router(ctx, get_meeting))  # antes do app.include_router (herda a auth)

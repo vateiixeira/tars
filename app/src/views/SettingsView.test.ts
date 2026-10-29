@@ -64,6 +64,7 @@ const baseSettings: Settings = {
   print_mode: "off",
   print_folder: null,
   print_key: "ctrl+alt+p",
+  print_monitor: null,
 };
 
 const devices: Devices = {

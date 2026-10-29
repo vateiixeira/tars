@@ -77,6 +77,7 @@ DEFAULTS: dict[str, Any] = {
     "print_mode": "off",
     "print_folder": None,
     "print_key": "ctrl+alt+KEY_P",
+    "print_monitor": None,  # None = todos os monitores; senão o id de `prints/monitors.py`
 }
 
 # Variáveis de ambiente com nome antigo (`DITADO_<antiga>`), lidas quando a nova não existe.
@@ -232,6 +233,13 @@ def _validate(key: str, value: Any) -> Any:
         except SystemExit:
             raise ValueError(f"Atalho do print inválido: {spec!r} (ex.: ctrl+alt+KEY_P)") from None
         return spec
+    if key == "print_monitor":
+        raw = _text(value, "Monitor do print", nullable=True)
+        if raw is None:
+            return None
+        if len(raw) > 512 or raw.count("|") != 3 or any(c in raw for c in "\r\n"):
+            raise ValueError(f"Monitor do print inválido: {raw!r}")
+        return raw
     if key == "issues_mcp_name":
         name = _text(value, "Nome do servidor MCP", nullable=False).strip()
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
@@ -291,7 +299,7 @@ def _from_env(key: str, raw: str) -> Any:
         return float(raw)
     if isinstance(default, list):
         return [s.strip() for s in raw.split(",") if s.strip()]
-    if key in MODEL_KEYS or key in EFFORT_KEYS or key in ("issues_mcp_name", "print_mode", "print_key"):
+    if key in MODEL_KEYS or key in EFFORT_KEYS or key in ("issues_mcp_name", "print_mode", "print_key", "print_monitor"):
         return _validate(key, raw)  # inválido levanta ValueError: `get` loga e usa o padrão
     if key == "diarizer":
         return _validate(key, raw.strip())

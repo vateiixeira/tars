@@ -871,6 +871,60 @@ def test_capture_print_native_stores_moves_and_beeps(store, settings, tmp_path):
     wait_for(lambda: not rig.manager._print_lock.locked())
 
 
+def test_capture_print_crops_to_saved_monitor(store, settings, tmp_path):
+    mid_monitor = "GSM|LG FULL HD|0x01010101|DP-3"
+    settings.update({"print_mode": "native", "print_monitor": mid_monitor})
+    shot = tmp_path / "Screenshot.png"
+    shot.write_bytes(PNG_BYTES)
+    crops, sounds = [], []
+
+    def crop(path, monitor_id):
+        crops.append((path, monitor_id, path.exists()))
+
+    rig = Rig(store, settings, capture=lambda: shot, crop_monitor=crop, print_sound=sounds.append,
+              notify_fn=lambda msg: pytest.fail(msg))
+    mid = rig.start()
+    assert rig.manager.capture_print() is True
+    wait_for(lambda: sounds == [True])
+    assert crops == [(shot, mid_monitor, True)]  # recorta antes de mover para a reunião
+    assert len(store.list_prints(mid)) == 1
+    wait_for(lambda: not rig.manager._print_lock.locked())
+
+
+def test_capture_print_keeps_full_screen_when_crop_breaks(store, settings, tmp_path):
+    settings.update({"print_mode": "native", "print_monitor": "GSM|LG FULL HD|0x01010101|DP-3"})
+    shot = tmp_path / "Screenshot.png"
+    shot.write_bytes(PNG_BYTES)
+    sounds = []
+
+    def crop(path, monitor_id):
+        raise RuntimeError("quebrou")
+
+    rig = Rig(store, settings, capture=lambda: shot, crop_monitor=crop, print_sound=sounds.append,
+              notify_fn=lambda msg: pytest.fail(msg))
+    mid = rig.start()
+    assert rig.manager.capture_print() is True
+    wait_for(lambda: sounds == [True])
+    assert len(store.list_prints(mid)) == 1 and store.get_alerts(mid) == []
+    wait_for(lambda: not rig.manager._print_lock.locked())
+
+
+def test_capture_print_all_monitors_does_not_crop(store, settings, tmp_path):
+    settings.update({"print_mode": "native"})
+    shot = tmp_path / "Screenshot.png"
+    shot.write_bytes(PNG_BYTES)
+    sounds = []
+
+    def crop(path, monitor_id):
+        pytest.fail("não deveria recortar")
+
+    rig = Rig(store, settings, capture=lambda: shot, crop_monitor=crop, print_sound=sounds.append)
+    rig.start()
+    assert rig.manager.capture_print() is True
+    wait_for(lambda: sounds == [True])
+    wait_for(lambda: not rig.manager._print_lock.locked())
+
+
 def test_capture_print_failure_beeps_error_alerts_and_notifies(store, settings):
     settings.update({"print_mode": "native"})
     sounds, notes = [], []

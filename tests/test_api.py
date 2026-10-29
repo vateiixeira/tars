@@ -522,6 +522,23 @@ def test_devices(client, monkeypatch):
     assert r.status_code == 503 and isinstance(r.json()["detail"], str)
 
 
+def test_monitors(client, monkeypatch):
+    from whisper_ditado.prints.monitors import Monitor, MonitorsError
+
+    lg = Monitor(id="GSM|LG FULL HD|0x01010101|DP-3", connector="DP-3", name='LG Electronics 22"',
+                 x=2560, y=0, width=1920, height=1080, pixel_width=1920, pixel_height=1080, primary=False)
+    monkeypatch.setattr(api.print_monitors, "list_monitors", lambda: [lg])
+    assert client.get("/api/monitors").json() == {"monitors": [{
+        "id": "GSM|LG FULL HD|0x01010101|DP-3", "label": 'LG Electronics 22" (DP-3)',
+        "width": 1920, "height": 1080, "primary": False}]}
+
+    def boom():
+        raise MonitorsError("fora do GNOME")
+
+    monkeypatch.setattr(api.print_monitors, "list_monitors", boom)
+    assert client.get("/api/monitors").json() == {"monitors": []}  # fora do GNOME: só "Todos"
+
+
 def test_levels_monitor(client, ctx):
     assert client.post("/api/levels/monitor", json={"on": True}).status_code == 200
     assert client.post("/api/levels/monitor", json={"on": False}).status_code == 200
