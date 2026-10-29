@@ -10,10 +10,30 @@ import AppButton from "./ui/AppButton.vue";
 import AppDialog from "./ui/AppDialog.vue";
 
 const UPDATE_COMMAND = "python3 scripts/update.py";
+// Divergência: refaz o build e o reinício para o código que já está no clone.
+const FORCE_COMMAND = "python3 scripts/update.py --force";
 
-const { status } = useStatus();
-const info = computed(() => status.value?.version ?? null);
+function parts(version: string): number[] | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/** "older": app mais antigo que o serviço; "newer": mais novo; "unknown": não dá para comparar. */
+function direction(app: string, service: string): "older" | "newer" | "unknown" {
+  const a = parts(app);
+  const b = parts(service);
+  if (!a || !b) return "unknown";
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? "older" : "newer";
+  return "unknown";
+}
+
+const { status, connected } = useStatus();
+// Sem conexão o último status é velho: a linha mostra só a versão do app.
+const info = computed(() => (connected.value ? (status.value?.version ?? null) : null));
 const mismatch = computed(() => info.value !== null && info.value.current !== appVersion);
+const side = computed(() => (info.value ? direction(appVersion, info.value.current) : "unknown"));
+const command = computed(() => (mismatch.value ? FORCE_COMMAND : UPDATE_COMMAND));
+const showCommand = computed(() => info.value?.install === "git");
 const updatable = computed(() => !mismatch.value && info.value?.update_available === true);
 
 const open = ref(false);
@@ -26,7 +46,7 @@ function openLink(url: string): void {
 
 async function copy(): Promise<void> {
   try {
-    await writeText(UPDATE_COMMAND);
+    await writeText(command.value);
     copied.value = true;
     clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => (copied.value = false), 2000);
@@ -54,9 +74,21 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
     >
       <div class="body">
         <template v-if="mismatch">
-          <p>
-            O app está na versão {{ appVersion }} e o serviço na {{ info.current }}. Para igualar, recompile o app
-            com o comando abaixo e reabra o app.
+          <p v-if="info.install === 'package'">
+            O app está na versão {{ appVersion }} e o serviço na {{ info.current }}. Baixe o pacote da versão mais
+            recente e reinstale o TARS para igualar as duas.
+          </p>
+          <p v-else-if="side === 'older'">
+            O app está na versão {{ appVersion }} e o serviço na {{ info.current }}: o app não foi recompilado depois
+            da atualização. O comando abaixo recompila o app e reinicia o serviço; depois, feche e reabra o app.
+          </p>
+          <p v-else-if="side === 'newer'">
+            O app está na versão {{ appVersion }}, mas o serviço está na {{ info.current }}: o serviço ficou para
+            trás. O comando abaixo refaz a instalação e reinicia o serviço.
+          </p>
+          <p v-else>
+            O app está na versão {{ appVersion }} e o serviço na {{ info.current }}. O comando abaixo recompila o app
+            e reinicia o serviço; depois, feche e reabra o app.
           </p>
         </template>
         <p v-else-if="info.install === 'git'">Para atualizar, rode este comando na pasta do projeto:</p>
@@ -64,12 +96,12 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
           Baixe o pacote da versão {{ info.latest }} e reinstale o TARS no lugar da versão {{ appVersion }}.
         </p>
 
-        <div v-if="mismatch || info.install === 'git'" class="command">
-          <code>{{ UPDATE_COMMAND }}</code>
+        <div v-if="showCommand" class="command">
+          <code>{{ command }}</code>
           <AppButton size="sm" @click="copy">{{ copied ? "Copiado" : "Copiar" }}</AppButton>
         </div>
 
-        <div v-if="!mismatch && info.url" class="actions">
+        <div v-if="info.url && (!mismatch || info.install === 'package')" class="actions">
           <AppButton v-if="info.install === 'package'" variant="primary" @click="openLink(info.url)">
             Baixar a versão {{ info.latest }}
           </AppButton>

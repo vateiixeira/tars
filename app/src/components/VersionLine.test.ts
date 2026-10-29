@@ -13,6 +13,7 @@ vi.mock("../lib/appVersion", () => ({ appVersion: "0.2.0" }));
 
 const URL_V3 = "https://github.com/example/tars/releases/tag/v0.3.0";
 const COMMAND = "python3 scripts/update.py";
+const FORCE_COMMAND = "python3 scripts/update.py --force";
 
 function version(over: Partial<VersionInfo> = {}): VersionInfo {
   return {
@@ -82,13 +83,49 @@ describe("VersionLine", () => {
     expect(openUrl).toHaveBeenCalledWith(URL_V3);
   });
 
-  it("versões divergentes mostram app e serviço", async () => {
+  it("app mais antigo que o serviço: pede recompilar e mostra o comando com --force", async () => {
     await open(version({ current: "0.3.0", latest: "0.3.0" }));
     expect(wrapper!.text()).toBe("app 0.2.0 · serviço 0.3.0");
 
     await wrapper!.get("button").trigger("click");
-    expect(dialog()!.textContent).toContain(COMMAND);
-    expect(dialog()!.textContent).toContain("reabra o app");
+    expect(dialog()!.querySelector("code")?.textContent).toBe(FORCE_COMMAND);
+    expect(dialog()!.textContent).toContain("não foi recompilado");
+    expect(dialog()!.textContent).toContain("feche e reabra o app");
+
+    button("Copiar")!.click();
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith(FORCE_COMMAND);
+  });
+
+  it("app mais novo que o serviço: pede refazer o serviço, sem mandar reabrir o app", async () => {
+    await open(version({ current: "0.1.9", latest: "0.1.9" }));
+    expect(wrapper!.text()).toBe("app 0.2.0 · serviço 0.1.9");
+
+    await wrapper!.get("button").trigger("click");
+    expect(dialog()!.querySelector("code")?.textContent).toBe(FORCE_COMMAND);
+    expect(dialog()!.textContent).toContain("serviço ficou para trás");
+    expect(dialog()!.textContent).not.toContain("não foi recompilado");
+
+    button("Copiar")!.click();
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith(FORCE_COMMAND);
+  });
+
+  it("compara as versões como números (0.10.0 é maior que 0.9.0)", async () => {
+    await open(version({ current: "0.10.0", latest: "0.10.0" }));
+    await wrapper!.get("button").trigger("click");
+    expect(dialog()!.textContent).toContain("não foi recompilado");
+  });
+
+  it("divergência numa instalação por pacote mostra o download em vez do comando", async () => {
+    await open(version({ current: "0.3.0", latest: "0.3.0", url: URL_V3, install: "package" }));
+    await wrapper!.get("button").trigger("click");
+    expect(dialog()!.textContent).not.toContain("scripts/update.py");
+    expect(dialog()!.querySelector("code")).toBeNull();
+    expect(button("Copiar")).toBeUndefined();
+
+    button("Baixar a versão 0.3.0")!.click();
+    expect(openUrl).toHaveBeenCalledWith(URL_V3);
   });
 
   it("divergência tem precedência sobre o aviso de atualização", async () => {
@@ -110,5 +147,18 @@ describe("VersionLine", () => {
   it("sem backend mostra só a versão do app", async () => {
     await open(null);
     expect(wrapper!.text()).toBe("TARS 0.2.0");
+  });
+
+  it("desconectado ignora o último status, mesmo com atualização ou divergência", async () => {
+    const status: Status = { ...IDLE, version: version({ latest: "0.3.0", url: URL_V3, update_available: true }) };
+    const { events } = installStore({}, status);
+    wrapper = mount(VersionLine, { attachTo: document.body });
+    await flushPromises();
+    expect(wrapper.text()).toBe("TARS 0.2.0 · atualizar para 0.3.0");
+
+    events.state.value = "closed";
+    await flushPromises();
+    expect(wrapper.text()).toBe("TARS 0.2.0");
+    expect(wrapper.find("button").exists()).toBe(false);
   });
 });
