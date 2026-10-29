@@ -2,9 +2,12 @@
 // Aba "Resumo": estados sem resumo / carregando / erro / resumo em Markdown. Só apresenta: quem
 // chama o Claude por clique é o `MeetingDetail`, que recebe `summarize` (Copiar e Refazer ficam
 // nas ações da aba, no detalhe). O resumo também pode vir automático ao fim do processamento
-// (`job`: rodando, ou falhou sem deixar resumo).
+// (`job`: rodando, ou falhou sem deixar resumo). O backend não informa etapas do resumo, então a espera
+// é a órbita com texto (e não o StepProgress, que mostraria um avanço inventado).
 import { computed } from "vue";
+import AppBanner from "./ui/AppBanner.vue";
 import AppIcon from "./ui/AppIcon.vue";
+import AppLoader from "./ui/AppLoader.vue";
 import MarkdownIt from "markdown-it";
 import type { JobState } from "../api/types";
 
@@ -28,16 +31,19 @@ const rendered = computed(() => (props.summary ? md.render(props.summary) : ""))
 
 <template>
   <div class="summary">
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="autoError" class="error" role="alert">{{ autoError }}</p>
+    <AppBanner v-if="error" class="error" role="alert">{{ error }}</AppBanner>
+    <AppBanner v-if="autoError" class="error" role="alert">{{ autoError }}</AppBanner>
 
-    <div v-if="busy" class="summary-busy" role="status"><p class="muted">O Claude está resumindo…</p><button type="button" class="btn" disabled aria-busy="true">Resumindo…</button></div>
+    <div v-if="busy" class="busy" role="status">
+      <AppLoader size="sm" />
+      <span>Gerando resumo…</span>
+    </div>
 
-    <div v-if="summary" class="md" v-html="rendered"></div>
-    <template v-else-if="!busy">
-      <p class="muted">Nenhum resumo ainda.</p>
-      <button type="button" class="btn pri" @click="emit('summarize')"><AppIcon name="file" :size="16" /> Resumir</button>
-    </template>
+    <div v-if="summary" class="md" :class="{ dim: busy }" v-html="rendered"></div>
+    <div v-else-if="!busy" class="empty">
+      <p>Nenhum resumo ainda.</p>
+      <button type="button" class="btn pri" @click="emit('summarize')"><AppIcon name="spark" :size="16" /> Resumir</button>
+    </div>
   </div>
 </template>
 
@@ -45,47 +51,94 @@ const rendered = computed(() => (props.summary ? md.render(props.summary) : ""))
 .summary {
   height: 100%;
   overflow-y: auto;
-  padding: 16px var(--page-gutter) 32px;
-}
-.muted {
-  color: var(--muted);
+  padding: var(--space-4) var(--page-gutter) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 .error {
-  color: var(--danger);
-  margin: 0 0 10px;
+  max-width: var(--read-max);
 }
+.busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12) var(--space-6);
+  text-align: center;
+}
+.empty p {
+  margin: 0;
+  color: var(--text-muted);
+}
+/* Prosa (am-prose): 16/26, marcadores em accent-glow, `code` em pílula. */
 .md {
-  line-height: 1.7;
-  max-width:var(--read-max);
+  max-width: var(--read-max);
+  font-size: 16px;
+  line-height: 26px;
+  font-weight: 500;
   overflow-wrap: anywhere;
+}
+.md.dim {
+  opacity: 0.55;
 }
 .md :deep(h1),
 .md :deep(h2),
-.md :deep(h3) {
-  margin: 1em 0 0.4em;
-  font-size: 1.05rem;
+.md :deep(h3),
+.md :deep(h4) {
+  margin: 18px 0 6px;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 700;
 }
 .md :deep(h1) {
-  font-size: 1.2rem;
+  font-size: 20px;
+  line-height: 26px;
 }
-.md :deep(p),
+.md :deep(h2) {
+  font-size: 18px;
+  line-height: 24px;
+}
+.md > :deep(:first-child) {
+  margin-top: 0;
+}
+.md :deep(p) {
+  margin: 0 0 var(--space-3);
+}
 .md :deep(ul),
 .md :deep(ol) {
-  margin: 0 0 0.7em;
+  margin: 0 0 var(--space-3);
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.md :deep(ul),
-.md :deep(ol) {
-  padding-left: 1.4em;
+.md :deep(li::marker) {
+  color: var(--accent-glow);
+}
+.md :deep(strong) {
+  font-weight: 700;
 }
 .md :deep(code) {
-  background: var(--surface);
-  border-radius: 4px;
-  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--glass-strong);
 }
 .md :deep(pre) {
-  background: var(--surface);
-  border-radius: 6px;
-  padding: 8px 10px;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--glass-strong);
   overflow-x: auto;
 }
 .md :deep(pre code) {
@@ -93,10 +146,10 @@ const rendered = computed(() => (props.summary ? md.render(props.summary) : ""))
   background: transparent;
 }
 .md :deep(blockquote) {
-  margin: 0 0 0.7em;
-  padding:12px 16px;
-  border:1px solid var(--border);
-  border-radius:var(--radius-md);
-  color: var(--muted);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
 }
 </style>

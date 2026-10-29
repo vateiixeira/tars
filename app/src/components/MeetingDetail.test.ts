@@ -391,7 +391,7 @@ describe("MeetingDetail", () => {
     const summarize = vi.fn(() => new Promise<{ summary: string }>((r) => (finish = () => r({ summary: "## Pontos" }))));
     const { w, getMeeting } = await mountDetail(detail(), { summarize });
     await w.findAll("button").find((b) => b.text().includes("Resumir"))!.trigger("click");
-    expect(w.text()).toContain("O Claude está resumindo…");
+    expect(w.text()).toContain("Gerando resumo…");
     getMeeting.mockResolvedValue(detail({ summary: "## Pontos" }));
     finish();
     await flushPromises();
@@ -451,7 +451,7 @@ describe("MeetingDetail", () => {
     expect(w.emitted("changed")).toBeUndefined();
     // a ação em andamento era da reunião antiga: a nova pode resumir
     expect(w.findAll("button").find((b) => b.text().includes("Resumir"))!.attributes("disabled")).toBeUndefined();
-    expect(w.text()).not.toContain("O Claude está resumindo…");
+    expect(w.text()).not.toContain("Gerando resumo…");
   });
 
   it("does not repeat the same error message key when two actions fail with the same text", async () => {
@@ -667,9 +667,10 @@ describe("MeetingDetail", () => {
     const btn = (label: string) => w.findAll("button").find((b) => b.text().includes(label))!;
     await btn("Resumir").trigger("click");
     await flushPromises();
-    expect(btn("Resumindo").attributes("disabled")).toBeDefined();
+    expect(w.text()).toContain("Gerando resumo…"); // a aba Resumo não oferece mais botão enquanto resume
 
     await w.findAll('[role="tab"]').find(t => t.text() === "Transcrição")!.trigger("click");
+    expect(btn("Resumindo").attributes("disabled")).toBeDefined();
     await btn("Copiar transcrição").trigger("click"); // outra ação começa e termina
     await flushPromises();
     expect(writeText).toHaveBeenCalled();
@@ -857,7 +858,7 @@ describe("MeetingDetail", () => {
     const running = { state: "running" as const, error: null, updated_at: "2026-10-20T10:00:00" };
     const { w } = await mountDetail(detail({ summary_job: running }));
     await w.findAll('[role="tab"]').find(t => t.text() === "Resumo")!.trigger("click");
-    expect(w.text()).toContain("O Claude está resumindo…");
+    expect(w.text()).toContain("Gerando resumo…");
   });
 
   it("play from the TasksTab plays the excerpt", async () => {

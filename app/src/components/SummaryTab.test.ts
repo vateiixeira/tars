@@ -37,24 +37,26 @@ describe("SummaryTab", () => {
     expect(w.get(".md h1").text()).toBe("Resumo");
   });
 
-  it("shows loading and disables the buttons", () => {
+  it("shows loading with the existing summary and no buttons", () => {
     const w = mount(SummaryTab, { props: props({ summary: "x", loading: true }) });
-    expect(w.text()).toContain("O Claude está resumindo…");
-    expect(w.findAll("button").every((b) => b.attributes("disabled") !== undefined)).toBe(true);
+    expect(w.get('[role="status"]').text()).toContain("Gerando resumo…");
+    expect(w.get(".md").text()).toBe("x");
+    expect(w.findAll("button")).toHaveLength(0);
   });
 
   it("shows the error message and keeps the button usable", async () => {
     const w = mount(SummaryTab, { props: props({ error: "O Claude não está logado" }) });
     expect(w.text()).toContain("O Claude não está logado");
+    expect(w.get('.error[role="alert"]').text()).toContain("O Claude não está logado");
     const btn = w.findAll("button").find((b) => b.text().includes("Resumir"))!;
     expect(btn.attributes("disabled")).toBeUndefined();
   });
 
-  it("with the automatic job running and no summary shows 'O Claude está resumindo…'", () => {
+  it("with the automatic job running and no summary shows 'Gerando resumo…'", () => {
     const w = mount(SummaryTab, { props: props({ job: job("running") }) });
-    expect(w.text()).toContain("O Claude está resumindo…");
+    expect(w.text()).toContain("Gerando resumo…");
     expect(w.text()).not.toContain("Nenhum resumo ainda.");
-    expect(w.findAll("button").every((b) => b.attributes("disabled") !== undefined)).toBe(true);
+    expect(w.findAll("button")).toHaveLength(0);
   });
 
   it("with the automatic job in error and no summary shows the failure and keeps Resumir", async () => {
