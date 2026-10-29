@@ -98,6 +98,18 @@ function seek(event: Event): void {
   current.value = value;
 }
 
+const KEY_SEEK_STEP = 5; // segundos por seta; PageUp/PageDown/Home/End seguem os do próprio range
+/** Setas esquerda/direita andam 5 s (o passo do range é 1 s; nativamente seria um passo por tecla). */
+function onTrackKey(event: KeyboardEvent): void {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !props.src) return;
+  event.preventDefault();
+  const delta = event.key === "ArrowRight" ? KEY_SEEK_STEP : -KEY_SEEK_STEP;
+  const value = Math.min(length.value, Math.max(0, current.value + delta));
+  if (audioEl.value) audioEl.value.currentTime = value;
+  current.value = value;
+}
+
 const buttonLabel = computed(() =>
   props.loading ? "Carregando áudio…" : !props.src ? "Ouvir áudio da reunião" : playing.value ? "Pausar" : "Tocar",
 );
@@ -124,13 +136,14 @@ defineExpose({ play, pause });
       type="range"
       min="0"
       :max="length"
-      step="0.1"
+      step="1"
       :value="current"
       :style="{ '--pct': `${percent}%` }"
       aria-label="Posição no áudio"
       :aria-valuetext="`${mmss(at)} de ${mmss(shownTotal)}`"
       :disabled="!src"
       @input="seek"
+      @keydown="onTrackKey"
     />
     <span class="time">{{ mmss(at) }} / {{ mmss(shownTotal) }}</span>
     <button

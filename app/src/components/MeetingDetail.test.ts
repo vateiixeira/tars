@@ -585,6 +585,32 @@ describe("MeetingDetail", () => {
     expect(w.findComponent(MeetingPlayer).emitted("progress")?.slice(-1)[0]).toEqual([{ at: 90, playing: true }]);
   });
 
+  it("as setas do player andam 5 s e não saem dos limites", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const { w } = await mountDetail(detail(), { audioBlob });
+    await w.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
+    await flushPromises();
+    const audio = w.get("audio");
+    const el = audio.element as HTMLAudioElement;
+    Object.defineProperty(el, "duration", { configurable: true, value: 120 });
+    await audio.trigger("loadedmetadata");
+    const range = w.get('.meeting-player input[type="range"]');
+    expect(range.attributes("step")).toBe("1");
+    await range.trigger("keydown", { key: "ArrowRight" });
+    expect(el.currentTime).toBe(5);
+    await range.trigger("keydown", { key: "ArrowRight" });
+    expect(el.currentTime).toBe(10);
+    await range.trigger("keydown", { key: "ArrowLeft" });
+    expect(el.currentTime).toBe(5);
+    await range.trigger("keydown", { key: "ArrowLeft" });
+    await range.trigger("keydown", { key: "ArrowLeft" });
+    expect(el.currentTime).toBe(0);
+    expect(range.attributes("aria-valuetext")).toBe("00:00 de 02:00");
+    await range.setValue("118");
+    await range.trigger("keydown", { key: "ArrowRight" });
+    expect(el.currentTime).toBe(120);
+  });
+
   it("falha do áudio (evento error) vira o banner de erro", async () => {
     const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
     const { w } = await mountDetail(detail(), { audioBlob });
