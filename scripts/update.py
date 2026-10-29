@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,10 @@ class UpdateError(Exception):
     """Recusa ou falha que o usuário precisa resolver antes de repetir o comando."""
 
 
+class BackendUnresponsive(Exception):
+    """O backend pode estar vivo, mas não deu um status válido (timeout, erro HTTP, JSON ruim)."""
+
+
 def _run(cmd: list[str], cwd: Path, show: bool = False) -> subprocess.CompletedProcess:
     """Executa um comando. `show` deixa a saída aparecer no terminal; senão ela é capturada."""
     try:
@@ -32,19 +37,43 @@ def _run(cmd: list[str], cwd: Path, show: bool = False) -> subprocess.CompletedP
 
 
 def backend_status() -> dict | None:
-    """Status do backend local, ou None se ele estiver parado ou não responder."""
+    """Status do backend local; None só quando ele está comprovadamente parado.
+
+    Parado = sem `api.json` legível, `pid` dele morto ou conexão recusada. Qualquer outra
+    falha (timeout, erro HTTP, JSON inválido) levanta BackendUnresponsive: um backend
+    ocupado com uma reunião não pode ser confundido com um backend parado.
+    """
     base = os.environ.get("XDG_DATA_HOME")
     data = (Path(base) if base else Path.home() / ".local" / "share") / "whisper-ditado"
     try:
         info = json.loads((data / "api.json").read_text())
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{info['port']}/api/status",
-            headers={"Authorization": f"Bearer {info['token']}"},
-        )
-        with urllib.request.urlopen(request, timeout=3) as response:
-            return json.load(response)
+        port, token = info["port"], info["token"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    pid = info.get("pid")
+    if isinstance(pid, int) and pid > 0:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except OSError:  # PermissionError: o processo existe
+            pass
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/status",
+                                     headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            status = json.load(response)
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ConnectionRefusedError):
+            return None
+        raise BackendUnresponsive(str(exc)) from exc
+    except ConnectionRefusedError:
+        return None
+    except (OSError, ValueError) as exc:  # timeout, reset, HTTPError, JSON inválido
+        raise BackendUnresponsive(str(exc)) from exc
+    if not isinstance(status, dict):
+        raise BackendUnresponsive("resposta inesperada")
+    return status
 
 
 def _key(tag: str) -> tuple[int, int, int]:
@@ -81,7 +110,7 @@ def _installed(root: Path, *patterns: str) -> bool:
 def _sync_args(root: Path) -> list[str]:
     """`uv sync` preservando extras e grupos que a pessoa já usa."""
     args = ["uv", "sync", "--frozen"]
-    if _installed(root, "pyannote.audio-*.dist-info", "pyannote"):
+    if _installed(root, "pyannote_audio-*.dist-info", "pyannote"):
         args += ["--extra", "pyannote"]
     if _installed(root, "pytest", "pytest-*.dist-info"):
         args += ["--group", "dev"]
@@ -98,7 +127,12 @@ def _check_preconditions(root: Path, run, api) -> bool:
         raise UpdateError("Há arquivos alterados no clone; faça commit ou descarte antes de atualizar "
                           "(nada foi mexido):\n  " + "\n  ".join(dirty.splitlines()))
     unit = run(["systemctl", "--user", "cat", UNIT], root).returncode == 0
-    status = api()
+    try:
+        status = api()
+    except BackendUnresponsive:
+        if run(["systemctl", "--user", "is-active", UNIT], root).stdout.strip() == "active":
+            raise UpdateError("O serviço não respondeu; tente de novo em instantes.") from None
+        status = None  # a unidade não está ativa: o backend está parado
     if status is not None:
         if (status.get("meeting") or {}).get("state", "idle") != "idle":
             raise UpdateError("Há uma reunião gravando ou processando. Termine-a e tente de novo.")
@@ -110,6 +144,17 @@ def _check_preconditions(root: Path, run, api) -> bool:
     return unit
 
 
+def _current_version(root: Path) -> str:
+    try:
+        version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+        raise UpdateError(f"Não consegui ler a versão em pyproject.toml: {exc}") from None
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", str(version)):
+        raise UpdateError(f"Versão '{version}' do pyproject.toml não é MAJOR.MINOR.PATCH; "
+                          "volte a uma release com git checkout e rode de novo.")
+    return version
+
+
 def update(root: Path, run=_run, api=backend_status, out=print) -> str:
     """Leva o clone à última release. Devolve a tag aplicada ou a versão atual."""
     unit = _check_preconditions(root, run, api)
@@ -118,17 +163,23 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
     _git(run, root, "fetch", "--tags", REMOTE)
     pending = pending_path(root, run)
     target = None
-    if pending.is_file():
+    if pending.exists():
         marked = pending.read_text().strip()
-        target = marked if TAG.fullmatch(marked) else None
-        if target:
+        known = TAG.fullmatch(marked) and not run(
+            ["git", "rev-parse", "-q", "--verify", f"refs/tags/{marked}"], root).returncode
+        if known:
+            target = marked
             out(f"Há uma atualização para {target} pela metade; retomando.")
+        else:
+            out(f"Atenção: a marca de atualização pendente aponta para '{marked}', que não existe "
+                "mais; descartando.")
+            pending.unlink()
     resuming = target is not None
     if target is None:
         target = latest_tag(_git(run, root, "tag", "--list", "v*").splitlines())
         if target is None:
             raise UpdateError(f"Nenhuma release encontrada em {REMOTE}. Veja {RELEASES}.")
-        current = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+        current = _current_version(root)
         if tuple(map(int, current.split("."))) >= _key(target):
             out(f"O TARS já está na versão {current} (última release: {target}).")
             return f"v{current}"
@@ -138,8 +189,10 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
     if unit:
         out("==> Parando o serviço")
         if run(["systemctl", "--user", "stop", UNIT], root).returncode:
-            pending.unlink(missing_ok=True)  # nada foi alterado ainda
-            raise UpdateError("Não consegui parar o serviço; nada foi alterado.")
+            if not resuming:  # numa retomada o clone já está pela metade: a marca fica
+                pending.unlink(missing_ok=True)
+            raise UpdateError("Não consegui parar o serviço; " + (
+                "rode o comando de novo para continuar." if resuming else "nada foi alterado."))
 
     def step(name: str, cmd: list[str], cwd: Path) -> None:
         out(f"==> {name}")
@@ -156,8 +209,9 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
         step("uv sync", _sync_args(root), root)
         step("pnpm install", ["pnpm", "install", "--frozen-lockfile"], root / "app")
         step("pnpm tauri build", ["pnpm", "tauri", "build", "--no-bundle"], root / "app")
-    except UpdateError as exc:
-        out(f"Falhou: {exc}")
+    except (UpdateError, KeyboardInterrupt) as exc:
+        interrupted = isinstance(exc, KeyboardInterrupt)
+        out("Interrompido." if interrupted else f"Falhou: {exc}")
         started = False
         if unit:
             out("==> Subindo o serviço de novo")
@@ -165,6 +219,10 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
         situation = ("o serviço voltou a subir" if started else
                      "o serviço não está rodando; inicie-o" if unit else
                      "inicie o ./run-backend.sh")
+        if interrupted:
+            out(f"Atualização interrompida ({situation}). Rode python3 scripts/update.py de novo "
+                "para continuar de onde parou.")
+            raise
         raise UpdateError(f"O passo '{exc}' falhou e o clone ficou pela metade ({situation}). "
                           "Corrija o problema e rode python3 scripts/update.py de novo para "
                           "continuar de onde parou.") from None
@@ -186,6 +244,8 @@ def main() -> None:
     except UpdateError as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
 
 
 if __name__ == "__main__":

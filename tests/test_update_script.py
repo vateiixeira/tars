@@ -191,7 +191,7 @@ def test_without_systemd_unit_skips_service_and_points_to_run_backend(repo):
 
 def test_keeps_pyannote_and_dev_extras(repo):
     site = repo / ".venv/lib/python3.12/site-packages"
-    (site / "pyannote.audio-3.3.2.dist-info").mkdir(parents=True)
+    (site / "pyannote_audio-3.3.2.dist-info").mkdir(parents=True)
     (site / "pytest").mkdir()
     runner = Runner()
     up(repo, runner)
@@ -251,3 +251,140 @@ def test_pending_marker_lives_in_the_git_dir_of_a_worktree(repo, tmp_path):
     assert pending.parent.is_dir()
     assert pending.parent != worktree / ".git"
     assert pending.parent.name == "wt"
+
+
+def test_stop_failure_while_resuming_keeps_the_marker(repo):
+    pending = update.pending_path(repo, Runner())
+    pending.write_text("v0.3.0\n")
+    runner = Runner(fail="systemctl --user stop")
+    with pytest.raises(update.UpdateError, match="de novo"):
+        up(repo, runner)
+    assert pending.read_text().strip() == "v0.3.0"
+
+
+def test_marker_for_a_vanished_tag_is_discarded_before_stopping(repo):
+    pending = update.pending_path(repo, Runner())
+    pending.write_text("v9.9.9\n")
+    runner = Runner()
+    messages = []
+    assert up(repo, runner, out=messages.append) == "v0.3.0"
+    assert any("v9.9.9" in m and "não existe" in m for m in messages)
+    assert ("git", "checkout", "v9.9.9") not in runner.commands()
+    assert not pending.exists()
+
+
+def test_garbage_marker_is_discarded(repo):
+    update.pending_path(repo, Runner()).write_text("lixo\n")
+    assert up(repo, Runner()) == "v0.3.0"
+
+
+def unresponsive():
+    raise update.BackendUnresponsive("timeout")
+
+
+def test_unresponsive_backend_with_active_unit_refuses(repo):
+    runner = Runner(active="active")
+    with pytest.raises(update.UpdateError, match="não respondeu"):
+        update.update(repo, run=runner, api=unresponsive, out=[].append)
+    assert runner.commands() == []
+
+
+def test_unresponsive_backend_with_inactive_unit_proceeds(repo):
+    runner = Runner(active="inactive")
+    assert update.update(repo, run=runner, api=unresponsive, out=[].append) == "v0.3.0"
+
+
+@pytest.fixture
+def api_home(tmp_path, monkeypatch):
+    home = tmp_path / "data"
+    (home / "whisper-ditado").mkdir(parents=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(home))
+    return home / "whisper-ditado" / "api.json"
+
+
+def write_info(path, pid=None):
+    import json
+    import os
+    path.write_text(json.dumps({"port": 1, "token": "t", "pid": pid or os.getpid()}))
+
+
+def test_backend_status_without_api_json_is_stopped(api_home):
+    assert update.backend_status() is None
+
+
+def test_backend_status_with_dead_pid_is_stopped(api_home, monkeypatch):
+    write_info(api_home, pid=4242)
+
+    def kill(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(update.os, "kill", kill)
+    monkeypatch.setattr(update.urllib.request, "urlopen", lambda *a, **k: pytest.fail("não deveria consultar"))
+    assert update.backend_status() is None
+
+
+def test_backend_status_refused_connection_is_stopped(api_home, monkeypatch):
+    write_info(api_home)
+
+    def refused(*a, **k):
+        raise update.urllib.error.URLError(ConnectionRefusedError())
+
+    monkeypatch.setattr(update.urllib.request, "urlopen", refused)
+    assert update.backend_status() is None
+
+
+@pytest.mark.parametrize("error", [
+    TimeoutError("timed out"),
+    ConnectionResetError(),
+    update.urllib.error.URLError(TimeoutError()),
+    update.urllib.error.HTTPError("http://x", 500, "erro", None, None),
+    ValueError("json ruim"),
+])
+def test_backend_status_other_failures_are_unresponsive(api_home, monkeypatch, error):
+    write_info(api_home)
+
+    def fail(*a, **k):
+        raise error
+
+    monkeypatch.setattr(update.urllib.request, "urlopen", fail)
+    with pytest.raises(update.BackendUnresponsive):
+        update.backend_status()
+
+
+def test_backend_status_non_dict_body_is_unresponsive(api_home, monkeypatch):
+    import io
+    write_info(api_home)
+    monkeypatch.setattr(update.urllib.request, "urlopen", lambda *a, **k: io.StringIO("[1]"))
+    with pytest.raises(update.BackendUnresponsive):
+        update.backend_status()
+
+
+def test_fetch_brings_a_tag_that_exists_only_in_origin(repo):
+    git(repo, "tag", "-d", "v0.3.0")
+    assert "v0.3.0" not in git(repo, "tag", "--list")
+    runner = Runner()
+    assert up(repo, runner) == "v0.3.0"
+    assert ("git", "checkout", "v0.3.0") in runner.commands()
+
+
+def test_non_numeric_pyproject_version_is_a_clear_error(latest):
+    (latest / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.3.0rc1"\n')
+    git(latest, "commit", "-qam", "rc")
+    runner = Runner()
+    with pytest.raises(update.UpdateError, match="0.3.0rc1"):
+        up(latest, runner)
+    assert runner.commands() == []
+
+
+def test_ctrl_c_during_a_step_restarts_the_service_and_keeps_the_marker(repo):
+    class Interrupting(Runner):
+        def __call__(self, cmd, cwd, show=False):
+            if cmd[0] == "uv":
+                raise KeyboardInterrupt
+            return super().__call__(cmd, cwd, show)
+
+    runner = Interrupting()
+    with pytest.raises(KeyboardInterrupt):
+        up(repo, runner)
+    assert runner.commands()[-1] == ("systemctl", "--user", "start", UNIT)
+    assert update.pending_path(repo, runner).read_text().strip() == "v0.3.0"
