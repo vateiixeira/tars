@@ -42,7 +42,7 @@ describe("MeetingList", () => {
     expect(listMeetings).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     await flushPromises();
-    expect(listMeetings).toHaveBeenLastCalledWith("nfse");
+    expect(listMeetings).toHaveBeenLastCalledWith("nfse", undefined);
     expect(w.findAll(".item")).toHaveLength(1);
   });
 
@@ -72,5 +72,41 @@ describe("MeetingList", () => {
     await flushPromises();
     expect(w.text()).not.toContain("não está rodando");
     expect(w.findAll(".item")).toHaveLength(1);
+  });
+
+  it("hides the archived link when there is nothing archived", async () => {
+    installStore({ listMeetings: vi.fn(async () => [item("a", "X", "2026-10-19T14:00:00")]) });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    expect(w.find(".archive-toggle").exists()).toBe(false);
+  });
+
+  it("switches to the archived list and back", async () => {
+    const listMeetings = vi.fn(async (_q?: string, archived?: boolean) =>
+      archived
+        ? [item("z", "Antiga", "2026-09-01T10:00:00")]
+        : [item("a", "Atual", "2026-10-19T14:00:00")],
+    );
+    const archivedCount = vi.fn(async () => ({ count: 1 }));
+    installStore({ listMeetings, archivedCount });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    expect(w.get(".archive-toggle").text()).toBe("Arquivadas (1)");
+
+    await w.get(".archive-toggle").trigger("click");
+    await flushPromises();
+    expect(listMeetings).toHaveBeenLastCalledWith(undefined, true);
+    expect(w.findAll(".item").map((i) => i.find("b").text())).toEqual(["Antiga"]);
+    expect(w.get(".archive-toggle").text()).toContain("Voltar às reuniões");
+
+    await w.get("input").setValue("antiga");
+    await w.get("input").trigger("input");
+    await new Promise((r) => setTimeout(r, 310));
+    await flushPromises();
+    expect(listMeetings).toHaveBeenLastCalledWith("antiga", true);
+
+    await w.get(".archive-toggle").trigger("click");
+    await flushPromises();
+    expect(listMeetings).toHaveBeenLastCalledWith("antiga", undefined);
   });
 });

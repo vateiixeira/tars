@@ -239,7 +239,7 @@ def test_meeting_detail_shape(client, ctx):
     body = client.get(f"/api/meetings/{mid}").json()
     assert set(body) == {"id", "title", "started_at", "ended_at", "status", "error",
                          "followed_app", "speakers", "segments", "summary", "alerts",
-                         "summary_job", "prints"}
+                         "summary_job", "prints", "archived_at"}
     assert body["title"] == "Planejamento"
     assert body["followed_app"] == "Zoom"
     assert body["summary"] == "resumo aqui"
@@ -298,6 +298,40 @@ def test_patch_reprocess_and_delete_meeting(client, ctx):
     assert ctx.store.get_meeting(mid) is None
     assert not folder.exists()
     assert client.delete(f"/api/meetings/{mid}").status_code == 404
+
+
+def test_archive_and_unarchive_meeting(client, ctx):
+    mid = make_meeting(ctx)
+    other = ctx.store.create_meeting(datetime(2026, 10, 18, 10, 0))
+    ctx.store.update_meeting(other.id, title="Churrasco", status="ready")
+    assert client.get(f"/api/meetings/{mid}").json()["archived_at"] is None
+    assert client.get("/api/meetings/archived/count").json() == {"count": 0}
+
+    r = client.post(f"/api/meetings/{mid}/archive")
+    assert r.status_code == 200 and r.json()["archived_at"]
+    assert client.get(f"/api/meetings/{mid}").json()["archived_at"] == r.json()["archived_at"]
+    assert [m["id"] for m in client.get("/api/meetings").json()] == [other.id]
+    archived = client.get("/api/meetings", params={"archived": "true"}).json()
+    assert [m["id"] for m in archived] == [mid]
+    assert client.get("/api/meetings", params={"archived": "true", "q": "maria"}).json()[0]["id"] == mid
+    assert client.get("/api/meetings/archived/count").json() == {"count": 1}
+    # falantes de reunião arquivada continuam editáveis
+    assert client.patch("/api/speakers/sp-a", json={"label": "Maria"}).status_code == 200
+
+    r = client.delete(f"/api/meetings/{mid}/archive")
+    assert r.status_code == 200 and r.json()["archived_at"] is None
+    assert [m["id"] for m in client.get("/api/meetings").json()] == [mid, other.id]
+    assert client.post("/api/meetings/zzz/archive").status_code == 404
+    assert client.delete("/api/meetings/zzz/archive").status_code == 404
+
+
+def test_archive_refuses_active_meeting(client, ctx):
+    mid = make_meeting(ctx, status="processing")
+    r = client.post(f"/api/meetings/{mid}/archive")
+    assert r.status_code == 409 and isinstance(r.json()["detail"], str)
+    assert ctx.store.get_meeting(mid).archived_at is None
+    recording = client.post("/api/meetings/start").json()["meeting_id"]
+    assert client.post(f"/api/meetings/{recording}/archive").status_code == 409
 
 
 def test_delete_refuses_active_meeting(client, ctx):

@@ -185,8 +185,17 @@ INSERT OR IGNORE INTO settings(key, value)
 DELETE FROM settings WHERE key = 'voice_match_threshold';
 """
 
+# Reunião arquivada sai da lista principal, mas continua inteira e editável.
+_SCHEMA_V8 = """
+ALTER TABLE meetings ADD COLUMN archived_at TEXT;
+CREATE INDEX idx_meetings_archived ON meetings(archived_at);
+"""
+
 # Índice = versão destino (`PRAGMA user_version` após aplicar).
-_MIGRATIONS = [_SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7]
+_MIGRATIONS = [
+    _SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
+    _SCHEMA_V8,
+]
 
 
 @dataclass
@@ -199,6 +208,7 @@ class Meeting:
     status: str
     error: str | None = None
     followed_app: str | None = None
+    archived_at: datetime | None = None
 
 
 @dataclass
@@ -369,6 +379,7 @@ _MEETING_FIELDS = {
     "status": None,
     "error": None,
     "followed_app": None,
+    "archived_at": _iso,
 }
 _SPEAKER_FIELDS = {
     "label": None,
@@ -438,6 +449,7 @@ class Store:
             id=row["id"], title=row["title"], title_auto=bool(row["title_auto"]),
             started_at=_dt(row["started_at"]), ended_at=_dt(row["ended_at"]),
             status=row["status"], error=row["error"], followed_app=row["followed_app"],
+            archived_at=_dt(row["archived_at"]),
         )
 
     def create_meeting(self, started_at: datetime) -> Meeting:
@@ -455,7 +467,10 @@ class Store:
             row = self._conn.execute("SELECT * FROM meetings WHERE id=?", (meeting_id,)).fetchone()
         return self._meeting(row) if row else None
 
-    def list_meetings(self, query: str | None = None) -> list[MeetingSummary]:
+    def list_meetings(
+        self, query: str | None = None, *, archived: bool | None = False
+    ) -> list[MeetingSummary]:
+        """Reuniões mais recentes primeiro; `archived=None` traz arquivadas e não arquivadas."""
         sql = """
             SELECT m.id, m.title, m.started_at, m.status, m.ended_at,
                    (SELECT COUNT(*) FROM speakers sp WHERE sp.meeting_id = m.id) AS speakers_count,
@@ -464,14 +479,17 @@ class Store:
             FROM meetings m
         """
         params: list = []
+        where: list[str] = []
+        if archived is not None:
+            where.append("m.archived_at IS NOT NULL" if archived else "m.archived_at IS NULL")
         if query:
-            sql += """
-                WHERE casefold(m.title) LIKE ? ESCAPE '\\'
+            where.append("""(casefold(m.title) LIKE ? ESCAPE '\\'
                    OR EXISTS (SELECT 1 FROM segments sg
-                              WHERE sg.meeting_id = m.id AND casefold(sg.text) LIKE ? ESCAPE '\\')
-            """
+                              WHERE sg.meeting_id = m.id AND casefold(sg.text) LIKE ? ESCAPE '\\'))""")
             pattern = _like_pattern(query)
             params = [pattern, pattern]
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY m.started_at DESC"
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
@@ -485,6 +503,26 @@ class Store:
                 speakers_count=r["speakers_count"], status=r["status"],
             ))
         return out
+
+    def count_archived(self) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM meetings WHERE archived_at IS NOT NULL"
+            ).fetchone()[0]
+
+    def set_archived(self, meeting_id: str, archived: bool) -> None:
+        """Arquivar recusa (`MeetingBusy`) reunião gravando/processando; desarquivar sempre pode."""
+        with self._tx() as c:
+            if not archived:
+                c.execute("UPDATE meetings SET archived_at=NULL WHERE id=?", (meeting_id,))
+                return
+            cur = c.execute(
+                "UPDATE meetings SET archived_at=? WHERE id=?"
+                " AND status NOT IN ('recording','processing')",
+                (datetime.now().isoformat(), meeting_id),
+            )
+            if cur.rowcount == 0:
+                raise MeetingBusy("A reunião ainda está sendo gravada ou processada")
 
     def update_meeting(self, meeting_id: str, **fields) -> None:
         self._update("meetings", meeting_id, _MEETING_FIELDS, fields)

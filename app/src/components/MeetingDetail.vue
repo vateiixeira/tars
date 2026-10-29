@@ -408,6 +408,22 @@ function reprocess(): Promise<void> {
 const menuOpen = ref(false);
 const peopleExpanded = ref(false);
 const confirmingDelete = ref(false);
+const archived = computed(() => !!meeting.value?.archived_at);
+// gravando/processando: o backend recusa (409), igual à exclusão
+const canArchive = computed(
+  () => meeting.value?.status !== "recording" && meeting.value?.status !== "processing",
+);
+
+function toggleArchive(): Promise<void> {
+  const id = props.meetingId;
+  const archive = !archived.value;
+  menuOpen.value = false;
+  return run("archive", async () => {
+    const r = archive ? await client.archiveMeeting(id) : await client.unarchiveMeeting(id);
+    if (id === props.meetingId && meeting.value) meeting.value.archived_at = r.archived_at;
+    notifyMeetingsChanged();
+  });
+}
 
 function remove(): Promise<void> {
   const id = props.meetingId;
@@ -592,6 +608,13 @@ onBeforeUnmount(() => {
               </button>
               <button
                 type="button"
+                :disabled="!connected || isBusy('archive') || (!archived && !canArchive)"
+                @click="toggleArchive"
+              >
+                {{ archived ? "Desarquivar" : "Arquivar reunião" }}
+              </button>
+              <button
+                type="button"
                 class="danger"
                 :disabled="!connected"
                 @click="
@@ -606,7 +629,8 @@ onBeforeUnmount(() => {
         </div>
         <div class="meta">
           <AppIcon name="clock" :size="14" />{{ when
-          }}<span v-if="savingTitle" role="status">Salvando título…</span>
+          }}<span v-if="archived" class="archived-tag">Arquivada</span
+          ><span v-if="savingTitle" role="status">Salvando título…</span>
         </div>
         <div class="head-bottom" :class="{ expanded: peopleExpanded }">
           <SpeakerChips
@@ -1053,6 +1077,12 @@ h1 {
   color: var(--muted);
   font-size: var(--font-meta);
   margin-top: 12px;
+}
+.archived-tag {
+  padding: 1px 8px;
+  border: 1px solid var(--border-control);
+  border-radius: 999px;
+  font-size: 0.6875rem;
 }
 .head-bottom {
   display: flex;

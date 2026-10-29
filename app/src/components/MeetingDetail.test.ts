@@ -29,6 +29,7 @@ const detail = (extra: Partial<Detail> = {}): Detail => ({
   status: "ready",
   error: null,
   followed_app: null,
+  archived_at: null,
   speakers: [
     { id: "s1", label: "Você", voice_id: null, is_me: true, color_index: 0 },
     { id: "s2", label: "Pessoa 2", voice_id: null, is_me: false, color_index: 1 },
@@ -418,6 +419,46 @@ describe("MeetingDetail", () => {
     await flushPromises();
     expect(deleteMeeting).toHaveBeenCalledWith("m1");
     expect(w.emitted("deleted")?.[0]).toEqual(["m1"]);
+  });
+
+  it("archives and unarchives from the menu without confirmation", async () => {
+    const archiveMeeting = vi.fn(async () => ({ id: "m1", archived_at: "2026-10-29T13:00:00" }));
+    const unarchiveMeeting = vi.fn(async () => ({ id: "m1", archived_at: null }));
+    const before = meetingsRevision.value;
+    const { w } = await mountDetail(detail(), { archiveMeeting, unarchiveMeeting });
+    expect(w.find(".archived-tag").exists()).toBe(false);
+
+    await w.get(".more").trigger("click");
+    await w.findAll("button").find((b) => b.text() === "Arquivar reunião")!.trigger("click");
+    await flushPromises();
+    expect(archiveMeeting).toHaveBeenCalledWith("m1");
+    expect(w.get(".archived-tag").text()).toBe("Arquivada");
+    expect(meetingsRevision.value).toBe(before + 1);
+
+    await w.get(".more").trigger("click");
+    await w.findAll("button").find((b) => b.text() === "Desarquivar")!.trigger("click");
+    await flushPromises();
+    expect(unarchiveMeeting).toHaveBeenCalledWith("m1");
+    expect(w.find(".archived-tag").exists()).toBe(false);
+  });
+
+  it("shows the archive error as a banner", async () => {
+    const archiveMeeting = vi.fn(async () => {
+      throw new Error("A reunião ainda está sendo gravada ou processada");
+    });
+    const { w } = await mountDetail(detail(), { archiveMeeting });
+    await w.get(".more").trigger("click");
+    await w.findAll("button").find((b) => b.text() === "Arquivar reunião")!.trigger("click");
+    await flushPromises();
+    expect(w.get(".banner.error").text()).toContain("gravada ou processada");
+    expect(w.find(".archived-tag").exists()).toBe(false);
+  });
+
+  it("does not offer archiving while the meeting is processing", async () => {
+    const { w } = await mountDetail(detail({ status: "processing" }));
+    await w.get(".more").trigger("click");
+    const btn = w.findAll("button").find((b) => b.text() === "Arquivar reunião")!;
+    expect(btn.attributes("disabled")).toBeDefined();
   });
 
   it("plays a segment through the audio player", async () => {

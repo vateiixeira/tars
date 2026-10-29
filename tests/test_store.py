@@ -35,7 +35,7 @@ def test_migrations_create_schema_and_file_is_private(tmp_path):
     path = tmp_path / "t.db"
     s = Store(path)
     assert path.stat().st_mode & 0o777 == 0o600
-    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 8
     names = {r[0] for r in s._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"meetings", "speakers", "segments", "summaries", "voices", "alerts",
             "dictation_spans", "settings", "meeting_jobs", "task_suggestions", "dictation_samples",
@@ -43,7 +43,7 @@ def test_migrations_create_schema_and_file_is_private(tmp_path):
     s.close()
     # reabrir é idempotente
     s2 = Store(path)
-    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 8
     s2.close()
 
 
@@ -305,7 +305,7 @@ def test_migration_v7_tags_existing_embeddings_and_settings(tmp_path):
 
     s = Store(path)
     try:
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 8
         v1 = s.get_voice("v1")
         assert set(v1.embeddings) == {"pyannote-community-1"}
         emb = v1.embeddings["pyannote-community-1"]
@@ -355,7 +355,7 @@ def test_migration_v7_from_main_v6_keeps_prints(tmp_path):
 
     s = Store(path)
     try:
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 8
         rows = s._conn.execute("SELECT voice_id, model, n_samples FROM voice_embeddings").fetchall()
         assert [tuple(r) for r in rows] == [("v1", "pyannote-community-1", 3)]
         np.testing.assert_array_equal(s.get_voice("v1").embeddings["pyannote-community-1"].vector, vec)
@@ -394,3 +394,30 @@ def test_delete_alerts_by_kind_only_for_that_meeting(store):
     store.delete_alerts(a.id, "no_diarization")
     assert [x.kind for x in store.get_alerts(a.id)] == ["mic_silent"]
     assert [x.kind for x in store.get_alerts(b.id)] == ["no_diarization"]
+
+
+def test_archive_hides_meeting_from_main_list(store):
+    a = store.create_meeting(T0)
+    b = store.create_meeting(T0 + timedelta(days=1))
+    store.update_meeting(a.id, title="Planejamento", status="ready")
+    store.update_meeting(b.id, title="Planejamento 2", status="ready")
+    assert store.get_meeting(a.id).archived_at is None
+
+    store.set_archived(a.id, True)
+    assert store.get_meeting(a.id).archived_at is not None
+    assert [x.id for x in store.list_meetings()] == [b.id]
+    assert [x.id for x in store.list_meetings("planeja")] == [b.id]
+    assert [x.id for x in store.list_meetings(archived=True)] == [a.id]
+    assert [x.id for x in store.list_meetings("planeja", archived=True)] == [a.id]
+    assert {x.id for x in store.list_meetings(archived=None)} == {a.id, b.id}
+    assert store.count_archived() == 1
+
+    store.update_meeting(b.id, status="processing")
+    with pytest.raises(MeetingBusy):
+        store.set_archived(b.id, True)
+    assert store.get_meeting(b.id).archived_at is None
+
+    store.set_archived(a.id, False)
+    assert store.get_meeting(a.id).archived_at is None
+    assert [x.id for x in store.list_meetings()] == [b.id, a.id]
+    assert store.count_archived() == 0

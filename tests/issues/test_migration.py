@@ -38,7 +38,9 @@ def test_migrates_legacy_settings_and_created_issue_without_losing_data(tmp_path
         assert (task.issue_number, task.issue_url, task.create_state) == (42, "https://tracker.example/tickets/42", "created")
         assert task.title == "Implementar" and task.description == "Descrição aprovada"
         assert store.get_meeting("m").title == "Antiga"
-        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert store.get_meeting("m").archived_at is None
+        assert [m.id for m in store.list_meetings()] == ["m"]
+        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 8
     finally:
         store.close()
     reopened = Store(path)

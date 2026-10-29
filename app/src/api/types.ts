@@ -105,6 +105,8 @@ export interface MeetingDetail {
   status: MeetingStatus;
   error: string | null;
   followed_app: string | null;
+  /** Quando foi arquivada; `null` se está na lista principal. */
+  archived_at: string | null;
   speakers: Speaker[];
   segments: Segment[];
   summary: string | null;

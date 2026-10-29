@@ -51,7 +51,7 @@ async function errorMessage(res: Response): Promise<string> {
   return `Erro ${res.status} no serviço do ditado`;
 }
 
-function query(params: Record<string, string | number | undefined | null>): string {
+function query(params: Record<string, string | number | boolean | undefined | null>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
@@ -117,7 +117,14 @@ export function createClient(getInfo: () => Promise<ApiInfo>, fetchFn: typeof fe
     monitorLevels: (on: boolean) => json<{ on: boolean }>("POST", "/levels/monitor", { on }),
 
     // reuniões
-    listMeetings: (q?: string) => json<MeetingListItem[]>("GET", `/meetings${query({ q })}`),
+    /** Lista principal ou, com `archived`, só as reuniões arquivadas. */
+    listMeetings: (q?: string, archived?: boolean) =>
+      json<MeetingListItem[]>("GET", `/meetings${query({ q, archived: archived || undefined })}`),
+    archivedCount: () => json<{ count: number }>("GET", "/meetings/archived/count"),
+    archiveMeeting: (id: string) =>
+      json<{ id: string; archived_at: string }>("POST", `/meetings/${enc(id)}/archive`),
+    unarchiveMeeting: (id: string) =>
+      json<{ id: string; archived_at: null }>("DELETE", `/meetings/${enc(id)}/archive`),
     getMeeting: (id: string) => json<MeetingDetail>("GET", `/meetings/${enc(id)}`),
     renameMeeting: (id: string, title: string) =>
       json<{ id: string; title: string }>("PATCH", `/meetings/${enc(id)}`, { title }),

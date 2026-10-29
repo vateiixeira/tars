@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Busca (debounce 300 ms) + lista de reuniões agrupada por dia. Recarrega em `meeting_updated`,
+// Busca (debounce 300 ms) + lista de reuniões agrupada por dia. O link do rodapé alterna para
+// as reuniões arquivadas (a busca vale para a lista que estiver na tela). Recarrega em `meeting_updated`,
 // quando outro componente avisa por `notifyMeetingsChanged()` e a cada (re)conexão com o backend
 // (no login o app sobe antes do serviço, e eventos se perdem enquanto ele reinicia).
 import { computed, onBeforeUnmount, ref, watch } from "vue";
@@ -16,6 +17,8 @@ const SEARCH_DEBOUNCE_MS = 300;
 const { client, events, meetingState, connected } = useStatus();
 
 const query = ref("");
+const showArchived = ref(false);
+const archivedCount = ref(0);
 const items = ref<MeetingListItem[]>([]);
 const error = ref<string | null>(null);
 const loaded = ref(false);
@@ -28,9 +31,15 @@ async function load(): Promise<void> {
   const seq = ++requestSeq;
   const q = query.value.trim();
   try {
-    const result = await client.listMeetings(q || undefined);
+    const archived = showArchived.value;
+    const [result, count] = await Promise.all([
+      client.listMeetings(q || undefined, archived || undefined),
+      // a contagem é só do link do rodapé: se falhar, a lista ainda aparece
+      archived ? null : client.archivedCount().catch(() => null),
+    ]);
     if (seq !== requestSeq) return;
     items.value = result;
+    if (count) archivedCount.value = count.count;
     error.value = null;
   } catch (e) {
     if (seq !== requestSeq) return;
@@ -44,6 +53,20 @@ function onSearch(): void {
   clearTimeout(debounce);
   debounce = setTimeout(load, SEARCH_DEBOUNCE_MS);
 }
+
+function toggleArchived(): void {
+  clearTimeout(debounce);
+  showArchived.value = !showArchived.value;
+  loaded.value = false;
+  items.value = [];
+  void load();
+}
+
+const emptyText = computed(() => {
+  const q = query.value.trim();
+  if (q) return `Nada encontrado para “${q}”.`;
+  return showArchived.value ? "Nenhuma reunião arquivada." : "Nenhuma reunião ainda.";
+});
 
 function meta(m: MeetingListItem): string {
   const time = timeOfDay(m.started_at);
@@ -72,16 +95,17 @@ onBeforeUnmount(() => {
       v-model="query"
       class="search"
       type="search"
-      placeholder="Buscar nas reuniões…"
-      aria-label="Buscar nas reuniões"
+      :placeholder="showArchived ? 'Buscar nas arquivadas…' : 'Buscar nas reuniões…'"
+      :aria-label="showArchived ? 'Buscar nas reuniões arquivadas' : 'Buscar nas reuniões'"
       @input="onSearch"
     />
-    <div class="list" aria-label="Reuniões">
+    <button v-if="showArchived" type="button" class="archive-toggle back" @click="toggleArchived">
+      ← Voltar às reuniões
+    </button>
+    <div class="list" :aria-label="showArchived ? 'Reuniões arquivadas' : 'Reuniões'">
       <p v-if="!loaded" class="empty" role="status">Carregando reuniões…</p>
       <p v-if="error" class="empty error">{{ error }}</p>
-      <p v-else-if="loaded && items.length === 0" class="empty">
-        {{ query.trim() ? `Nada encontrado para “${query.trim()}”.` : "Nenhuma reunião ainda." }}
-      </p>
+      <p v-else-if="loaded && items.length === 0" class="empty">{{ emptyText }}</p>
       <template v-for="g in groups" :key="g.label">
         <div class="day">{{ g.label }}</div>
         <button
@@ -97,6 +121,14 @@ onBeforeUnmount(() => {
         </button>
       </template>
     </div>
+    <button
+      v-if="!showArchived && archivedCount > 0"
+      type="button"
+      class="archive-toggle"
+      @click="toggleArchived"
+    >
+      Arquivadas ({{ archivedCount }})
+    </button>
   </div>
 </template>
 
@@ -113,4 +145,7 @@ onBeforeUnmount(() => {
 .item span { display:block; font-size:.6875rem; color:var(--muted); margin-top:6px; }
 .empty { margin:16px 10px; color:var(--muted); font-size:var(--font-meta); }
 .empty.error { color:var(--danger); }
+.archive-toggle { align-self:flex-start; margin:6px 2px; padding:6px 8px; border:0; border-radius:var(--radius-md); background:transparent; color:var(--muted); font:inherit; font-size:.75rem; cursor:pointer; }
+.archive-toggle:hover { background:var(--hover); color:var(--text); }
+.archive-toggle.back { margin-top:8px; }
 </style>

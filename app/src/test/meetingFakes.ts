@@ -42,6 +42,7 @@ export function installStore(overrides: Record<string, unknown> = {}, status: St
   const client = {
     status: vi.fn(async () => status),
     listMeetings: vi.fn(async () => []),
+    archivedCount: vi.fn(async () => ({ count: 0 })),
     ...overrides,
   } as unknown as ApiClient;
   const { events, emit } = fakeEvents();

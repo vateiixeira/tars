@@ -315,7 +315,7 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
 
     def find_speaker(speaker_id: str):
         # o Store não tem busca de falante por id: varre as reuniões
-        for summary in store.list_meetings():
+        for summary in store.list_meetings(archived=None):
             for sp in store.get_speakers(summary.id):
                 if sp.id == speaker_id:
                     return sp
@@ -377,12 +377,17 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
     # -- reuniões ------------------------------------------------------------------------
 
     @router.get("/meetings")
-    def list_meetings(q: str | None = None) -> list[dict]:
+    def list_meetings(q: str | None = None, archived: bool = False) -> list[dict]:
         return [
             {"id": m.id, "title": m.title, "started_at": _iso(m.started_at),
              "duration_s": m.duration_s, "speakers_count": m.speakers_count, "status": m.status}
-            for m in store.list_meetings(q or None)
+            for m in store.list_meetings(q or None, archived=archived)
         ]
+
+    # antes de `/meetings/{meeting_id}` só por clareza: o caminho tem dois segmentos
+    @router.get("/meetings/archived/count")
+    def archived_count() -> dict:
+        return {"count": store.count_archived()}
 
     @router.get("/meetings/{meeting_id}")
     def meeting_detail(meeting_id: str) -> dict:
@@ -390,7 +395,7 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         return {
             "id": m.id, "title": m.title, "started_at": _iso(m.started_at),
             "ended_at": _iso(m.ended_at), "status": m.status, "error": m.error,
-            "followed_app": m.followed_app,
+            "followed_app": m.followed_app, "archived_at": _iso(m.archived_at),
             "speakers": [
                 {"id": s.id, "label": s.label, "voice_id": s.voice_id, "is_me": s.is_me,
                  "color_index": s.color_index}
@@ -429,6 +434,23 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         # `m` veio do banco, então o id é um uuid4 hex nosso (sem `..` ou `/`)
         shutil.rmtree(paths.data_dir() / "meetings" / meeting_id, ignore_errors=True)
         return {"ok": True}
+
+    @router.post("/meetings/{meeting_id}/archive")
+    def archive_meeting(meeting_id: str) -> dict:
+        m = get_meeting(meeting_id)
+        if m.status in ("recording", "processing") or meetings.current_id == meeting_id:
+            raise HTTPException(409, "A reunião ainda está sendo gravada ou processada")
+        try:
+            store.set_archived(meeting_id, True)
+        except MeetingBusy as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"id": meeting_id, "archived_at": _iso(get_meeting(meeting_id).archived_at)}
+
+    @router.delete("/meetings/{meeting_id}/archive")
+    def unarchive_meeting(meeting_id: str) -> dict:
+        get_meeting(meeting_id)
+        store.set_archived(meeting_id, False)
+        return {"id": meeting_id, "archived_at": None}
 
     @router.post("/meetings/{meeting_id}/reprocess")
     async def reprocess_meeting(meeting_id: str) -> dict:
