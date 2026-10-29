@@ -388,6 +388,15 @@ const meetingLength = computed(() => {
   return m.segments[m.segments.length - 1]?.end_s ?? 0;
 });
 
+/** Tempo do player; voltar a tocar com sucesso tira o aviso de falha de áudio. */
+function onPlayback(state: Playback | null): void {
+  playback.value = state;
+  if (state?.playing && actionErrors.value.audio) {
+    const { audio: _cleared, ...rest } = actionErrors.value;
+    actionErrors.value = rest;
+  }
+}
+
 function stopAudio(): void {
   ++audioSeq;
   player.value?.pause();
@@ -674,7 +683,8 @@ onBeforeUnmount(() => {
           :loading="isBusy('audio')"
           :disabled="!connected"
           @load="playAudio()"
-          @progress="playback = $event"
+          @progress="onPlayback"
+          @error="actionErrors = { ...actionErrors, audio: $event }"
         />
         <span class="sr-only" role="status">{{
           copied === "transcript" ? "Transcrição copiada." : copied === "summary" ? "Resumo copiado." : ""

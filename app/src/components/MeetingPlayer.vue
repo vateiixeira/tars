@@ -27,7 +27,9 @@ const props = defineProps<{
   loading: boolean;
   disabled: boolean;
 }>();
-const emit = defineEmits<{ load: []; progress: [state: Playback | null] }>();
+const emit = defineEmits<{ load: []; progress: [state: Playback | null]; error: [message: string] }>();
+
+const AUDIO_ERROR = "Não foi possível tocar o áudio desta reunião.";
 
 const audioEl = ref<HTMLAudioElement | null>(null);
 const current = ref(0);
@@ -71,10 +73,16 @@ function onTime(): void {
   current.value = audioEl.value?.currentTime ?? 0;
 }
 
-/** Toca o que estiver carregado (um autoplay barrado não vira erro na tela). */
+/** Toca o que estiver carregado. Autoplay barrado (`NotAllowedError`) ou interrompido por outro
+ * `load`/`pause` (`AbortError`) não é falha; qualquer outra rejeição vira `error`. */
 async function play(): Promise<void> {
-  // jsdom não implementa `play`
-  await audioEl.value?.play?.()?.catch(() => {});
+  try {
+    // jsdom não implementa `play`
+    await audioEl.value?.play?.();
+  } catch (e) {
+    const name = e instanceof DOMException || e instanceof Error ? e.name : "";
+    if (name !== "NotAllowedError" && name !== "AbortError") emit("error", AUDIO_ERROR);
+  }
 }
 function pause(): void {
   audioEl.value?.pause?.();
@@ -148,6 +156,7 @@ defineExpose({ play, pause });
       @play="playing = true"
       @pause="playing = false"
       @ended="playing = false"
+      @error="emit('error', AUDIO_ERROR)"
     />
   </div>
 </template>

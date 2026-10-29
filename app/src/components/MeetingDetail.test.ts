@@ -585,6 +585,45 @@ describe("MeetingDetail", () => {
     expect(w.findComponent(MeetingPlayer).emitted("progress")?.slice(-1)[0]).toEqual([{ at: 90, playing: true }]);
   });
 
+  it("falha do áudio (evento error) vira o banner de erro", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const { w } = await mountDetail(detail(), { audioBlob });
+    await w.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
+    await flushPromises();
+    expect(w.find(".banner.error").exists()).toBe(false);
+    await w.get("audio").trigger("error");
+    expect(w.get(".banner.error").text()).toContain("Não foi possível tocar o áudio desta reunião.");
+    // voltar a tocar com sucesso tira o aviso
+    await w.get("audio").trigger("play");
+    expect(w.find(".banner.error").exists()).toBe(false);
+  });
+
+  it("play() rejeitado vira banner, exceto NotAllowedError e AbortError", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockImplementationOnce(async () => {
+      throw new DOMException("barrado", "NotAllowedError");
+    });
+    const { w } = await mountDetail(detail(), { audioBlob });
+    await w.get('[aria-label="Ouvir áudio da reunião"]').trigger("click");
+    await flushPromises();
+    expect(w.find(".banner.error").exists()).toBe(false);
+
+    play.mockImplementationOnce(async () => {
+      throw new DOMException("interrompido", "AbortError");
+    });
+    await w.get(".row .play").trigger("click");
+    await flushPromises();
+    expect(w.find(".banner.error").exists()).toBe(false);
+
+    play.mockImplementationOnce(async () => {
+      throw new DOMException("sem suporte", "NotSupportedError");
+    });
+    await w.get(".row .play").trigger("click");
+    await flushPromises();
+    expect(w.get(".banner.error").text()).toContain("Não foi possível tocar o áudio desta reunião.");
+  });
+
   it("trocar de reunião zera o tempo do player: nada fica tocando na reunião nova", async () => {
     const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
     const { w, getMeeting } = await mountDetail(detail(), { audioBlob });
