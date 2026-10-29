@@ -4,7 +4,8 @@ import AppIcon from "./AppIcon.vue";
 
 // Só o painel: quem usa posiciona, abre e devolve o foco ao fechar.
 // Itens fora da ordem de Tab (tabindex -1): o foco entra no primeiro e anda pelas setas.
-type MenuItem = { key: string; label: string; icon?: string; danger?: boolean; disabled?: boolean };
+// Com `checked` definido o item vira opção de escolha única (menuitemradio) e mostra o visto.
+type MenuItem = { key: string; label: string; icon?: string; danger?: boolean; disabled?: boolean; checked?: boolean };
 
 const props = defineProps<{ items: MenuItem[]; label: string }>();
 const emit = defineEmits<{ select: [key: string]; close: [] }>();
@@ -16,7 +17,7 @@ const regular = computed(() => props.items.filter((i) => !i.danger));
 const destructive = computed(() => props.items.filter((i) => i.danger));
 
 function enabledItems(): HTMLButtonElement[] {
-  return Array.from(root.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+  return Array.from(root.value?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? []);
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -42,7 +43,11 @@ function onKeydown(e: KeyboardEvent) {
   list[next].focus();
 }
 
-onMounted(() => enabledItems()[0]?.focus());
+// Em menu de escolha, o foco entra na opção marcada.
+onMounted(() => {
+  const list = enabledItems();
+  (list.find((b) => b.getAttribute("aria-checked") === "true") ?? list[0])?.focus();
+});
 </script>
 
 <template>
@@ -51,7 +56,8 @@ onMounted(() => enabledItems()[0]?.focus());
       v-for="item in regular"
       :key="item.key"
       type="button"
-      role="menuitem"
+      :role="item.checked === undefined ? 'menuitem' : 'menuitemradio'"
+      :aria-checked="item.checked"
       tabindex="-1"
       class="menu-item"
       :disabled="item.disabled"
@@ -59,6 +65,7 @@ onMounted(() => enabledItems()[0]?.focus());
     >
       <AppIcon v-if="item.icon" :name="item.icon" :size="18" />
       {{ item.label }}
+      <AppIcon v-if="item.checked" class="checked" name="check" :size="16" />
     </button>
     <div v-if="regular.length && destructive.length" class="sep" role="separator" />
     <button
@@ -122,6 +129,10 @@ onMounted(() => enabledItems()[0]?.focus());
 .menu-item svg {
   color: var(--text-muted);
 }
+.menu-item svg.checked {
+  margin-left: auto;
+  color: var(--text-accent);
+}
 .menu-item.danger,
 .menu-item.danger svg {
   color: var(--danger);
@@ -132,7 +143,7 @@ onMounted(() => enabledItems()[0]?.focus());
   background: var(--glass-border);
 }
 @media (prefers-reduced-motion: reduce) {
-  .item {
+  .menu-item {
     transition: none;
   }
 }

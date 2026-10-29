@@ -227,4 +227,18 @@ describe("AppMenu", () => {
     await w.trigger("keydown", { key: "Escape" });
     expect(w.emitted("close")).toHaveLength(1);
   });
+
+  it("renders single-choice items as menuitemradio and focuses the checked one", async () => {
+    const choices = [
+      { key: "system", label: "Tema do sistema", checked: false },
+      { key: "dark", label: "Noite", checked: true },
+      { key: "light", label: "Dia", checked: false },
+    ];
+    const w = mountMenu({ items: choices, label: "Aparência" });
+    const radios = w.findAll("[role=menuitemradio]");
+    expect(radios.map((r) => r.attributes("aria-checked"))).toEqual(["false", "true", "false"]);
+    expect((document.activeElement as HTMLElement).textContent?.trim()).toBe("Noite");
+    await w.trigger("keydown", { key: "ArrowDown" });
+    expect((document.activeElement as HTMLElement).textContent?.trim()).toBe("Dia");
+  });
 });
