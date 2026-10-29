@@ -240,12 +240,21 @@ function step(delta: -1 | 1): void {
   if (target) openId.value = target.id;
 }
 
+/** `suggested` com responsável/equipe enviados marcados como escolha do operador, como o servidor faz. */
+function markedManual(t: TaskSuggestion, changes: Changes): TaskSuggestion["suggested"] {
+  const chosen = (["assignee_id", "team_id"] as const).filter((k) => k in changes);
+  if (!chosen.length) return t.suggested;
+  const fill = { ...t.suggested?.fill };
+  for (const k of chosen) fill[k] = "manual";
+  return { ...t.suggested, fill };
+}
+
 /** Aplica na tela na hora (o "Criar" seguinte já leva o valor) e salva no servidor. */
 async function onUpdate(id: string, changes: Changes): Promise<void> {
   loadSeq++; // uma carga em voo traria o valor antigo por cima desta edição
   const touchesFields = Object.keys(changes).some((k) => k !== "discarded");
   items.value = items.value.map((i) =>
-    i.id === id ? { ...i, ...changes, edited: i.edited || touchesFields } : i,
+    i.id === id ? { ...i, ...changes, suggested: markedManual(i, changes), edited: i.edited || touchesFields } : i,
   );
   if ("title" in changes) {
     const { [id]: _saved, ...titles } = liveTitles.value;

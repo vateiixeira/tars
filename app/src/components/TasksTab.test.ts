@@ -298,6 +298,19 @@ describe("TasksTab", () => {
     expect(updateTask).toHaveBeenLastCalledWith("t1", { assignee_id: null });
   });
 
+  it.each([
+    ["Responsável", "assignee_id", "2", "Miguel"],
+    ["Equipe", "team_id", "11", "Frontend"],
+  ] as const)("%s trocado à mão perde o '(último usado)' antes de recarregar", async (label, key, value, name) => {
+    const updateTask = vi.fn(() => new Promise<never>(() => {})); // o servidor ainda não respondeu
+    const t = task({ suggested: { fill: { [key]: "last" } } });
+    const { w } = await mountTab(payload([t]), { updateTask });
+    await field(w, label).setValue(value);
+    await flushPromises();
+    const select = field(w, label).element as HTMLSelectElement;
+    expect(select.selectedOptions[0].text).toBe(name);
+  });
+
   it("dica sem id: 'Sugestão do Claude: Miguel — não encontrado no MCP de issues'", async () => {
     const t = task({
       assignee_id: null,
