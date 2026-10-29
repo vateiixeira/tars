@@ -6,6 +6,7 @@ bloqueante (minutos, via `claude`) para o pool com `run_in_threadpool`.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Literal
 
@@ -19,6 +20,8 @@ from whisper_ditado.issues.client import IssueError
 from whisper_ditado.issues.prompts import PRIORITIES
 from whisper_ditado.claude_cli import sync_tasks_cli
 from whisper_ditado.store import TaskLocked, TaskSuggestion
+
+log = logging.getLogger("ditado")
 
 STAGE_DEFAULT = "To Do"
 NOT_FOUND = "Tarefa não encontrada"
@@ -209,7 +212,11 @@ def tasks_router(ctx, get_meeting: Callable[[str], object]) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         # Leva a escolha aos outros cartões do produto (e completa este se o produto mudou).
-        autofill.after_patch(store, ctx.issue_options.peek(), task, set(changes))
+        # A mudança do operador já está salva: uma falha aqui não pode virar erro do PATCH.
+        try:
+            autofill.after_patch(store, ctx.issue_options.peek(), task, set(changes))
+        except Exception:
+            log.exception("Falha ao preencher pelo último usado depois de editar a sugestão %s", task_id)
         task = store.get_task(task_id) or task
         notify(task.meeting_id)
         return task_json(task)

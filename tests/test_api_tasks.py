@@ -11,7 +11,7 @@ from tests.test_api import (
     FakeMeetings,
     make_meeting,
 )
-from whisper_ditado import api, paths
+from whisper_ditado import api, api_tasks, paths
 from whisper_ditado.issues.jobs import JobBusy
 from whisper_ditado.issues.client import IssueError, IssueOptions, Option
 from whisper_ditado.events import EventBus
@@ -540,6 +540,19 @@ def test_patch_task_print_ids_and_json_fields(client, ctx, mid):
     r = client.patch(f"/api/tasks/{t.id}", json={"print_ids": ["p1"]})
     assert r.status_code == 409 and r.json() == {"detail": BUSY_MSG}
     assert ctx.store.get_task(t.id).print_ids == []
+
+
+def test_patch_survives_autofill_failure(client, ctx, mid, monkeypatch):
+    task = add(ctx, mid, assignee_id=None, team_id=None)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("falha no preenchimento")
+
+    monkeypatch.setattr(api_tasks.autofill, "after_patch", boom)
+    r = client.patch(f"/api/tasks/{task.id}", json={"assignee_id": 9})
+    assert r.status_code == 200 and r.json()["assignee_id"] == 9
+    assert ctx.store.get_task(task.id).assignee_id == 9
+    assert len(changed(ctx, mid)) == 1
 
 
 def test_patch_assignee_propagates_and_notifies(client, ctx, mid):
