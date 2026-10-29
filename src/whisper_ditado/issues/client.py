@@ -55,6 +55,8 @@ class IssueError(Exception):
 class Option:
     id: int
     name: str
+    teams: tuple[int, ...] = ()
+    products: tuple[int, ...] = ()
 
 
 @dataclass
@@ -77,6 +79,18 @@ class IssueOptions:
     def stage_named(self, name: str) -> Option | None:
         wanted = name.strip().casefold()
         return next((s for s in self.stages if s.name.strip().casefold() == wanted), None)
+
+    def person(self, id: int) -> Option | None:
+        return next((p for p in self.people if p.id == id), None)
+
+    def coherent(self, person_id: int, team_id: int | None, product_id: int | None) -> bool:
+        """A pessoa pertence à equipe ou ao produto informados. Sem dados para comparar, vale como coerente."""
+        person = self.person(person_id)
+        if person is None or not (person.teams or person.products):
+            return True
+        if team_id is None and product_id is None:
+            return True
+        return team_id in person.teams or product_id in person.products
 
     def has(self, kind: str, id: int) -> bool:
         if kind not in _KINDS:
@@ -200,21 +214,30 @@ def _parse_options(raw: str) -> IssueOptions:
     if not isinstance(data, dict):
         raise IssueError("Resposta inesperada do MCP de issues")
 
-    def options(key: str) -> list[Option]:
+    def ids(item: dict, key: str) -> tuple[int, ...]:
+        raw_ids = item.get(key)
+        if not isinstance(raw_ids, list):
+            return ()
+        return tuple(i for i in raw_ids if isinstance(i, int) and not isinstance(i, bool))
+
+    def options(key: str, with_membership: bool = False) -> list[Option]:
         found = []
         for item in data.get(key) or []:
             if not isinstance(item, dict) or isinstance(item.get("id"), bool) or not isinstance(item.get("id"), int):
                 continue
             name = next((v.strip() for v in (item.get("name"), item.get("username"))
                          if isinstance(v, str) and v.strip()), f"#{item['id']}")
-            found.append(Option(item["id"], name))
+            if with_membership:
+                found.append(Option(item["id"], name, ids(item, "equipes"), ids(item, "produtos")))
+            else:
+                found.append(Option(item["id"], name))
         return found
 
     you = data.get("voce")
     username = you.get("username") if isinstance(you, dict) else None
     return IssueOptions(
         username=username if isinstance(username, str) else "",
-        people=options("pessoas"), teams=options("equipes"), products=options("produtos"),
+        people=options("pessoas", with_membership=True), teams=options("equipes"), products=options("produtos"),
         stages=options("etapas"), fetched_at=datetime.now(timezone.utc),
     )
 
