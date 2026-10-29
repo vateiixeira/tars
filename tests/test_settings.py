@@ -331,6 +331,33 @@ def test_tasks_prompt_previous_default_is_stored_as_none(data_home):
     assert store.all_settings()["tasks_prompt"] is None
 
 
+_DEFAULT_BEFORE_TEAM_PRODUCT_GUIDANCE = """Levante, a partir da reunião, as issues que precisam de revisão: funcionalidades, tarefas e correções de bugs.
+- Sempre escreva as tarefas no modo Spec Driven Development (SDD): primeiro a especificação do que precisa acontecer, depois o plano de implementação e a validação. A especificação deve orientar o desenvolvimento e os testes.
+- Cada área de um projeto vira uma issue só, mesmo quando os pedidos aparecem em momentos diferentes; nunca agrupe por cliente nem por pessoa. Separe assuntos independentes.
+- Backend e front de um mesmo pedido são a mesma issue, mesmo quando envolvem vários repositórios. Cite todos na descrição e não separe por etapa.
+- Não crie sugestões para conversas sem ação, demonstrações, recados ou trabalho já concluído. Se uma issue já foi aberta durante a reunião, informe isso e inclua seu número quando mencionado.
+- Use os tipos feature, tarefa ou bugfix. Use prioridade medium, salvo quando a reunião indicar low, high ou urgent.
+- Identifique os projetos pelas informações da reunião e pelos arquivos CLAUDE.md disponíveis na pasta raiz. Não presuma nomes de repositórios, produtos, pessoas ou equipes.
+- Use somente os ids das opções retornadas pelo MCP. Se não houver correspondência, deixe o id vazio e registre a sugestão em texto para revisão. Não invente responsáveis ou equipes.
+- Você pode consultar os projetos para entender os termos, mas não alterar arquivos nem inventar causas, soluções ou decisões.
+- Escreva títulos de até 100 caracteres no formato Área: resultado esperado, sem nome de cliente.
+- Descreva em português, em Markdown, com as seções ## Problema, ## Especificação, ## Critérios de aceite, ## Plano de implementação, ## Validação e ## Projeto.
+- Em Especificação, registre o objetivo, os requisitos e o comportamento esperado, com escopo e restrições sustentados pela reunião. Não invente requisitos, decisões técnicas nem detalhes ausentes.
+- Escreva critérios de aceite verificáveis em checklist, vinculados aos requisitos. Em Validação, indique como conferir esses critérios e quais cenários devem ser testados, sem afirmar que testes já foram executados.
+- No Plano de implementação, use uma sequência de passos: revisar e completar a especificação, definir o plano técnico, implementar os requisitos e validar os critérios de aceite. Detalhes técnicos ainda não decididos devem ser definidos após a revisão da especificação.
+- Acrescente ## Pendências para dúvidas, dependências e decisões que precisam ser confirmadas antes da implementação. Não preencha lacunas por suposição.
+- Para cada issue, inclua de 1 a 5 trechos da transcrição que sustentam o pedido, com o horário e quem falou.
+- Antes de responder, elimine duplicações e confira se cada sugestão corresponde ao que foi dito."""
+
+
+def test_default_before_team_product_guidance_is_legacy_and_migrates(data_home):
+    assert legacy.is_legacy_prompt(_DEFAULT_BEFORE_TEAM_PRODUCT_GUIDANCE)
+    assert not legacy.is_legacy_prompt(DEFAULT_TASKS_PROMPT)
+    store = Store(data_home / "t.db")
+    store.set_setting("tasks_prompt", _DEFAULT_BEFORE_TEAM_PRODUCT_GUIDANCE)
+    assert Settings(store).get("tasks_prompt") == DEFAULT_TASKS_PROMPT
+
+
 def test_tasks_prompt_raw_old_default_reads_as_new_default(data_home):
     store = Store(data_home / "t.db")
     store.set_setting("tasks_prompt", _PREVIOUS_TASKS_PROMPTS[0])

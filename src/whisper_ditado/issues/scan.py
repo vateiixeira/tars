@@ -61,7 +61,6 @@ class ScanItem:
     kind: str
     title: str
     description: str
-    project: str | None
     product_id: int | None
     assignee_id: int | None
     assignee_hint: str | None
@@ -78,7 +77,7 @@ class ScanItem:
         return {
             "fields": {
                 "kind": self.kind, "title": self.title, "description": self.description,
-                "project": self.project, "product_id": self.product_id,
+                "product_id": self.product_id,
                 "assignee_id": self.assignee_id, "team_id": self.team_id,
                 "stage_id": stage_id, "priority": self.priority,
             },
@@ -113,7 +112,9 @@ def build_scan_prompt(
         def dump(items) -> list[dict]:
             return [{"id": o.id, "name": o.name} for o in items]
 
-        options_block = _dump({"pessoas": dump(options.people), "equipes": dump(options.teams),
+        people = [{"id": p.id, "name": p.name, "equipes": list(p.teams), "produtos": list(p.products)}
+                  for p in options.people]
+        options_block = _dump({"pessoas": people, "equipes": dump(options.teams),
                                "produtos": dump(options.products)})
     already = _dump([
         {"titulo": t.title, "tipo": t.kind, "numero_issues_client": t.issue_number, "descartado": t.discarded}
@@ -254,18 +255,21 @@ def _item(raw: dict, options: IssueOptions | None, segments: list[Segment],
     if not isinstance(title, str) or not title.strip():
         return None
     description = raw.get("descricao")
-    project = raw.get("projeto")
     priority = raw.get("prioridade")
     repeats = _int(raw.get("repete"))
+    product_id = _known_id(raw.get("produto_id"), "products", options)
+    assignee_id = _known_id(raw.get("responsavel_id"), "people", options)
+    team_id = _known_id(raw.get("equipe_id"), "teams", options)
+    if assignee_id is not None and options is not None and not options.coherent(assignee_id, team_id, product_id):
+        assignee_id = None  # a dica em texto continua valendo
     return ScanItem(
         kind=kind,
         title=title.strip()[:TITLE_MAX],
         description=description[:DESCRIPTION_MAX] if isinstance(description, str) else "",
-        project=(project.strip() or None) if isinstance(project, str) else None,
-        product_id=_known_id(raw.get("produto_id"), "products", options),
-        assignee_id=_known_id(raw.get("responsavel_id"), "people", options),
+        product_id=product_id,
+        assignee_id=assignee_id,
         assignee_hint=_hint(raw.get("responsavel_dica")),
-        team_id=_known_id(raw.get("equipe_id"), "teams", options),
+        team_id=team_id,
         team_hint=_hint(raw.get("equipe_dica")),
         priority=priority if isinstance(priority, str) and priority in PRIORITIES else DEFAULT_PRIORITY,
         evidence=_evidence(raw.get("trechos"), segments),

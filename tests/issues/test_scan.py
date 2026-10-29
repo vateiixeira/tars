@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from whisper_ditado.issues.client import IssueOptions, Option
-from whisper_ditado.issues.prompts import PRINTS_BLOCK, SCAN_SYSTEM
+from whisper_ditado.issues.prompts import DEFAULT_TASKS_PROMPT, PRINTS_BLOCK, SCAN_SYSTEM
 from whisper_ditado.issues.scan import (
     MAX_ITEMS,
     SCAN_TIMEOUT_S,
@@ -49,7 +49,7 @@ def created_task(**kw):
 
 def raw_item(**kw):
     base = {"tipo": "tarefa", "titulo": "Checkout: boleto", "descricao": "## Problema\nx",
-            "projeto": "ecommerce", "produto_id": 4, "responsavel_id": 9, "responsavel_dica": "Miguel",
+            "produto_id": 4, "responsavel_id": 9, "responsavel_dica": "Miguel",
             "equipe_id": 3, "equipe_dica": "Desenvolvimento", "prioridade": "high",
             "trechos": [{"tempo": "01:05", "falante": "Ana", "texto": "o Miguel pega isso"}],
             "repete": None}
@@ -119,6 +119,25 @@ def test_prompt_excludes_suggestions_being_replaced_and_preserves_reviewed_items
         assert f'"titulo": "{title}"' in p
 
 
+def test_prompt_lists_people_with_teams_and_products():
+    opts = IssueOptions("vi", people=[Option(9, "Miguel", teams=(3,), products=(4,))],
+                        teams=[Option(3, "Dev")], products=[Option(4, "e-commerce")], stages=[],
+                        fetched_at=datetime.now())
+    prompt = build_scan_prompt("regras", "t", None, opts, [])
+    assert '{"id": 9, "name": "Miguel", "equipes": [3], "produtos": [4]}' in prompt
+    assert '"equipes": [{"id": 3, "name": "Dev"}]' in prompt
+    assert '"produtos": [{"id": 4, "name": "e-commerce"}]' in prompt
+
+
+def test_scan_system_has_no_projeto_key():
+    assert '"projeto"' not in SCAN_SYSTEM and "## Projeto" not in DEFAULT_TASKS_PROMPT
+
+
+def test_default_prompt_guides_assignee_by_team_and_product():
+    assert "escolha responsável e equipe entre quem participa do produto da issue" in DEFAULT_TASKS_PROMPT
+    assert "arquivos CLAUDE.md da pasta raiz para entender os projetos" in DEFAULT_TASKS_PROMPT
+
+
 # ----- parse -----
 
 
@@ -127,8 +146,8 @@ def test_parse_valid_item_maps_evidence_to_segment():
     assert len(items) == 1
     it = items[0]
     assert it.evidence[0] == Evidence(65.0, 70.0, "Ana", "o Miguel pega isso")
-    assert (it.kind, it.title, it.project, it.product_id, it.assignee_id, it.team_id, it.priority) == (
-        "tarefa", "Checkout: boleto", "ecommerce", 4, 9, 3, "high")
+    assert (it.kind, it.title, it.product_id, it.assignee_id, it.team_id, it.priority) == (
+        "tarefa", "Checkout: boleto", 4, 9, 3, "high")
     assert (it.assignee_hint, it.team_hint, it.repeats_number) == ("Miguel", "Desenvolvimento", None)
 
 
@@ -264,11 +283,15 @@ def test_parse_clamps_and_defaults():
     assert len(it.description) == 20_000
 
 
-def test_parse_description_and_project_types():
-    it = parse([raw_item(descricao=["x"], projeto=["a"])])[0]
-    assert it.description == "" and it.project is None
-    it = parse([raw_item(projeto="  ")])[0]
-    assert it.project is None
+def test_parse_description_type():
+    it = parse([raw_item(descricao=["x"])])[0]
+    assert it.description == ""
+
+
+def test_parse_ignores_projeto_key():
+    it = parse([raw_item(projeto="ecommerce")])[0]
+    assert not hasattr(it, "project")
+    assert "project" not in it.as_store_item(2)["fields"]
 
 
 def test_parse_repeats_only_known_created_numbers():
@@ -316,7 +339,7 @@ def test_as_store_item_format():
     it = parse([raw_item(repete=217)], segments=[seg(60, 70, "x")], created={217})[0]
     assert it.as_store_item(2) == {
         "fields": {"kind": "tarefa", "title": "Checkout: boleto", "description": "## Problema\nx",
-                   "project": "ecommerce", "product_id": 4, "assignee_id": 9, "team_id": 3,
+                   "product_id": 4, "assignee_id": 9, "team_id": 3,
                    "stage_id": 2, "priority": "high"},
         "suggested": {"product_id": 4, "assignee_id": 9, "team_id": 3,
                       "assignee_hint": "Miguel", "team_hint": "Desenvolvimento"},
@@ -490,3 +513,32 @@ def test_parse_output_over_cap_is_claude_error():
     from whisper_ditado.issues.scan import OUTPUT_MAX_CHARS
     with pytest.raises(ClaudeError, match="resposta grande demais do Claude"):
         parse_scan("[]" + " " * OUTPUT_MAX_CHARS, OPTS, [], set())
+
+
+COHERENCE_OPTS = IssueOptions(
+    "vi",
+    people=[Option(9, "M", teams=(3,), products=(4,)), Option(10, "A", teams=(5,), products=(6,))],
+    teams=[Option(3, "Dev"), Option(5, "Ops")], products=[Option(4, "e"), Option(6, "f")],
+    stages=[], fetched_at=datetime.now(),
+)
+
+
+def test_parse_drops_assignee_outside_team_and_product():
+    raw = json.dumps([{"tipo": "tarefa", "titulo": "X", "produto_id": 4, "equipe_id": 3,
+                       "responsavel_id": 10, "responsavel_dica": "Ana"}])
+    [item] = parse_scan(raw, COHERENCE_OPTS, [], set())
+    assert item.assignee_id is None and item.assignee_hint == "Ana" and item.team_id == 3
+
+
+def test_parse_keeps_assignee_when_coherent():
+    raw = json.dumps([{"tipo": "tarefa", "titulo": "X", "produto_id": 4, "equipe_id": 5,
+                       "responsavel_id": 9}])
+    [item] = parse_scan(raw, COHERENCE_OPTS, [], set())
+    assert item.assignee_id == 9
+
+
+def test_parse_keeps_assignee_when_no_team_or_product_suggested():
+    raw = json.dumps([{"tipo": "tarefa", "titulo": "X", "produto_id": None, "equipe_id": None,
+                       "responsavel_id": 10}])
+    [item] = parse_scan(raw, COHERENCE_OPTS, [], set())
+    assert item.assignee_id == 10

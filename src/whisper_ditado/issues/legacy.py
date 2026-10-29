@@ -14,6 +14,7 @@ LEGACY_PROMPT_HASHES = frozenset((
     'c00214733d337593c9daa91b0ac0e447d5a2bcca7b8c934b3aaea0f623b670ce',
     '6f932c7506c795a4af3c967ba30a0aaff42c2ed43fd80944f4d7d2c46324a600',
     '358518247cafbd1cd18ad315891de05c7ed409a47bbb80a9eab148a4f70ca1d1',
+    '9ec4b00ab97a1bb0dc4f504fea78dc08037e428cfef73548f099ff93b4e24c00',
 ))
 
 
