@@ -2,6 +2,8 @@
 """Atualiza o clone do TARS para a última release (somente biblioteca padrão)."""
 from __future__ import annotations
 
+import argparse
+import http.client
 import json
 import os
 from pathlib import Path
@@ -36,6 +38,11 @@ def _run(cmd: list[str], cwd: Path, show: bool = False) -> subprocess.CompletedP
         return subprocess.CompletedProcess(cmd, 127, "", str(exc))
 
 
+def _local_opener() -> urllib.request.OpenerDirector:
+    """Cliente HTTP sem proxy: a API local nunca passa por `http_proxy` (o token iria em claro)."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def backend_status() -> dict | None:
     """Status do backend local; None só quando ele está comprovadamente parado.
 
@@ -61,7 +68,7 @@ def backend_status() -> dict | None:
     request = urllib.request.Request(f"http://127.0.0.1:{port}/api/status",
                                      headers={"Authorization": f"Bearer {token}"})
     try:
-        with urllib.request.urlopen(request, timeout=3) as response:
+        with _local_opener().open(request, timeout=3) as response:
             status = json.load(response)
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, ConnectionRefusedError):
@@ -69,7 +76,7 @@ def backend_status() -> dict | None:
         raise BackendUnresponsive(str(exc)) from exc
     except ConnectionRefusedError:
         return None
-    except (OSError, ValueError) as exc:  # timeout, reset, HTTPError, JSON inválido
+    except (OSError, ValueError, http.client.HTTPException) as exc:  # timeout, reset, HTTPError, JSON ou HTTP inválido
         raise BackendUnresponsive(str(exc)) from exc
     if not isinstance(status, dict):
         raise BackendUnresponsive("resposta inesperada")
@@ -117,8 +124,8 @@ def _sync_args(root: Path) -> list[str]:
     return args
 
 
-def _check_preconditions(root: Path, run, api) -> bool:
-    """Valida o ambiente; devolve se a unidade systemd do backend está instalada."""
+def _check_preconditions(root: Path, run, api) -> tuple[bool, dict | None]:
+    """Valida o ambiente; devolve se a unidade systemd está instalada e o status do backend (ou None)."""
     if not (root / ".git").exists():
         raise UpdateError("Esta pasta não é um clone git, então não dá para atualizar por aqui. "
                           f"Baixe a versão nova em {RELEASES} e siga docs/INSTALL_RELEASE.md.")
@@ -129,10 +136,9 @@ def _check_preconditions(root: Path, run, api) -> bool:
     unit = run(["systemctl", "--user", "cat", UNIT], root).returncode == 0
     try:
         status = api()
-    except BackendUnresponsive:
-        if run(["systemctl", "--user", "is-active", UNIT], root).stdout.strip() == "active":
-            raise UpdateError("O serviço não respondeu; tente de novo em instantes.") from None
-        status = None  # a unidade não está ativa: o backend está parado
+    except BackendUnresponsive:  # vivo, mas sem status válido: pode estar ocupado com uma reunião
+        raise UpdateError("O serviço não respondeu; tente de novo em instantes. "
+                          "Se ele roda pelo ./run-backend.sh, encerre-o antes.") from None
     if status is not None:
         if (status.get("meeting") or {}).get("state", "idle") != "idle":
             raise UpdateError("Há uma reunião gravando ou processando. Termine-a e tente de novo.")
@@ -141,13 +147,13 @@ def _check_preconditions(root: Path, run, api) -> bool:
             raise UpdateError("O backend está rodando fora do systemd (./run-backend.sh). "
                               "Encerre-o antes de atualizar; depois use ./run-backend.sh de novo "
                               "ou instale o serviço com scripts/install_user.py.")
-    return unit
+    return unit, status
 
 
 def _current_version(root: Path) -> str:
     try:
         version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
-    except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:  # ValueError: TOML inválido ou não UTF-8
         raise UpdateError(f"Não consegui ler a versão em pyproject.toml: {exc}") from None
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", str(version)):
         raise UpdateError(f"Versão '{version}' do pyproject.toml não é MAJOR.MINOR.PATCH; "
@@ -155,9 +161,14 @@ def _current_version(root: Path) -> str:
     return version
 
 
-def update(root: Path, run=_run, api=backend_status, out=print) -> str:
-    """Leva o clone à última release. Devolve a tag aplicada ou a versão atual."""
-    unit = _check_preconditions(root, run, api)
+def update(root: Path, run=_run, api=backend_status, out=print, force: bool = False) -> str:
+    """Leva o clone à última release. Devolve a tag aplicada ou a versão atual.
+
+    Com `force` (ou quando o serviço em execução está numa versão diferente da do código) e sem
+    release nova, refaz parar → uv sync → pnpm → build → subir para o código que já está no clone,
+    sem checkout. Esse modo não usa a marca de retomada: basta rodar `--force` de novo após uma falha.
+    """
+    unit, status = _check_preconditions(root, run, api)
 
     out("==> Buscando releases")
     _git(run, root, "fetch", "--tags", REMOTE)
@@ -175,24 +186,38 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
                 "mais; descartando.")
             pending.unlink()
     resuming = target is not None
+    forced = False  # reinstala o código já em uso, sem trocar de tag nem gravar marca
     if target is None:
         target = latest_tag(_git(run, root, "tag", "--list", "v*").splitlines())
         if target is None:
             raise UpdateError(f"Nenhuma release encontrada em {REMOTE}. Veja {RELEASES}.")
         current = _current_version(root)
         if tuple(map(int, current.split("."))) >= _key(target):
-            out(f"O TARS já está na versão {current} (última release: {target}).")
-            return f"v{current}"
+            running = ((status or {}).get("version") or {}).get("current")
+            if not force and isinstance(running, str) and running != current:
+                out(f"O serviço em execução está na versão {running}; o código está em {current}. "
+                    "Refazendo a instalação.")
+                force = True
+            if not force:
+                out(f"O TARS já está na versão {current} (última release: {target}). Se o app ou o "
+                    "serviço não estiverem nessa versão, rode python3 scripts/update.py --force.")
+                return f"v{current}"
+            forced, target = True, f"v{current}"
 
-    pending.write_text(target + "\n")
-    out(f"Atualizando para {target}. Ditado e reuniões ficam fora do ar por alguns minutos.")
+    again = "python3 scripts/update.py" + (" --force" if forced else "")
+    if forced:
+        out(f"Reinstalando a versão {target} (sem trocar de código). Ditado e reuniões ficam "
+            "fora do ar por alguns minutos.")
+    else:
+        pending.write_text(target + "\n")
+        out(f"Atualizando para {target}. Ditado e reuniões ficam fora do ar por alguns minutos.")
     if unit:
         out("==> Parando o serviço")
         if run(["systemctl", "--user", "stop", UNIT], root).returncode:
-            if not resuming:  # numa retomada o clone já está pela metade: a marca fica
+            if not resuming and not forced:  # numa retomada o clone já está pela metade: a marca fica
                 pending.unlink(missing_ok=True)
             raise UpdateError("Não consegui parar o serviço; " + (
-                "rode o comando de novo para continuar." if resuming else "nada foi alterado."))
+                f"rode {again} de novo para continuar." if resuming else "nada foi alterado."))
 
     def step(name: str, cmd: list[str], cwd: Path) -> None:
         out(f"==> {name}")
@@ -200,12 +225,13 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
             raise UpdateError(name)
 
     try:
-        branch = run(["git", "symbolic-ref", "--short", "-q", "HEAD"], root)
-        step(f"git checkout {target}", ["git", "checkout", target], root)
-        if branch.returncode == 0:
-            name = branch.stdout.strip()
-            out(f"Atenção: saiu da branch {name}; seus commits continuam nela "
-                f"(volte com git checkout {name}).")
+        if not forced:
+            branch = run(["git", "symbolic-ref", "--short", "-q", "HEAD"], root)
+            step(f"git checkout {target}", ["git", "checkout", target], root)
+            if branch.returncode == 0:
+                name = branch.stdout.strip()
+                out(f"Atenção: saiu da branch {name}; seus commits continuam nela "
+                    f"(volte com git checkout {name}).")
         step("uv sync", _sync_args(root), root)
         step("pnpm install", ["pnpm", "install", "--frozen-lockfile"], root / "app")
         step("pnpm tauri build", ["pnpm", "tauri", "build", "--no-bundle"], root / "app")
@@ -220,11 +246,11 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
                      "o serviço não está rodando; inicie-o" if unit else
                      "inicie o ./run-backend.sh")
         if interrupted:
-            out(f"Atualização interrompida ({situation}). Rode python3 scripts/update.py de novo "
+            out(f"Atualização interrompida ({situation}). Rode {again} de novo "
                 "para continuar de onde parou.")
             raise
-        raise UpdateError(f"O passo '{exc}' falhou e o clone ficou pela metade ({situation}). "
-                          "Corrija o problema e rode python3 scripts/update.py de novo para "
+        raise UpdateError(f"O passo '{exc}' falhou e a instalação ficou pela metade ({situation}). "
+                          f"Corrija o problema e rode {again} de novo para "
                           "continuar de onde parou.") from None
 
     if unit:
@@ -238,9 +264,14 @@ def update(root: Path, run=_run, api=backend_status, out=print) -> str:
     return target
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Atualiza o clone do TARS para a última release.")
+    parser.add_argument("--force", action="store_true",
+                        help="refaz sincronização, build e reinício do código já em uso, "
+                             "mesmo sem release nova")
+    args = parser.parse_args(argv)
     try:
-        update(ROOT)
+        update(ROOT, force=args.force)
     except UpdateError as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None

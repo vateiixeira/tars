@@ -86,8 +86,8 @@ class Runner:
         return keep
 
 
-def up(root, runner, status=None, out=None):
-    return update.update(root, run=runner, api=lambda: status, out=(out or [].append))
+def up(root, runner, status=None, out=None, force=False):
+    return update.update(root, run=runner, api=lambda: status, out=(out or [].append), force=force)
 
 
 @pytest.mark.parametrize("tags,expected", [
@@ -282,16 +282,13 @@ def unresponsive():
     raise update.BackendUnresponsive("timeout")
 
 
-def test_unresponsive_backend_with_active_unit_refuses(repo):
-    runner = Runner(active="active")
-    with pytest.raises(update.UpdateError, match="não respondeu"):
+@pytest.mark.parametrize("active", ["active", "inactive"])
+def test_unresponsive_backend_always_refuses(repo, active):
+    runner = Runner(active=active)
+    with pytest.raises(update.UpdateError, match="não respondeu") as failure:
         update.update(repo, run=runner, api=unresponsive, out=[].append)
+    assert "run-backend.sh" in str(failure.value)
     assert runner.commands() == []
-
-
-def test_unresponsive_backend_with_inactive_unit_proceeds(repo):
-    runner = Runner(active="inactive")
-    assert update.update(repo, run=runner, api=unresponsive, out=[].append) == "v0.3.0"
 
 
 @pytest.fixture
@@ -308,6 +305,11 @@ def write_info(path, pid=None):
     path.write_text(json.dumps({"port": 1, "token": "t", "pid": pid or os.getpid()}))
 
 
+class FakeOpener:
+    def __init__(self, handler):
+        self.open = handler
+
+
 def test_backend_status_without_api_json_is_stopped(api_home):
     assert update.backend_status() is None
 
@@ -319,7 +321,7 @@ def test_backend_status_with_dead_pid_is_stopped(api_home, monkeypatch):
         raise ProcessLookupError
 
     monkeypatch.setattr(update.os, "kill", kill)
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda *a, **k: pytest.fail("não deveria consultar"))
+    monkeypatch.setattr(update, "_local_opener", lambda: pytest.fail("não deveria consultar"))
     assert update.backend_status() is None
 
 
@@ -329,7 +331,7 @@ def test_backend_status_refused_connection_is_stopped(api_home, monkeypatch):
     def refused(*a, **k):
         raise update.urllib.error.URLError(ConnectionRefusedError())
 
-    monkeypatch.setattr(update.urllib.request, "urlopen", refused)
+    monkeypatch.setattr(update, "_local_opener", lambda: FakeOpener(refused))
     assert update.backend_status() is None
 
 
@@ -339,6 +341,8 @@ def test_backend_status_refused_connection_is_stopped(api_home, monkeypatch):
     update.urllib.error.URLError(TimeoutError()),
     update.urllib.error.HTTPError("http://x", 500, "erro", None, None),
     ValueError("json ruim"),
+    update.http.client.BadStatusLine("''"),
+    update.http.client.IncompleteRead(b"par"),
 ])
 def test_backend_status_other_failures_are_unresponsive(api_home, monkeypatch, error):
     write_info(api_home)
@@ -346,7 +350,7 @@ def test_backend_status_other_failures_are_unresponsive(api_home, monkeypatch, e
     def fail(*a, **k):
         raise error
 
-    monkeypatch.setattr(update.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(update, "_local_opener", lambda: FakeOpener(fail))
     with pytest.raises(update.BackendUnresponsive):
         update.backend_status()
 
@@ -354,7 +358,7 @@ def test_backend_status_other_failures_are_unresponsive(api_home, monkeypatch, e
 def test_backend_status_non_dict_body_is_unresponsive(api_home, monkeypatch):
     import io
     write_info(api_home)
-    monkeypatch.setattr(update.urllib.request, "urlopen", lambda *a, **k: io.StringIO("[1]"))
+    monkeypatch.setattr(update, "_local_opener", lambda: FakeOpener(lambda *a, **k: io.StringIO("[1]")))
     with pytest.raises(update.BackendUnresponsive):
         update.backend_status()
 
@@ -388,3 +392,138 @@ def test_ctrl_c_during_a_step_restarts_the_service_and_keeps_the_marker(repo):
         up(repo, runner)
     assert runner.commands()[-1] == ("systemctl", "--user", "start", UNIT)
     assert update.pending_path(repo, runner).read_text().strip() == "v0.3.0"
+
+
+def test_backend_status_ignores_http_proxy_and_sends_the_token(api_home, monkeypatch):
+    import http.server
+    import json
+    import socket
+    import threading
+
+    seen = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            body = json.dumps({"meeting": {"state": "idle"}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    with socket.socket() as closed:  # porta fechada para o "proxy"
+        closed.bind(("127.0.0.1", 0))
+        dead = closed.getsockname()[1]
+    try:
+        import os
+        api_home.write_text(json.dumps({"port": server.server_port, "token": "segredo", "pid": os.getpid()}))
+        monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{dead}")
+        monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{dead}")
+        monkeypatch.delenv("no_proxy", raising=False)
+        monkeypatch.delenv("NO_PROXY", raising=False)
+        assert update.backend_status() == {"meeting": {"state": "idle"}}
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen == [("/api/status", "Bearer segredo")]
+
+
+def test_non_utf8_pyproject_is_a_clear_error(latest):
+    (latest / "pyproject.toml").write_bytes(b'[project]\nversion = "\xff\xfe"\n')
+    git(latest, "commit", "-qam", "bytes ruins")
+    runner = Runner()
+    with pytest.raises(update.UpdateError, match="pyproject.toml"):
+        up(latest, runner)
+    assert runner.commands() == []
+
+
+IDLE_AT = lambda version: {"meeting": {"state": "idle"}, "version": {"current": version}}  # noqa: E731
+FULL_REBUILD = [
+    ("systemctl", "--user", "stop", UNIT),
+    ("uv", "sync", "--frozen"),
+    ("pnpm", "install", "--frozen-lockfile"),
+    ("pnpm", "tauri", "build", "--no-bundle"),
+    ("systemctl", "--user", "start", UNIT),
+]
+
+
+def test_up_to_date_message_mentions_force(latest):
+    messages = []
+    up(latest, Runner(), out=messages.append)
+    assert any("update.py --force" in m for m in messages)
+
+
+def test_force_without_newer_tag_rebuilds_the_current_code_without_checkout(latest):
+    runner = Runner()
+    messages = []
+    assert up(latest, runner, IDLE_AT("0.3.0"), messages.append, force=True) == "v0.3.0"
+    assert runner.commands() == FULL_REBUILD
+    assert not update.pending_path(latest, runner).exists()
+    assert git(latest, "symbolic-ref", "--short", "HEAD") == "main"
+    assert any("Pronto" in m for m in messages)
+
+
+def test_force_keeps_extras_detection(latest):
+    site = latest / ".venv/lib/python3.12/site-packages"
+    (site / "pyannote_audio-3.3.2.dist-info").mkdir(parents=True)
+    runner = Runner()
+    up(latest, runner, force=True)
+    assert ("uv", "sync", "--frozen", "--extra", "pyannote") in runner.commands()
+
+
+def test_force_with_a_newer_tag_runs_the_normal_update(repo):
+    runner = Runner()
+    assert up(repo, runner, force=True) == "v0.3.0"
+    assert ("git", "checkout", "v0.3.0") in runner.commands()
+    assert git(repo, "describe", "--tags") == "v0.3.0"
+
+
+def test_forced_failure_keeps_no_marker_and_asks_for_force_again(latest):
+    runner = Runner(fail="pnpm tauri build")
+    with pytest.raises(update.UpdateError, match="update.py --force de novo") as failure:
+        up(latest, runner, force=True)
+    assert "voltou a subir" in str(failure.value)
+    assert runner.commands()[-1] == ("systemctl", "--user", "start", UNIT)
+    assert not update.pending_path(latest, runner).exists()
+
+
+def test_forced_stop_failure_changes_nothing(latest):
+    runner = Runner(fail="systemctl --user stop")
+    with pytest.raises(update.UpdateError, match="parar o serviço"):
+        up(latest, runner, force=True)
+    assert [c for c in runner.commands() if c[0] in ("uv", "pnpm")] == []
+
+
+def test_running_version_mismatch_forces_a_rebuild(latest):
+    runner = Runner()
+    messages = []
+    assert up(latest, runner, IDLE_AT("0.2.0"), messages.append) == "v0.3.0"
+    assert runner.commands() == FULL_REBUILD
+    assert any("0.2.0" in m and "0.3.0" in m and "serviço em execução" in m for m in messages)
+
+
+@pytest.mark.parametrize("running", ["0.3.0", None, 3, {"x": 1}])
+def test_matching_or_unusable_running_version_does_not_force(latest, running):
+    runner = Runner()
+    up(latest, runner, {"meeting": {"state": "idle"}, "version": {"current": running}})
+    assert runner.commands() == []
+
+
+def test_status_without_version_does_not_force(latest):
+    runner = Runner()
+    up(latest, runner, {"meeting": {"state": "idle"}})
+    assert runner.commands() == []
+
+
+def test_main_passes_force_to_update(monkeypatch):
+    calls = []
+    monkeypatch.setattr(update, "update", lambda root, **kw: calls.append(kw))
+    update.main(["--force"])
+    update.main([])
+    assert calls == [{"force": True}, {"force": False}]
