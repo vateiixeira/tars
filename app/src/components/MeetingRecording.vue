@@ -6,6 +6,7 @@ import { computed, onBeforeUnmount, ref } from "vue";
 import { useStatus } from "../composables/useStatus";
 import { mmss } from "../lib/format";
 import { LEVELS_STALE_MS } from "../lib/levels";
+import AppBanner from "./ui/AppBanner.vue";
 import AppIcon from "./ui/AppIcon.vue";
 import GlowOrb from "./ui/GlowOrb.vue";
 import LevelMeter from "./settings/LevelMeter.vue";
@@ -40,9 +41,9 @@ const SILENT_DB = -90; // piso do backend: o medidor mostra "sem sinal"
       <LevelMeter icon="volume" label="Áudio do PC" :db="fresh?.pc_db ?? SILENT_DB" />
       <p v-if="!fresh" class="stale">Aguardando níveis de áudio recentes.</p>
     </div>
-    <p v-for="alert in alerts" :key="alert.kind" class="alert" role="status">
-      <AppIcon name="warning" :size="18" />{{ alert.message }}
-    </p>
+    <AppBanner v-for="alert in alerts" :key="alert.kind" tone="warn" class="alert" role="status">
+      {{ alert.message }}
+    </AppBanner>
     <p class="hint">Use Parar, na barra superior, para encerrar a reunião.</p>
   </div>
 </template>
@@ -92,23 +93,9 @@ h2 {
   font-size: 13px;
   font-weight: 600;
 }
-/* Alerta ao vivo (am-banner, tom de aviso). */
+/* Alerta ao vivo (AppBanner, tom de aviso). */
 .alert {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
   width: min(560px, 100%);
-  margin: 0;
-  padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-lg);
-  background: var(--warning-surface);
-  color: var(--warning);
-  font-size: 13px;
-  line-height: 19px;
-  font-weight: 600;
   text-align: left;
-}
-.alert svg {
-  flex-shrink: 0;
 }
 </style>

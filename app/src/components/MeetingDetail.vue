@@ -29,6 +29,7 @@ import type {
 import { notifyMeetingsChanged } from "../composables/useMeetingsRevision";
 import { useStatus } from "../composables/useStatus";
 import { alertLines, exportFileName, transcriptText } from "../lib/meeting";
+import AppBanner from "./ui/AppBanner.vue";
 import AppButton from "./ui/AppButton.vue";
 import AppIcon from "./ui/AppIcon.vue";
 import AppDialog from "./ui/AppDialog.vue";
@@ -451,10 +452,12 @@ onBeforeUnmount(() => {
 <template>
   <section class="detail">
     <div v-if="loadError && !meeting" class="state">
-      <p class="banner error" role="alert">
-        <AppIcon name="warning" :size="18" /><span>{{ loadError }}</span>
-        <button class="btn btn-sm" type="button" @click="load">Tentar de novo</button>
-      </p>
+      <AppBanner class="banner error" role="alert">
+        {{ loadError }}
+        <template #action>
+          <button class="btn btn-sm" type="button" @click="load">Tentar de novo</button>
+        </template>
+      </AppBanner>
     </div>
     <div v-else-if="!meeting" class="state loading">
       <SkeletonLines :lines="1" class="skel-title" />
@@ -472,14 +475,14 @@ onBeforeUnmount(() => {
         @menu="onMenu"
         @select-speaker="onSpeakerSelect"
       />
-      <p
+      <AppBanner
         v-for="b in errorBanners"
         :key="b.action"
         class="banner error"
         role="alert"
       >
-        <AppIcon name="warning" :size="18" />{{ b.message }}
-      </p>
+        {{ b.message }}
+      </AppBanner>
       <MeetingRecording v-if="meeting.status === 'recording'" :started-at="meeting.started_at" />
       <div v-else-if="meeting.status === 'processing'" class="processing">
         <div>
@@ -490,22 +493,23 @@ onBeforeUnmount(() => {
         <StepProgress class="steps" :steps="PROCESSING_STEPS" :current="stage" />
       </div>
       <div v-else-if="meeting.status === 'failed'" class="state failed">
-        <div class="banner failed-banner">
-          <AppIcon name="warning" :size="18" />
+        <AppBanner class="failed-banner">
           <div role="alert">
             <strong>O processamento falhou</strong>
             {{ meeting.error || "Não foi possível transcrever esta reunião." }}
           </div>
-          <AppButton
-            v-if="!confirmingReprocess"
-            size="sm"
-            :busy="isBusy('reprocess')"
-            :disabled="!connected"
-            @click="requestReprocess"
-          >
-            <AppIcon name="refresh" :size="15" />Reprocessar
-          </AppButton>
-        </div>
+          <template #action>
+            <AppButton
+              v-if="!confirmingReprocess"
+              size="sm"
+              :busy="isBusy('reprocess')"
+              :disabled="!connected"
+              @click="requestReprocess"
+            >
+              <AppIcon name="refresh" :size="15" />Reprocessar
+            </AppButton>
+          </template>
+        </AppBanner>
         <div
           v-if="confirmingReprocess"
           class="confirm"
@@ -889,32 +893,9 @@ onBeforeUnmount(() => {
   gap: var(--space-4);
   padding-top: var(--space-2);
 }
-.banner strong {
-  display: block;
-  font-size: 14px;
-  font-weight: 700;
-}
-/* Erro de ação (am-banner--danger): ícone, mensagem e, quando houver, a ação de refazer. */
+/* Faixa de erro de ação (AppBanner): só a margem da página. */
 .banner {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
   margin: 0 var(--page-gutter) var(--space-2);
-  padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-lg);
-  background: var(--danger-surface);
-  color: var(--danger);
-  font-size: 13px;
-  line-height: 19px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.banner svg {
-  flex-shrink: 0;
-}
-.banner .btn {
-  margin-left: auto;
-  flex-shrink: 0;
 }
 .state .banner {
   margin: 0;
