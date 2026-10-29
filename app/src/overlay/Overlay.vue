@@ -4,19 +4,17 @@
 // backend reiniciou no meio dela); parada, ela é escondida.
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import AppIcon from "../components/ui/AppIcon.vue";
+import BrandOrb from "../components/ui/BrandOrb.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { AlertKind, TrackSource } from "../api/types";
 import { INTERRUPTED_MESSAGE, useStatus } from "../composables/useStatus";
 import { mmss } from "../lib/format";
+import { BAR_SHAPE, levelBars } from "../lib/levels";
 
 const { status, alerts, levels, meetingState, dictationActive, connected, interrupted } = useStatus();
 
-const FLOOR_DB = -60; // abaixo disso o medidor fica vazio (cinza)
-const FULL_DB = -10; // daqui para cima, cheio
-const BAR_PX = 10; // altura máxima das barras
-const BAR_SHAPE = [0.6, 1, 0.8]; // as três barras com alturas diferentes, como no mockup
-const LEVELS_STALE_MS = 3000; // sem `levels` há mais que isso: medidor vazio, não congelado
+const BAR_PX = 10; // altura máxima das barras (a escala dB e a expiração ficam em lib/levels)
 const CONNECTION_LOST = "Sem conexão com o serviço do ditado";
 const SHOW_RETRY_MS = 1000; // `show_overlay` falhou: tenta de novo, dobrando a espera até 10 s
 const SHOW_RETRY_MAX_MS = 10000;
@@ -58,12 +56,7 @@ const meters = computed<TrackSource[]>(() => {
 });
 
 function bars(source: TrackSource): number[] | null {
-  const lv = levels.value;
-  if (!lv || now.value - lv.at > LEVELS_STALE_MS) return null;
-  const db = source === "mic" ? lv.mic_db : lv.pc_db;
-  if (db <= FLOOR_DB) return null;
-  const frac = Math.min(1, (db - FLOOR_DB) / (FULL_DB - FLOOR_DB));
-  return BAR_SHAPE.map((k) => Math.max(2, Math.round(BAR_PX * frac * k)));
+  return levelBars(levels.value, source, now.value, BAR_PX);
 }
 
 // o backend manda ISO local com microssegundos; corta em milissegundos (o JS não garante mais)
@@ -131,13 +124,13 @@ onBeforeUnmount(() => {
     v-if="visible"
     data-test="pill"
     class="pill"
-    :class="{ alert: alert }"
+    :class="{ alert: alert, dictating: !recording && !alert }"
     :style="{ opacity: 1 }"
   >
-    <!-- o ponto vermelho diz "gravando": não aparece no aviso de gravação interrompida -->
-    <span v-if="!wasInterrupted" class="dot" :class="{ blink: recording && dictating }"></span>
+    <!-- o ponto diz "gravando": não aparece no ditado puro nem no aviso de gravação interrompida -->
+    <span v-if="recording" class="dot" :class="{ blink: dictating }"></span>
     <template v-if="recording">
-      <span data-test="timer">{{ elapsed }}</span>
+      <span data-test="timer" class="time">{{ elapsed }}</span>
       <span v-for="source in meters" :key="source" class="m" :data-test="`meter-${source}`">
         <AppIcon :name="source === 'mic' ? 'mic' : 'volume'" :size="13" />
         <span class="bars" :class="{ off: !bars(source) }">
@@ -147,7 +140,10 @@ onBeforeUnmount(() => {
       <span v-if="alert" data-test="alert" class="alert-text">{{ alert.message }}</span>
     </template>
     <span v-else-if="alert" data-test="alert" class="alert-text">{{ alert.message }}</span>
-    <span v-else>{{ status?.dictation.source === "pc" ? "Transcrevendo áudio do PC" : "Ditando" }}</span>
+    <template v-else>
+      <BrandOrb :size="22" class="orb" />
+      <span>{{ status?.dictation.source === "pc" ? "Transcrevendo áudio do PC" : "Ditando" }}</span>
+    </template>
   </div>
 </template>
 
@@ -170,22 +166,32 @@ body {
 
 .pill {
   max-width: calc(100vw - 4px);
+  height: 34px;
   box-sizing: border-box;
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: var(--surface);
-  border:1px solid var(--border-control);
+  padding: 0 var(--space-4) 0 10px;
+  border-radius: var(--radius-pill);
+  /* opaca: a janela é transparente e qualquer translucidez vazaria; sem sombra, que a janela cortaria */
+  background: var(--surface-raised);
+  border: 1px solid var(--glass-border);
   color: var(--text);
-  font: 600 13px var(--font-round);
+  font: 700 13px var(--font-round);
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   white-space: nowrap;
 }
 
+.pill.dictating {
+  padding-left: 6px;
+}
+
 .pill.alert {
-  /* o tom de aviso é translúcido: fica sobre a superfície opaca para a janela transparente não vazar */
-  background: linear-gradient(var(--warning-surface), var(--warning-surface)), var(--surface);
+  /* contorno de aviso sobre a superfície opaca (o tom translúcido nunca fica sozinho na janela) */
+  box-shadow: inset 0 0 0 1px var(--warning);
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
 }
 
 .dot {
@@ -194,53 +200,82 @@ body {
   height: 8px;
   border-radius: 50%;
   background: var(--danger);
+  animation: pulse var(--duration-glow) ease-in-out infinite;
 }
 
+/* gravando e ditando ao mesmo tempo: anel de destaque ao redor do ponto */
 .dot.blink {
-  outline:2px solid var(--accent-glow); outline-offset:2px;
+  outline: 2px solid var(--accent-glow);
+  outline-offset: 2px;
 }
 
-@keyframes blink {
+/* o brilho do orbe (--shadow-orb) vazaria para a janela transparente e seria cortado: só o anel pulsa */
+.pill.dictating .orb {
+  box-shadow: 0 0 0 0 var(--selected-border);
+  animation: glow var(--duration-glow) ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--danger-surface);
+  }
   50% {
-    opacity: 0.15;
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+@keyframes glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--selected-border);
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
   }
 }
 
 .m {
   display: flex;
   align-items: center;
-  gap: 3px;
-  font-weight: 500;
-  font-size: 10px;
+  gap: 4px;
+  color: var(--text-muted);
 }
 
 .bars {
   display: flex;
-  gap: 1.5px;
+  gap: 2px;
   align-items: flex-end;
-  height: 10px;
+  height: 12px;
 }
 
 .bars i {
-  width: 2.5px;
+  width: 3px;
   background: var(--success);
-  border-radius: 1px;
+  border-radius: 2px;
+  transition: height var(--duration-fast) var(--ease-out);
 }
 
 .bars.off i {
-  background: var(--muted);
-  height: 2px;
+  background: var(--text-muted);
+  height: 3px;
 }
 
 .alert-text {
   /* sem isto o item flex não encolhe abaixo do texto e as reticências nunca aparecem */
   min-width: 0;
-  color: var(--warn);
+  color: var(--warning);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 </style>
 
 <style>
-@media(prefers-reduced-motion:reduce) { .pill * { animation:none!important; transition:none!important; } }
+@media (prefers-reduced-motion: reduce) {
+  .pill *,
+  .pill {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 </style>
