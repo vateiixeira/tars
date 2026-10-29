@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, provide, ref } from "vue";
 import MeetingList from "./components/MeetingList.vue";
 import RecordButton from "./components/RecordButton.vue";
+import VersionLine from "./components/VersionLine.vue";
 import AppearanceControl from "./components/ui/AppearanceControl.vue";
 import AppIcon from "./components/ui/AppIcon.vue";
 import { useStatus } from "./composables/useStatus";
@@ -147,6 +148,7 @@ const dictationLabel = computed(() => {
           >
             <span class="status-dot" aria-hidden="true" />{{ connectionLabel }}
           </div>
+          <VersionLine />
         </footer>
       </aside>
       <main id="main-content" class="main" tabindex="-1">
