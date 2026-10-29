@@ -52,11 +52,15 @@ describe("ScanContextPrompt", () => {
     expect(w.emitted("dismiss")).toHaveLength(1);
   });
 
-  it("desabilitado trava campo, chips e botões", () => {
+  it("desabilitado trava campo, chips e Gerar tarefas, mas não Agora não", async () => {
     const w = mountPrompt("x", true);
     expect(w.get("textarea").attributes("disabled")).toBeDefined();
     const buttons = w.findAll("button");
     expect(buttons).toHaveLength(5);
-    for (const b of buttons) expect(b.attributes("disabled")).toBeDefined();
+    for (const b of buttons.filter((b) => !b.text().includes("Agora não")))
+      expect(b.attributes("disabled")).toBeDefined();
+    expect(btn(w, "Agora não").attributes("disabled")).toBeUndefined();
+    await btn(w, "Agora não").trigger("click");
+    expect(w.emitted("dismiss")).toHaveLength(1);
   });
 });

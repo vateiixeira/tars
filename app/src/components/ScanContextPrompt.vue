@@ -5,6 +5,7 @@ import { useId } from "vue";
 import AppButton from "./ui/AppButton.vue";
 import AppIcon from "./ui/AppIcon.vue";
 
+// `disabled` trava campo, chips e "Gerar tarefas"; "Agora não" só esconde a caixa e fica sempre disponível.
 const props = defineProps<{ modelValue: string; disabled: boolean }>();
 const emit = defineEmits<{
   "update:modelValue": [value: string];
@@ -64,7 +65,7 @@ function append(text: string) {
     ></textarea>
     <div class="ctx-actions">
       <span class="note">Tarefas editadas, descartadas ou já enviadas são preservadas.</span>
-      <AppButton variant="ghost" :disabled="disabled" @click="emit('dismiss')">Agora não</AppButton>
+      <AppButton variant="ghost" @click="emit('dismiss')">Agora não</AppButton>
       <AppButton variant="primary" :disabled="disabled" @click="emit('generate')">
         <AppIcon name="sparkle" :size="16" /> Gerar tarefas
       </AppButton>
