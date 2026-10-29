@@ -231,3 +231,70 @@ def test_fill_loses_race_to_operator_edit(store, mid, monkeypatch):
     assert not patch(store, a, {"assignee_id": 9})
     got = store.get_task(b.id)
     assert (got.assignee_id, fill_of(got)) == (10, {"assignee_id": "manual"})
+
+
+def test_product_change_clears_stale_last_assignee(store, mid, old):
+    created(store, old, product_id=4, assignee_id=9, team_id=3)
+    store.replace_scan_tasks(mid, [scan_item(product_id=4, team_id=5)])  # Claude: equipe 5, sem responsável
+    autofill.fill_from_sources(store, OPTS, mid)
+    t = store.list_tasks(mid)[0]
+    assert (t.assignee_id, t.team_id, fill_of(t)) == (9, 5, {"assignee_id": "last"})
+    patch(store, t, {"product_id": 6})
+    got = store.get_task(t.id)
+    assert (got.assignee_id, got.team_id, got.product_id) == (None, 5, 6)
+    assert fill_of(got) == {}
+
+
+def test_product_change_to_product_without_sources_clears_last_fields(store, mid, old):
+    created(store, old, product_id=4, assignee_id=9, team_id=3)
+    t = card(store, mid, product_id=4)
+    autofill.fill_from_sources(store, OPTS, mid)
+    assert fill_of(store.get_task(t.id)) == {"assignee_id": "last", "team_id": "last"}
+    assert patch(store, store.get_task(t.id), {"product_id": 6})
+    got = store.get_task(t.id)
+    assert (got.assignee_id, got.team_id, fill_of(got)) == (None, None, {})
+
+
+def test_product_change_keeps_last_fields_the_new_product_provides(store, mid, old):
+    created(store, old, product_id=4, assignee_id=9, team_id=3)
+    created(store, old, product_id=6, assignee_id=10, team_id=5)
+    t = card(store, mid, product_id=4)
+    autofill.fill_from_sources(store, OPTS, mid)
+    patch(store, store.get_task(t.id), {"product_id": 6})
+    got = store.get_task(t.id)
+    assert (got.assignee_id, got.team_id) == (None, 5)  # Ana é incoerente com equipe 5 e produto 6
+    assert fill_of(got) == {"team_id": "last"}
+
+
+def test_product_change_never_clears_manual_or_claude_values(store, mid, old):
+    created(store, old, product_id=4, assignee_id=9, team_id=3)
+    claude = card(store, mid, product_id=4, assignee_id=10)  # sugestão do Claude, sem marca
+    manual = store.update_task(card(store, mid, product_id=4).id, {"assignee_id": 9, "team_id": 3})
+    patch(store, claude, {"product_id": 6})
+    patch(store, manual, {"product_id": 6})
+    assert store.get_task(claude.id).assignee_id == 10
+    got = store.get_task(manual.id)
+    assert (got.assignee_id, got.team_id) == (9, 3)
+
+
+def test_propagated_team_clears_incoherent_last_assignee(store, mid):
+    a, b = card(store, mid, product_id=6), card(store, mid, product_id=6)
+    store.fill_task(b.id, {"assignee_id": 10, "team_id": 3}, b.updated_at)  # Ana: equipe 3, produto 4
+    assert patch(store, a, {"team_id": 5})
+    got = store.get_task(b.id)
+    assert (got.assignee_id, got.team_id, fill_of(got)) == (None, 5, {"team_id": "last"})
+
+
+def test_propagated_team_keeps_incoherent_claude_assignee(store, mid):
+    a, b = card(store, mid, product_id=6), card(store, mid, product_id=6, assignee_id=10)
+    assert patch(store, a, {"team_id": 5})
+    got = store.get_task(b.id)
+    assert (got.assignee_id, got.team_id) == (10, 5)  # só o "last" sai
+
+
+def test_operator_team_change_clears_own_incoherent_last_assignee(store, mid):
+    t = card(store, mid, product_id=6)
+    store.fill_task(t.id, {"assignee_id": 10}, t.updated_at)  # Ana: equipe 3, produto 4
+    patch(store, store.get_task(t.id), {"team_id": 5})
+    got = store.get_task(t.id)
+    assert (got.assignee_id, got.team_id, fill_of(got)) == (None, 5, {"team_id": "manual"})

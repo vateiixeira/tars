@@ -13,7 +13,9 @@ De onde vem o último usado de um produto (`fill_from_sources`):
 Escolher responsável/equipe num cartão (ou criar a issue dele) leva o valor aos outros cartões
 pendentes da reunião com o mesmo produto (`propagate`). Com as opções do MCP de issues em cache,
 um candidato precisa existir nelas e o responsável precisa ser coerente com a equipe e o produto
-finais do cartão; sem opções, preenche sem validar (o operador revisa antes de criar).
+finais do cartão; sem opções, preenche sem validar (o operador revisa antes de criar). Um
+responsável "last" que deixa de ser coerente (equipe propagada, produto trocado) é esvaziado, e
+trocar o produto esvazia o "last" que o novo produto não fornece (`Store.clear_filled`).
 
 Toda gravação passa por `Store.fill_task` com o `updated_at` lido: se o operador mexeu no cartão
 nesse meio-tempo, a escrita é ignorada. As funções devolvem se algum cartão mudou.
@@ -55,7 +57,19 @@ def _apply(store: Store, options: IssueOptions | None, task: TaskSuggestion, can
             if not options.coherent(values["assignee_id"], team, task.product_id):
                 del values["assignee_id"]  # a equipe fica
     values = {f: v for f, v in values.items() if getattr(task, f) != v}
-    return bool(values) and store.fill_task(task.id, values, task.updated_at)
+    if not (values and store.fill_task(task.id, values, task.updated_at)):
+        return False
+    _drop_incoherent(store, options, store.get_task(task.id))
+    return True
+
+
+def _drop_incoherent(store: Store, options: IssueOptions | None, task: TaskSuggestion | None) -> bool:
+    """Esvazia o responsável "last" que não é coerente com a equipe e o produto finais do cartão."""
+    if options is None or task is None or task.assignee_id is None or _mark(task, "assignee_id") != "last":
+        return False
+    if options.coherent(task.assignee_id, task.team_id, task.product_id):
+        return False
+    return store.clear_filled(task.id, ["assignee_id"], task.updated_at)
 
 
 def _sources(store: Store, meeting_id: str, product_id: int) -> dict[str, int]:
@@ -109,16 +123,27 @@ def after_patch(store: Store, options: IssueOptions | None, task: TaskSuggestion
     """Depois que o operador mudou `changed` em `task` (já gravado), ajusta os outros cartões.
 
     Responsável/equipe mudados vão para os irmãos; produto trocado completa `task` pelo último
-    usado do novo produto e leva as escolhas manuais dele aos cartões desse produto.
+    usado do novo produto (o que ficou marcado "last" sem vir dele é esvaziado) e leva as
+    escolhas manuais dele aos cartões desse produto. Responsável "last" que fica incoerente com a
+    equipe e o produto finais do cartão também é esvaziado.
     """
     if not _pending(task):
         return False
     fields = [f for f in FILL_FIELDS if f in changed]
     result = False
     if "product_id" in changed:
-        result = fill_from_sources(store, options, task.meeting_id, [task.id])
+        sources = _sources(store, task.meeting_id, task.product_id) if task.product_id is not None else {}
+        result = _apply(store, options, task, sources)
         task = store.get_task(task.id) or task
+        # "last" que o novo produto não confirmou veio do produto antigo: sai.
+        stale = [f for f in FILL_FIELDS if _mark(task, f) == "last" and sources.get(f) != getattr(task, f)]
+        if stale and store.clear_filled(task.id, stale, task.updated_at):
+            result = True
+            task = store.get_task(task.id) or task
         fields = [f for f in FILL_FIELDS if _mark(task, f) == "manual"]
+    if "team_id" in changed or "product_id" in changed:
+        result |= _drop_incoherent(store, options, task)
+        task = store.get_task(task.id) or task
     if fields:
         result |= propagate(store, options, task, fields)
     return result

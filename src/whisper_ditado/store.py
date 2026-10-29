@@ -16,6 +16,7 @@ import os
 import sqlite3
 import threading
 import uuid
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -1009,6 +1010,38 @@ class Store:
             if row is None:
                 return False
             sets = {**values, "suggested_json": self._with_fill_marks(row["suggested_json"], values, "last"),
+                    "updated_at": datetime.now().isoformat()}
+            assignments = ", ".join(f"{name}=?" for name in sets)
+            c.execute(f"UPDATE task_suggestions SET {assignments} WHERE id=?", [*sets.values(), task_id])
+        return True
+
+    def clear_filled(self, task_id: str, fields: Iterable[str], expected_updated_at: str) -> bool:
+        """Esvazia os campos de `fields` preenchidos automaticamente ("last") e tira a marca deles.
+
+        Valor manual ou sugestão do Claude (sem marca "last") nunca é apagado; `edited` não muda.
+        Mesmas condições de `fill_task`: pendente e intocada desde a leitura. Devolve se gravou.
+        """
+        fields = list(dict.fromkeys(fields))
+        unknown = set(fields) - set(FILL_FIELDS)
+        if unknown:
+            raise ValueError(f"campos inválidos para o preenchimento: {sorted(unknown)}")
+        with self._tx() as c:
+            row = c.execute(
+                "SELECT suggested_json FROM task_suggestions WHERE id=? AND updated_at=?"
+                " AND discarded=0 AND create_state IN ('none','failed')",
+                (task_id, expected_updated_at),
+            ).fetchone()
+            if row is None:
+                return False
+            suggested = json.loads(row["suggested_json"]) if row["suggested_json"] else {}
+            fill = dict(suggested.get("fill") or {})
+            stale = [f for f in fields if fill.get(f) == "last"]
+            if not stale:
+                return False
+            for f in stale:
+                del fill[f]
+            suggested["fill"] = fill
+            sets = {**dict.fromkeys(stale), "suggested_json": json.dumps(suggested),
                     "updated_at": datetime.now().isoformat()}
             assignments = ", ".join(f"{name}=?" for name in sets)
             c.execute(f"UPDATE task_suggestions SET {assignments} WHERE id=?", [*sets.values(), task_id])
