@@ -1,6 +1,6 @@
 [project]
 name = "whisper-ditado"
-version = "0.1.0"
+version = "0.2.0"
 description = "TARS: ditado por voz, reuniões e criação de issues"
 license = "MIT"
 license-files = ["LICENSE"]
