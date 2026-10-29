@@ -102,9 +102,13 @@ class UpdateChecker:
         self.stopping = stopping if stopping is not None else threading.Event()
         self._lock = threading.Lock()  # uma consulta por vez
         # A versão do código que está rodando: resolvida uma vez (mudar o arquivo em disco depois não a muda).
+        self._current: str | None
         try:
-            self._current: str | None = installed_version(root)
-        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+            version = installed_version(root)
+            if parse_version(version) is None:  # também cobre versão que não é texto
+                raise ValueError(f"versão inválida: {version!r}")
+            self._current = version
+        except (OSError, KeyError, TypeError, ValueError) as exc:  # ValueError: TOML inválido ou não UTF-8
             log.warning("Não foi possível ler a versão instalada (%s): aviso de nova versão desligado", exc)
             self._current = None
         self._install = install_kind(root)

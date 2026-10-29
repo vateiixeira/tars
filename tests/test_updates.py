@@ -236,6 +236,27 @@ def test_unreadable_pyproject_makes_public_none(store, root, content):
     assert UpdateChecker(store, root, fetch=boom).public() is None
 
 
+def test_non_utf8_pyproject_makes_public_none(store, root):
+    (root / "pyproject.toml").write_bytes(b'[project]\nversion = "\xff\xfe"\n')
+    assert UpdateChecker(store, root, fetch=boom).public() is None
+
+
+@pytest.mark.parametrize("value", ["1", "0.3.0rc1", "01.2.3", "", "abc"])
+def test_non_semver_string_version_makes_public_none(store, root, value, caplog):
+    (root / "pyproject.toml").write_text(f'[project]\nversion = "{value}"\n', encoding="utf-8")
+    with caplog.at_level("WARNING", logger="ditado"):
+        assert UpdateChecker(store, root, fetch=boom).public() is None
+    assert any("versão" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("literal", ["1", "0.3", "true", "[1, 2]", "1979-05-27"])
+def test_non_string_version_makes_public_none(store, root, literal, caplog):
+    (root / "pyproject.toml").write_text(f"[project]\nversion = {literal}\n", encoding="utf-8")
+    with caplog.at_level("WARNING", logger="ditado"):
+        assert UpdateChecker(store, root, fetch=boom).public() is None
+    assert any("versão" in r.getMessage() for r in caplog.records)
+
+
 def test_public_keeps_version_from_construction(store, root):
     checker = UpdateChecker(store, root, fetch=release("0.3.0"))
     (root / "pyproject.toml").write_text('[project]\nversion = "0.9.0"\n', encoding="utf-8")
