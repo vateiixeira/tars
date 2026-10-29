@@ -555,7 +555,9 @@ onBeforeUnmount(() => {
             @click="selectTab(item.id)"
             @keydown="onTabKey($event, index)"
           >
-            {{ item.label }}<span v-if="item.count" class="count">{{ item.count }}</span>
+            {{ item.label }}<template v-if="item.count"
+              ><span class="sr-only"> (</span><span class="count">{{ item.count }}</span><span class="sr-only">)</span></template
+            >
           </button>
         </div>
         <div v-if="tab !== 'tasks'" class="actions">

@@ -221,7 +221,7 @@ describe("MeetingDetail", () => {
 
     const printBlob = vi.fn(async () => new Blob(["i"]));
     const { w: w2 } = await mountDetail(detail({ prints: [aPrint(), aPrint({ id: "p2", label: "P2", at_s: 40 })] }), { printBlob });
-    expect(w2.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição", "Prints2", "Tarefas"]);
+    expect(w2.findAll('[role="tab"]').map((t) => t.text())).toEqual(["Resumo", "Transcrição", "Prints (2)", "Tarefas"]);
     expect(w2.get("#tab-prints .count").text()).toBe("2");
     await w2.get("#tab-prints").trigger("click");
     await flushPromises();
