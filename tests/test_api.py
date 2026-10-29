@@ -217,6 +217,25 @@ def test_start_stop_conflicts(client, ctx):
     assert client.post("/api/meetings/stop").status_code == 409
 
 
+class FakeUpdates:
+    def __init__(self, public):
+        self._public = public
+
+    def public(self):
+        return self._public
+
+
+def test_status_has_version(client, ctx):
+    assert client.get("/api/status").json()["version"] is None  # sem checker no contexto
+
+
+def test_status_version_from_checker(client, ctx):
+    public = {"current": "0.2.0", "latest": "0.3.0", "url": "https://x",
+              "update_available": True, "install": "git"}
+    ctx.updates = FakeUpdates(public)
+    assert client.get("/api/status").json()["version"] == public
+
+
 def test_status_shape(client, ctx):
     ctx.meetings.state, ctx.meetings.current_id = "recording", "abc"
     ctx.meetings.followed_app = "Zoom"
