@@ -13,7 +13,6 @@ import {
   inject,
   nextTick,
   onBeforeUnmount,
-  onMounted,
   ref,
   watch,
 } from "vue";
@@ -28,12 +27,12 @@ import type {
 } from "../api/types";
 import { notifyMeetingsChanged } from "../composables/useMeetingsRevision";
 import { useStatus } from "../composables/useStatus";
-import { groupByDay, timeOfDay } from "../lib/format";
 import { alertLines, exportFileName, transcriptText } from "../lib/meeting";
 import AppIcon from "./ui/AppIcon.vue";
 import AppDialog from "./ui/AppDialog.vue";
+import SkeletonLines from "./ui/SkeletonLines.vue";
+import MeetingHeader, { type MeetingMenuKey } from "./MeetingHeader.vue";
 import NameSuggestionsDialog from "./NameSuggestionsDialog.vue";
-import SpeakerChips from "./SpeakerChips.vue";
 import SpeakerMenu from "./SpeakerMenu.vue";
 import PrintsTab from "./PrintsTab.vue";
 import SummaryTab from "./SummaryTab.vue";
@@ -93,7 +92,6 @@ const tasksBack = ref<HTMLButtonElement | null>(null);
 function openTasks(): void {
   if (tab.value !== "tasks") previousTab.value = tab.value;
   printFocus.value = null; // ao voltar, a aba Prints não deve rolar de novo até o print antigo
-  menuOpen.value = false;
   speakerMenu.value = null;
   tab.value = "tasks";
 }
@@ -199,77 +197,34 @@ watch(connected, (on) => {
 
 // -- cabeçalho ------------------------------------------------------------------------------
 
+const header = ref<InstanceType<typeof MeetingHeader> | null>(null);
 const title = computed(() => meeting.value?.title || "Reunião sem título");
-const when = computed(() => {
-  const m = meeting.value;
-  if (!m) return "";
-  const day = groupByDay([m])[0].label;
-  const end = m.ended_at ? `–${timeOfDay(m.ended_at)}` : "";
-  return `${day}, ${timeOfDay(m.started_at)}${end}`;
-});
 const alerts = computed(() => (meeting.value ? alertLines(meeting.value) : []));
 
-const editing = ref(false);
-const draft = ref("");
-const titleInput = ref<HTMLInputElement | null>(null);
-const savingTitle = ref(false);
-const renameButton = ref<HTMLButtonElement | null>(null);
-const moreButton = ref<HTMLButtonElement | null>(null);
-const moreWrap = ref<HTMLElement | null>(null);
-function toggleMore() {
-  menuOpen.value = !menuOpen.value;
-  confirmingDelete.value = false;
-  if (menuOpen.value)
-    void nextTick(() =>
-      moreWrap.value?.querySelector<HTMLButtonElement>(".menu button")?.focus(),
-    );
-}
-function closeOutside(event: PointerEvent) {
-  if (menuOpen.value && !moreWrap.value?.contains(event.target as Node))
-    menuOpen.value = false;
-}
-onMounted(() => document.addEventListener("pointerdown", closeOutside));
-onBeforeUnmount(() =>
-  document.removeEventListener("pointerdown", closeOutside),
-);
-function cancelDelete() {
-  confirmingDelete.value = false;
-  void nextTick(() => moreButton.value?.focus());
-}
-function cancelTitle() {
-  editing.value = false;
-  void nextTick(() => renameButton.value?.focus());
-}
-
-function startEdit(): void {
-  draft.value = meeting.value?.title ?? "";
-  editing.value = true;
-  void nextTick(() => titleInput.value?.select());
-}
-
-async function commitTitle(): Promise<void> {
-  if (!editing.value || savingTitle.value) return;
-  const next = draft.value.trim();
-  if (!next || next === (meeting.value?.title ?? "")) {
-    cancelTitle();
-    return;
-  }
-  savingTitle.value = true;
+/** Salva o título vindo do cabeçalho; o erro vira banner e o cabeçalho continua editando. */
+async function renameTitle(next: string): Promise<boolean> {
   const id = props.meetingId;
   const { title: _oldError, ...rest } = actionErrors.value;
   actionErrors.value = rest;
   try {
     await client.renameMeeting(id, next);
     await refreshAfterChange(id);
-    if (id === props.meetingId) cancelTitle();
+    return true;
   } catch (e) {
-    if (id === props.meetingId) {
-      actionErrors.value = { ...actionErrors.value, title: errorText(e) };
-      void nextTick(() => titleInput.value?.focus());
-    }
-  } finally {
-    savingTitle.value = false;
+    if (id === props.meetingId) actionErrors.value = { ...actionErrors.value, title: errorText(e) };
+    return false;
   }
+}
+
+function onMenu(key: MeetingMenuKey): void {
+  if (key === "export") void exportMeeting();
+  else if (key === "suggest") suggesting.value = true;
+  else if (key === "archive") void toggleArchive();
+  else confirmingDelete.value = true;
+}
+function cancelDelete(): void {
+  confirmingDelete.value = false;
+  void nextTick(() => header.value?.focusMenuButton());
 }
 
 // -- ações ----------------------------------------------------------------------------------
@@ -405,19 +360,12 @@ function reprocess(): Promise<void> {
   });
 }
 
-const menuOpen = ref(false);
-const peopleExpanded = ref(false);
 const confirmingDelete = ref(false);
 const archived = computed(() => !!meeting.value?.archived_at);
-// gravando/processando: o backend recusa (409), igual à exclusão
-const canArchive = computed(
-  () => meeting.value?.status !== "recording" && meeting.value?.status !== "processing",
-);
 
 function toggleArchive(): Promise<void> {
   const id = props.meetingId;
   const archive = !archived.value;
-  menuOpen.value = false;
   return run("archive", async () => {
     const r = archive ? await client.archiveMeeting(id) : await client.unarchiveMeeting(id);
     if (id === props.meetingId && meeting.value) meeting.value.archived_at = r.archived_at;
@@ -432,7 +380,6 @@ function remove(): Promise<void> {
     notifyMeetingsChanged();
     emit("deleted", id);
     if (id !== props.meetingId) return;
-    menuOpen.value = false;
     confirmingDelete.value = false;
   });
 }
@@ -478,11 +425,8 @@ watch(
     meeting.value = null;
     stage.value = null;
     actionErrors.value = {};
-    editing.value = false;
     confirmingDelete.value = false;
     confirmingReprocess.value = false;
-    menuOpen.value = false;
-    peopleExpanded.value = false;
     speakerMenu.value = null;
     suggesting.value = false;
     tab.value = "transcript";
@@ -507,152 +451,36 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="detail" :class="{ 'tasks-page': tasksActive }">
-    <p v-if="loadError && !meeting" class="state error" role="alert">
-      {{ loadError }}
-      <button class="btn" type="button" @click="load">Tentar de novo</button>
-    </p>
-    <div v-else-if="!meeting" class="state" role="status">
-      <div class="skeleton-line" />
-      <div class="skeleton-line short" />
-      Carregando reunião…
+    <div v-if="loadError && !meeting" class="state">
+      <p class="banner error" role="alert">
+        <AppIcon name="warning" :size="18" /><span>{{ loadError }}</span>
+        <button class="btn btn-sm" type="button" @click="load">Tentar de novo</button>
+      </p>
+    </div>
+    <div v-else-if="!meeting" class="state loading">
+      <SkeletonLines :lines="1" class="skel-title" />
+      <SkeletonLines :lines="4" label="Carregando reunião…" />
     </div>
     <template v-else>
-      <header v-show="!tasksActive" class="head">
-        <div class="context-label">
-          Reunião
-          <span v-if="meeting.status === 'ready'" class="ready"
-            ><AppIcon name="check" :size="14" />Pronta para revisar</span
-          >
-        </div>
-        <div class="title-row">
-          <input
-            v-if="editing"
-            ref="titleInput"
-            v-model="draft"
-            class="title-input"
-            maxlength="200"
-            aria-label="Título da reunião"
-            :aria-invalid="actionErrors.title ? true : undefined"
-            :disabled="savingTitle"
-            @keydown.enter.prevent="commitTitle"
-            @keydown.esc.prevent="cancelTitle"
-            @blur="commitTitle"
-          />
-          <h1 v-else>
-            <button
-              ref="renameButton"
-              type="button"
-              class="title"
-              title="Editar título da reunião"
-              :aria-label="`Renomear reunião: ${title}`"
-              :disabled="!connected"
-              @click="startEdit"
-            >
-              {{ title }}<AppIcon name="edit" :size="17" />
-            </button>
-          </h1>
-          <div
-            ref="moreWrap"
-            class="more-wrap"
-            @keydown.esc.stop.prevent="
-              menuOpen = false;
-              moreButton?.focus();
-            "
-          >
-            <button
-              ref="moreButton"
-              type="button"
-              class="more icon-button"
-              aria-label="Mais opções"
-              :aria-expanded="menuOpen"
-              @click="toggleMore"
-            >
-              <AppIcon name="more" />
-            </button>
-            <div
-              v-if="menuOpen"
-              class="menu"
-              @keydown.esc.stop.prevent="
-                menuOpen = false;
-                moreButton?.focus();
-              "
-            >
-              <button
-                type="button"
-                :disabled="isBusy('export') || !connected"
-                @click="
-                  exportMeeting();
-                  menuOpen = false;
-                "
-              >
-                {{ meeting.prints.length ? "Exportar reunião com prints (.zip)" : "Exportar reunião em Markdown" }}
-              </button>
-              <button
-                type="button"
-                :disabled="!connected"
-                @click="
-                  suggesting = true;
-                  menuOpen = false;
-                "
-              >
-                Sugerir nomes
-              </button>
-              <button
-                type="button"
-                @click="
-                  peopleExpanded = !peopleExpanded;
-                  menuOpen = false;
-                "
-              >
-                {{ peopleExpanded ? "Ocultar participantes" : "Participantes" }}
-              </button>
-              <button
-                type="button"
-                :disabled="!connected || isBusy('archive') || (!archived && !canArchive)"
-                @click="toggleArchive"
-              >
-                {{ archived ? "Desarquivar" : "Arquivar reunião" }}
-              </button>
-              <button
-                type="button"
-                class="danger"
-                :disabled="!connected"
-                @click="
-                  confirmingDelete = true;
-                  menuOpen = false;
-                "
-              >
-                Excluir reunião
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="meta">
-          <AppIcon name="clock" :size="14" />{{ when
-          }}<span v-if="archived" class="archived-tag">Arquivada</span
-          ><span v-if="savingTitle" role="status">Salvando título…</span>
-        </div>
-        <div class="head-bottom" :class="{ expanded: peopleExpanded }">
-          <SpeakerChips
-            :speakers="meeting.speakers"
-            @select="onSpeakerSelect"
-          /><button
-            type="button"
-            class="btn export"
-            :disabled="isBusy('export') || !connected"
-            @click="exportMeeting"
-          >
-            <AppIcon name="export" :size="16" />Exportar {{ exportExtension }}
-          </button>
-        </div>
-      </header>
+      <MeetingHeader
+        v-show="!tasksActive"
+        ref="header"
+        :meeting="meeting"
+        :connected="connected"
+        :rename="renameTitle"
+        :title-invalid="!!actionErrors.title"
+        :export-busy="isBusy('export')"
+        :archive-busy="isBusy('archive')"
+        @menu="onMenu"
+        @select-speaker="onSpeakerSelect"
+      />
       <p
         v-for="b in errorBanners"
         :key="b.action"
         class="banner error"
         role="alert"
       >
-        {{ b.message }}
+        <AppIcon name="warning" :size="18" />{{ b.message }}
       </p>
       <div v-if="meeting.status === 'recording'" class="capture-state">
         <span class="capture-status"
@@ -822,6 +650,14 @@ onBeforeUnmount(() => {
           >
           <button
             type="button"
+            class="btn ghost"
+            :disabled="isBusy('export') || !connected"
+            @click="exportMeeting"
+          >
+            <AppIcon name="export" :size="16" />Exportar {{ exportExtension }}
+          </button>
+          <button
+            type="button"
             class="btn ghost audio-action"
             :disabled="isBusy('audio') || !connected"
             @click="playAudio()"
@@ -976,9 +812,6 @@ onBeforeUnmount(() => {
   min-height: 0;
   container: detail / inline-size;
 }
-.head {
-  padding: 28px var(--page-gutter) 18px;
-}
 .tasks-head {
   display: flex;
   align-items: center;
@@ -1013,119 +846,6 @@ onBeforeUnmount(() => {
 }
 .tasks-link {
   margin-left: auto;
-}
-.context-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.75rem;
-  color: var(--muted);
-  margin-bottom: 14px;
-}
-.ready {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--audio-color);
-  font-size: 0.6875rem;
-}
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-h1 {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-}
-.title {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: inherit;
-  font-weight: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  overflow-wrap: anywhere;
-  max-width: 100%;
-}
-.title svg {
-  color: var(--muted);
-  flex-shrink: 0;
-}
-.title-input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: var(--font-h1);
-  padding: 4px 8px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  background: var(--surface);
-}
-.meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  margin-top: 12px;
-}
-.archived-tag {
-  padding: 1px 8px;
-  border: 1px solid var(--border-control);
-  border-radius: 999px;
-  font-size: 0.6875rem;
-}
-.head-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-}
-.export {
-  font-size: var(--font-meta);
-  flex-shrink: 0;
-}
-.more-wrap {
-  position: relative;
-  margin-left: auto;
-}
-.menu {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 20;
-  min-width: 220px;
-  padding: 6px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover);
-}
-.menu button {
-  padding: 12px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  text-align: left;
-  width: 100%;
-  font-size: var(--font-control);
-}
-.menu button:hover {
-  background: var(--hover);
-}
-.danger,
-.error {
-  color: var(--danger);
 }
 .confirm {
   display: flex;
@@ -1198,10 +918,6 @@ h1 {
   height: 100%;
   min-height: 0;
 }
-.state {
-  padding: var(--space-8) var(--page-gutter);
-  color: var(--muted);
-}
 .progress {
   display: flex;
   flex: 1;
@@ -1217,13 +933,49 @@ h1 {
   color: var(--text);
   margin-top: 20px;
 }
+.state {
+  padding: var(--space-8) var(--page-gutter);
+  color: var(--text-muted);
+}
+.state.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: var(--read-max);
+}
+.skel-title {
+  width: 55%;
+}
+.skel-title :deep(.skel) {
+  height: 22px;
+}
 .state.failed p {
   color: var(--danger);
 }
+/* Erro de ação (am-banner--danger): ícone, mensagem e, quando houver, a ação de refazer. */
 .banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 0 var(--page-gutter) var(--space-2);
+  padding: 14px var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--danger-surface);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.banner svg {
+  flex-shrink: 0;
+}
+.banner .btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.state .banner {
   margin: 0;
-  padding: 8px var(--page-gutter);
-  font-size: var(--font-meta);
 }
 .capture-state {
   flex: 1;
@@ -1283,29 +1035,7 @@ meter {
   width: 100%;
   accent-color: var(--audio-color);
 }
-.skeleton-line {
-  height: 24px;
-  margin-bottom: 16px;
-  width: 70%;
-  background: var(--panel);
-  border-radius: var(--radius-sm);
-}
-.skeleton-line.short {
-  width: 40%;
-}
 @container detail (max-width:560px) {
-  .head {
-    padding: 20px;
-  }
-  .ready {
-    display: none;
-  }
-  .head-bottom {
-    flex-wrap: wrap;
-  }
-  .title {
-    font-size: 1.25rem;
-  }
   .tabs {
     padding: 0 20px;
   }
@@ -1321,25 +1051,6 @@ meter {
   }
 }
 @container detail (max-width:900px) {
-  .head {
-    padding: 16px 24px 12px;
-  }
-  .context-label {
-    display: none;
-  }
-  .title {
-    font-size: 1.375rem;
-  }
-  .meta {
-    margin-top: 8px;
-    font-size: 0.75rem;
-  }
-  .head-bottom {
-    margin-top: 8px;
-  }
-  .export {
-    min-height: 34px;
-  }
   .tabs {
     padding: 0 24px;
   }
@@ -1349,22 +1060,6 @@ meter {
   }
   .actions {
     padding: 4px 24px;
-  }
-}
-@media (max-height: 600px) {
-  .head {
-    padding: 12px 24px;
-  }
-  .context-label,
-  .meta,
-  .head-bottom {
-    display: none;
-  }
-  .head-bottom.expanded {
-    display: flex;
-  }
-  .title {
-    font-size: 1.25rem;
   }
 }
 </style>

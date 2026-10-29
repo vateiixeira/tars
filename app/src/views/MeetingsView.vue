@@ -17,11 +17,15 @@ const emit = defineEmits<{ deleted: [meetingId: string]; tasksView: [active: boo
 </template>
 
 <style scoped>
+/* Painel de vidro sem backdrop-filter: o detalhe tem diálogos e menus fixed (Ruling R2). */
 .meetings-view {
   flex: 1;
   overflow: hidden;
   height: 100%;
   min-height: 0;
+  border-radius: var(--radius-xl);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
 }
 .empty {
   height: 100%;

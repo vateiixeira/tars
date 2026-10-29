@@ -409,6 +409,24 @@ describe("MeetingDetail", () => {
     warn.mockRestore();
   });
 
+  it("o cabeçalho mostra o status e o menu Mais opções, com Excluir por último", async () => {
+    installStore({ getMeeting: vi.fn(async () => detail()) });
+    const w = mount(MeetingDetail, { props: { meetingId: "m1" }, attachTo: document.body });
+    await flushPromises();
+    expect(w.get(".head").text()).toContain("Pronta para revisar");
+    const more = w.get(".more");
+    await more.trigger("click");
+    const items = w.findAll('[role="menuitem"]');
+    expect(items.map((i) => i.text())).toEqual([
+      "Exportar reunião em Markdown", "Sugerir nomes", "Participantes", "Arquivar reunião", "Excluir reunião",
+    ]);
+    expect(document.activeElement).toBe(items[0].element);
+    await w.get('[role="menu"]').trigger("keydown", { key: "Escape" });
+    expect(w.find('[role="menu"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(more.element);
+    w.unmount();
+  });
+
   it("delete asks for confirmation", async () => {
     const deleteMeeting = vi.fn(async () => ({ ok: true as const }));
     const { w } = await mountDetail(detail(), { deleteMeeting });
