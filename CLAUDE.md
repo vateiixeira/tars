@@ -17,6 +17,15 @@ git worktree add .worktrees/<nome> -b <branch>
 Correções pequenas e ajustes pontuais podem ser feitos direto no checkout atual.
 Remova o worktree com `git worktree remove` depois do merge.
 
+## Commits
+
+Faça commit automaticamente, sem perguntar, assim que uma mudança estiver concluída e
+verificada (testes e build passando e revisão feita, quando ela couber). Siga o formato de
+mensagem das instruções globais: `[Tipo] Título` em português, um commit por unidade
+lógica, sem misturar tipos. Inclua só os arquivos da própria mudança e deixe de fora
+arquivos não rastreados ou alterações alheias à tarefa. Commit não inclui push: só
+envie para o remoto ou publique uma versão quando isso for pedido.
+
 ## Versionamento e releases
 
 O fluxo completo está em [docs/RELEASING.md](docs/RELEASING.md).
