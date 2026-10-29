@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Reunião aberta: título editável, etiquetas dos participantes, ações, alertas e abas
-// Transcrição/Resumo. Cobre também os estados "processando" (com o estágio do evento `progress`)
-// e "falhou" (com Reprocessar).
+// Reunião aberta: cabeçalho (`MeetingHeader`), abas Resumo · Transcrição · Prints · Tarefas com as
+// ações de cada uma, alertas e o player no rodapé (`MeetingPlayer`). Cobre também os estados
+// "gravando" (`MeetingRecording`), "processando" (`StepProgress` com as etapas do evento
+// `progress`) e "falhou" (banner com Reprocessar).
 //
 // Pessoas e resumo: clique numa etiqueta abre o `SpeakerMenu` (renomear/identificar/juntar), "Sugerir
 // nomes" abre o `NameSuggestionsDialog`, a aba "Resumo" é o `SummaryTab` e a aba "Tarefas" é o
@@ -488,9 +489,9 @@ onBeforeUnmount(() => {
         <StepProgress class="steps" :steps="PROCESSING_STEPS" :current="stage" />
       </div>
       <div v-else-if="meeting.status === 'failed'" class="state failed">
-        <div class="banner failed-banner" role="alert">
+        <div class="banner failed-banner">
           <AppIcon name="warning" :size="18" />
-          <div>
+          <div role="alert">
             <strong>O processamento falhou</strong>
             {{ meeting.error || "Não foi possível transcrever esta reunião." }}
           </div>
@@ -766,7 +767,7 @@ onBeforeUnmount(() => {
 .tabs {
   display: flex;
   flex-shrink: 0;
-  gap: 22px;
+  gap: var(--space-5);
   margin: 0 var(--page-gutter);
   border-bottom: 1px solid var(--glass-border);
   overflow-x: auto;
@@ -776,10 +777,10 @@ onBeforeUnmount(() => {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   flex-shrink: 0;
   min-height: 44px;
-  padding: 10px 0;
+  padding: var(--space-2) 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -802,7 +803,7 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   height: 3px;
-  border-radius: 3px;
+  border-radius: var(--radius-pill);
   background: linear-gradient(90deg, var(--text-accent), var(--accent));
 }
 .tab:focus-visible {
@@ -810,7 +811,7 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 -3px 0 var(--focus-ring);
 }
 .count {
-  padding: 0 6px;
+  padding: 0 var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--selected);
   color: var(--text-accent);
@@ -819,9 +820,10 @@ onBeforeUnmount(() => {
 }
 .alerts {
   margin: 0;
-  padding: 8px var(--page-gutter) 8px calc(var(--page-gutter) + 18px);
-  color: var(--warn);
-  font-size: var(--font-meta);
+  padding: var(--space-2) var(--page-gutter) var(--space-2) calc(var(--page-gutter) + var(--space-5));
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
 }
 .body {
   flex: 1;
@@ -896,7 +898,7 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: var(--space-3);
   margin: 0 var(--page-gutter) var(--space-2);
-  padding: 14px var(--space-5);
+  padding: var(--space-3) var(--space-5);
   border-radius: var(--radius-lg);
   background: var(--danger-surface);
   color: var(--danger);

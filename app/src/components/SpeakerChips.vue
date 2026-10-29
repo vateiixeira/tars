@@ -42,9 +42,9 @@ const unidentified = (s: Speaker) => !s.voice_id && !s.is_me;
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   height: var(--control-sm);
-  padding: 0 var(--space-3) 0 10px;
+  padding: 0 var(--space-3) 0 var(--space-2);
   border-radius: var(--radius-pill);
   border: 1px solid var(--glass-border);
   background: var(--glass);

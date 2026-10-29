@@ -80,7 +80,7 @@ h2 {
   flex-direction: column;
   gap: var(--space-3);
   width: min(420px, 100%);
-  padding: 18px;
+  padding: var(--space-4);
   border-radius: var(--radius-lg);
   background: var(--glass);
   border: 1px solid var(--glass-border);
@@ -99,7 +99,7 @@ h2 {
   gap: var(--space-3);
   width: min(560px, 100%);
   margin: 0;
-  padding: 14px var(--space-5);
+  padding: var(--space-3) var(--space-5);
   border-radius: var(--radius-lg);
   background: var(--warning-surface);
   color: var(--warning);

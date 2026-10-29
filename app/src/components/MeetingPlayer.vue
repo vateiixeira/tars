@@ -152,7 +152,7 @@ defineExpose({ play, pause });
   gap: var(--space-3);
   flex-shrink: 0;
   margin: var(--space-2) var(--page-gutter) var(--space-4);
-  padding: 6px var(--space-4) 6px 6px;
+  padding: var(--space-1) var(--space-4) var(--space-1) var(--space-1);
   border-radius: var(--radius-pill);
   background: var(--glass);
   border: 1px solid var(--glass-border);

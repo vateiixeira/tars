@@ -86,8 +86,7 @@ describe("MeetingDetail", () => {
     getMeeting.mockResolvedValue(detail({ status: "failed", error: "Whisper caiu", segments: [] }));
     emit({ type: "meeting_updated", meeting_id: "m1", status: "failed" });
     await flushPromises();
-    expect(w.get(".failed-banner").attributes("role")).toBe("alert");
-    expect(w.get(".failed-banner").text()).toContain("Whisper caiu");
+    expect(w.get('.failed-banner [role="alert"]').text()).toContain("Whisper caiu");
     expect(w.findAll("button").some((b) => b.text() === "Reprocessar")).toBe(true);
   });
 
