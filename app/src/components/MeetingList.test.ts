@@ -3,6 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { setStatusStore } from "../composables/useStatus";
 import type { MeetingListItem } from "../api/types";
 import { ApiError } from "../api/client";
+import { notifyMeetingsChanged } from "../composables/useMeetingsRevision";
 import { installStore, reconnect } from "../test/meetingFakes";
 import MeetingList from "./MeetingList.vue";
 
@@ -93,6 +94,24 @@ describe("MeetingList", () => {
     const w = mount(MeetingList, { props: { selectedId: null } });
     await flushPromises();
     expect(w.find(".archive-toggle").exists()).toBe(false);
+  });
+
+  it("dentro das Arquivadas, a contagem do chip é renovada ao desarquivar", async () => {
+    let count = 2;
+    const listMeetings = vi.fn(async (_q?: string, archived?: boolean) =>
+      archived ? [item("z", "Antiga", "2026-09-01T10:00:00")] : [item("a", "Atual", "2026-10-19T14:00:00")],
+    );
+    const archivedCount = vi.fn(async () => ({ count }));
+    installStore({ listMeetings, archivedCount });
+    const w = mount(MeetingList, { props: { selectedId: null } });
+    await flushPromises();
+    await w.get(".archive-toggle").trigger("click");
+    await flushPromises();
+    expect(w.get(".archive-toggle").text()).toBe("Arquivadas · 2");
+    count = 1; // desarquivou uma
+    notifyMeetingsChanged();
+    await flushPromises();
+    expect(w.get(".archive-toggle").text()).toBe("Arquivadas · 1");
   });
 
   it("switches to the archived list and back", async () => {

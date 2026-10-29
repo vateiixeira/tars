@@ -57,8 +57,8 @@ async function load(): Promise<void> {
     const archived = showArchived.value;
     const [result, count] = await Promise.all([
       client.listMeetings(q || undefined, archived || undefined),
-      // a contagem é só do chip: se falhar, a lista ainda aparece
-      archived ? null : client.archivedCount().catch(() => null),
+      // a contagem é só do chip (também nas arquivadas, onde desarquivar a muda): se falhar, a lista ainda aparece
+      client.archivedCount().catch(() => null),
     ]);
     if (seq !== requestSeq) return;
     items.value = result;
