@@ -92,7 +92,7 @@ async function toggle(): Promise<void> {
 .rec:hover:not(:disabled) { background:var(--accent-hover); }
 .capture-label { display:flex; align-items:center; justify-content:center; gap:8px; }
 .rec small { display:block; font-weight:400; font-size:.6875rem; margin-top:5px; }
-.rec.recording { background:var(--danger-surface); color:var(--danger); border-color:var(--danger); }
+.rec.recording { background:var(--danger-surface); color:var(--danger); border-color:var(--danger); box-shadow:none; }
 .rec.recording:hover:not(:disabled) { background:var(--danger-surface); }
 .rec:disabled { opacity:.55; cursor:not-allowed; }
 .stop-dot { width:9px; height:9px; border-radius:2px; background:currentColor; }

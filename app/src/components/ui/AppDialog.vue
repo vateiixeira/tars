@@ -29,7 +29,7 @@ useFocusScope(root, true, () =>
           aria-label="Fechar diálogo"
           @click="emit('close')"
         >
-          <AppIcon name="close" />
+          <AppIcon name="close" :size="18" />
         </button>
       </header>
       <slot />
@@ -55,9 +55,9 @@ useFocusScope(root, true, () =>
   width: min(520px, 100%);
   max-height: 85dvh;
   overflow: auto;
-  padding: 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
   background: var(--surface-raised);
   box-shadow: var(--shadow-dialog);
 }
@@ -70,6 +70,8 @@ header {
 }
 h2 {
   margin: 0;
-  font-size: var(--font-h2);
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 700;
 }
 </style>

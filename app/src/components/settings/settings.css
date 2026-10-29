@@ -1,13 +1,19 @@
-/* Campos de domínio usam o mesmo vocabulário visual do sistema Mineral. */
-.s-section { max-width:720px; display:flex; flex-direction:column; gap:var(--space-6); }
-.s-section h2 { font-size:var(--font-h2); font-weight:600; margin:0; }
-.s-input,.s-select,.s-textarea { width:100%; min-height:var(--control-md); padding:10px 12px; background:var(--surface); color:var(--text); border:1px solid var(--border-control); border-radius:var(--radius-md); font:inherit; font-size:var(--font-control); }
+/* Campos Ametista (am-input/am-select/am-textarea): pílula de 48 px sobre vidro forte. */
+.s-section { max-width:var(--form-max); display:flex; flex-direction:column; gap:var(--space-6); }
+.s-section h2 { font-size:20px; line-height:26px; font-weight:700; margin:0; }
+.s-input,.s-select,.s-textarea { width:100%; min-width:0; min-height:var(--control-lg); padding:0 var(--space-5); background-color:var(--glass-strong); color:var(--text); border:1px solid var(--border-control); border-radius:var(--radius-pill); font:inherit; font-size:14px; font-weight:600; transition:border-color var(--duration-fast), box-shadow var(--duration-fast); }
+.s-input::placeholder,.s-textarea::placeholder { color:var(--text-muted); }
+.s-input:focus,.s-select:focus,.s-textarea:focus { outline:none; border-color:var(--focus-ring); box-shadow:0 0 0 1px var(--focus-ring), 0 0 0 5px var(--selected); }
+.s-input:disabled,.s-select:disabled,.s-textarea:disabled { opacity:.6; cursor:not-allowed; }
 .s-input[aria-invalid=true],.s-select[aria-invalid=true],.s-textarea[aria-invalid=true] { border-color:var(--danger); }
-.s-textarea { resize:vertical; min-height:120px; line-height:1.6; }
-.s-textarea.mono { font-family:var(--font-code); font-size:var(--font-control); min-height:320px; }
+/* seta própria do select, desenhada com dois triângulos na cor do texto */
+.s-select { appearance:none; padding-right:44px; background-image:linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position:calc(100% - 24px) 50%, calc(100% - 19px) 50%; background-size:5px 5px; background-repeat:no-repeat; cursor:pointer; }
+.s-select option { background:var(--surface-solid); color:var(--text); }
+.s-textarea { min-height:120px; padding:14px var(--space-5); border-radius:var(--radius-md); line-height:22px; resize:vertical; }
+.s-textarea.mono { font-family:var(--font-mono); font-size:13px; font-weight:500; min-height:320px; }
 .s-input.short { max-width:180px; }
 .s-btn.danger { color:var(--danger); }
 .s-row { display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap; }
-.s-note { color:var(--muted); font-size:var(--font-meta); margin:0; line-height:1.65; max-width:72ch; }
+.s-note { color:var(--text-muted); font-size:13px; font-weight:600; margin:0; line-height:19px; max-width:var(--read-max); }
 .s-ok { color:var(--success); font-size:var(--font-meta); }
-.s-error { color:var(--danger); font-size:var(--font-meta); margin:0; overflow-wrap:anywhere; }
+.s-error { color:var(--danger); font-size:13px; font-weight:700; line-height:19px; margin:0; overflow-wrap:anywhere; }
