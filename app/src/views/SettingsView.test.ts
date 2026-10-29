@@ -160,6 +160,20 @@ afterEach(() => {
 });
 
 describe("SettingsView", () => {
+  it("titula o painel com o grupo (eyebrow) e o nome da seção (h1)", async () => {
+    setup();
+    const w = await open();
+    expect(w.get(".eyebrow").text()).toBe("Captura");
+    expect(w.get("h1").text()).toBe("Ditado");
+    await w.get('[data-section="subs"]').trigger("click");
+    expect(w.get(".eyebrow").text()).toBe("Transcrição");
+    expect(w.get("h1").text()).toBe("Substituições");
+    await w.get('[data-section="whisper"]').trigger("click");
+    expect(w.get("h1").text()).toBe("Modelo Whisper");
+    expect(w.get('[data-section="whisper"]').attributes("aria-current")).toBe("page");
+    expect(w.get('[data-section="subs"]').attributes("aria-current")).toBeUndefined();
+  });
+
   it("permite ligar e desligar a coleta de áudio para avaliação", async () => {
     const { client } = setup();
     const w = await open();
@@ -746,7 +760,7 @@ describe("SettingsView", () => {
     it("mostra o título, a nota e os dois grupos", async () => {
       setup();
       const w = await open("claude");
-      expect(w.get("h2").text()).toBe("Claude");
+      expect(w.get("h1").text()).toBe("Claude");
       expect(w.text()).toContain(
         "O modelo fica gravado pelo apelido (opus, sonnet…): quando sair uma versão nova, ela passa a ser usada sozinha.",
       );

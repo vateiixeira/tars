@@ -108,35 +108,35 @@ async function saveDevice(key: DeviceKey, e: Event): Promise<void> {
 
 <template>
   <section v-if="form.settings.value" class="s-section">
-    <h2>Áudio</h2>
-
     <p v-if="devicesError" class="s-error" role="alert">
       {{ devicesError }} <button class="s-btn" @click="loadDevices">Tentar de novo</button>
     </p>
 
-    <SettingField label="Microfone" for="audio-mic" :error="form.errors.mic_device">
-      <select
-        id="audio-mic"
-        class="s-select"
-        :value="form.settings.value.mic_device ?? ''"
-        @change="saveDevice('mic_device', $event)"
-      >
-        <option value="">{{ systemDefaultLabel(devices?.default_source, devices?.sources) }}</option>
-        <option v-for="d in micOptions" :key="d.name" :value="d.name">{{ d.description }}</option>
-      </select>
-    </SettingField>
+    <div class="s-grid">
+      <SettingField label="Microfone" for="audio-mic" :error="form.errors.mic_device">
+        <select
+          id="audio-mic"
+          class="s-select"
+          :value="form.settings.value.mic_device ?? ''"
+          @change="saveDevice('mic_device', $event)"
+        >
+          <option value="">{{ systemDefaultLabel(devices?.default_source, devices?.sources) }}</option>
+          <option v-for="d in micOptions" :key="d.name" :value="d.name">{{ d.description }}</option>
+        </select>
+      </SettingField>
 
-    <SettingField label="Saída do PC (áudio da chamada)" for="audio-pc" :error="form.errors.pc_device">
-      <select
-        id="audio-pc"
-        class="s-select"
-        :value="form.settings.value.pc_device ?? ''"
-        @change="saveDevice('pc_device', $event)"
-      >
-        <option value="">{{ systemDefaultLabel(devices?.default_sink, devices?.sinks) }}</option>
-        <option v-for="d in pcOptions" :key="d.name" :value="d.name">{{ d.description }}</option>
-      </select>
-    </SettingField>
+      <SettingField label="Saída do PC (áudio da chamada)" for="audio-pc" :error="form.errors.pc_device">
+        <select
+          id="audio-pc"
+          class="s-select"
+          :value="form.settings.value.pc_device ?? ''"
+          @change="saveDevice('pc_device', $event)"
+        >
+          <option value="">{{ systemDefaultLabel(devices?.default_sink, devices?.sinks) }}</option>
+          <option v-for="d in pcOptions" :key="d.name" :value="d.name">{{ d.description }}</option>
+        </select>
+      </SettingField>
+    </div>
 
     <ToggleField
       :form="form"
@@ -151,7 +151,7 @@ async function saveDevice(key: DeviceKey, e: Event): Promise<void> {
       hint="Remove do microfone o som das caixas, para não repetir a fala dos outros."
     />
 
-    <div class="meters">
+    <div class="s-card meters">
       <h3>Teste os níveis</h3>
       <p class="s-note">Fale e toque um som no PC para conferir antes da reunião.</p>
       <LevelMeter icon="mic" label="Nível do microfone" :db="micDb" />
@@ -163,17 +163,6 @@ async function saveDevice(key: DeviceKey, e: Event): Promise<void> {
 
 <style scoped>
 .meters {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
+  gap: var(--space-3);
 }
 </style>

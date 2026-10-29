@@ -107,41 +107,42 @@ async function saveEffort(key: EffortKey, e: Event): Promise<void> {
 
 <template>
   <section v-if="form.settings.value" class="s-section">
-    <h2>Claude</h2>
     <p class="s-note">
       O modelo fica gravado pelo apelido (opus, sonnet…): quando sair uma versão nova, ela passa a ser usada sozinha.
     </p>
 
-    <div v-for="g in groups" :key="g.prefix" class="group" :data-group="g.prefix">
+    <div v-for="g in groups" :key="g.prefix" class="s-card group" :data-group="g.prefix">
       <h3>{{ g.title }}</h3>
 
-      <SettingField label="Modelo" :for="`${g.prefix}-model`" :error="form.errors[g.model]">
-        <select :id="`${g.prefix}-model`" class="s-select" @change="saveModel(g.model, $event)">
-          <option value="" :selected="form.settings.value[g.model] === null">{{ defaultLabel }}</option>
-          <option
-            v-for="o in modelOptions(form.settings.value[g.model])"
-            :key="o.value"
-            :value="o.value"
-            :selected="o.value === form.settings.value[g.model]"
-          >
-            {{ o.text }}
-          </option>
-        </select>
-      </SettingField>
+      <div class="s-grid">
+        <SettingField label="Modelo" :for="`${g.prefix}-model`" :error="form.errors[g.model]">
+          <select :id="`${g.prefix}-model`" class="s-select" @change="saveModel(g.model, $event)">
+            <option value="" :selected="form.settings.value[g.model] === null">{{ defaultLabel }}</option>
+            <option
+              v-for="o in modelOptions(form.settings.value[g.model])"
+              :key="o.value"
+              :value="o.value"
+              :selected="o.value === form.settings.value[g.model]"
+            >
+              {{ o.text }}
+            </option>
+          </select>
+        </SettingField>
 
-      <SettingField label="Effort" :for="`${g.prefix}-effort`" :error="form.errors[g.effort]">
-        <select :id="`${g.prefix}-effort`" class="s-select" @change="saveEffort(g.effort, $event)">
-          <option value="" :selected="form.settings.value[g.effort] === null">Padrão</option>
-          <option
-            v-for="o in EFFORTS"
-            :key="o.value"
-            :value="o.value"
-            :selected="o.value === form.settings.value[g.effort]"
-          >
-            {{ o.label }}
-          </option>
-        </select>
-      </SettingField>
+        <SettingField label="Effort" :for="`${g.prefix}-effort`" :error="form.errors[g.effort]">
+          <select :id="`${g.prefix}-effort`" class="s-select" @change="saveEffort(g.effort, $event)">
+            <option value="" :selected="form.settings.value[g.effort] === null">Padrão</option>
+            <option
+              v-for="o in EFFORTS"
+              :key="o.value"
+              :value="o.value"
+              :selected="o.value === form.settings.value[g.effort]"
+            >
+              {{ o.label }}
+            </option>
+          </select>
+        </SettingField>
+      </div>
     </div>
 
     <div class="s-row">
@@ -153,19 +154,3 @@ async function saveEffort(key: EffortKey, e: Event): Promise<void> {
     <p v-if="error" class="s-error" role="alert" data-test="claude-error">{{ error }}</p>
   </section>
 </template>
-
-<style scoped>
-.group {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.group h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-</style>

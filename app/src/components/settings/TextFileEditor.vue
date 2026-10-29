@@ -61,7 +61,6 @@ onMounted(load);
 
 <template>
   <section class="s-section">
-    <h2>{{ title }}</h2>
     <p class="s-note">{{ description }}</p>
     <textarea
       v-model="text"

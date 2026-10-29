@@ -70,7 +70,6 @@ onMounted(load);
 
 <template>
   <section class="s-section">
-    <h2>Vozes</h2>
     <p class="s-note">
       Vozes cadastradas a partir das reuniões. Elas ajudam a identificar quem fala nas próximas gravações.
     </p>
@@ -125,16 +124,16 @@ onMounted(load);
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .voice {
-  padding: 10px 12px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
 }
 .line {
-  min-height: 36px;
+  min-height: var(--control-md);
 }
 .name-text {
   flex: 1;
