@@ -147,6 +147,7 @@ definidas como `Environment=` no `whisper-ditado-backend.service`, valem como pa
 | `DITADO_PRINT_MODE` | `off` | Prints de tela nas reuniões: `off`, `flameshot` ou `native` (veja [Prints de tela](#prints-de-tela)) |
 | `DITADO_PRINT_FOLDER` | vazio (pasta de Imagens) | Pasta lida no modo `flameshot`; caminho absoluto |
 | `DITADO_PRINT_KEY` | `ctrl+alt+KEY_P` | Atalho do print no modo `native`, no mesmo formato de `DITADO_KEY`; deve ser diferente dos atalhos de ditado |
+| `DITADO_PRINT_MONITOR` | vazio | Monitor em que o print `native` é recortado, no formato `fabricante\|modelo\|série\|porta` (o `id` de `GET /api/monitors`); vazio captura todos os monitores |
 
 `shift+insert` é o padrão porque cola em apps GTK, Chrome/Electron e terminais VTE
 (o texto também é copiado para a seleção primária).
@@ -384,9 +385,14 @@ junto da fala daquele momento. O padrão é **Desligado**.
   folga para o print tirado na hora de parar. Com a pasta vazia, vale a pasta de Imagens do
   usuário (`xdg-user-dir PICTURES`, ou `~/Pictures`). Os originais não são alterados nem apagados.
   Funciona com qualquer ferramenta que salve arquivos nessa pasta.
-- **Nativo (tela inteira)**: durante uma reunião em gravação, o atalho (padrão
-  **Ctrl + Alt + P**, em **Atalho do print**) ou o item **Tirar print** da bandeja captura todos
-  os monitores numa imagem só, sem abrir janela, e toca um som curto. Fora de uma reunião em
+- **Nativo**: durante uma reunião em gravação, o atalho (padrão
+  **Ctrl + Alt + P**, em **Atalho do print**) ou o item **Tirar print** da bandeja captura a tela
+  sem abrir janela e toca um som curto. Em **Monitor do print**, **Todos os monitores** (padrão)
+  gera uma imagem só com todas as telas; escolhendo um monitor, o TARS recorta o print nele, na
+  resolução real do monitor. A lista vem do GNOME (Mutter `DisplayConfig`) e o monitor é
+  reconhecido pelo fabricante, modelo e número de série, então trocar a porta do cabo não
+  desfaz a escolha. Se o monitor escolhido não estiver ligado na hora, o print sai com a tela
+  inteira e o motivo vai para o log. Fora do GNOME, só **Todos os monitores** aparece. Fora de uma reunião em
   gravação, nada acontece. Se a captura falhar, toca outro som, o sistema mostra uma
   notificação e a reunião registra o alerta "Não foi possível tirar um print". A captura usa o
   portal Screenshot do xdg-desktop-portal (`interactive=false`); o arquivo que o portal grava em
@@ -419,10 +425,10 @@ O **export** da reunião vira um `.zip` quando há prints, com `reuniao.md` (as 
 ponto da fala em que foram tiradas) e a pasta `prints/`. Sem prints, continua sendo só o `.md`.
 Excluir a reunião apaga os prints.
 
-As configurações são `print_mode` (`off`, `flameshot` ou `native`), `print_folder` e `print_key`
-(também como `DITADO_<CHAVE>`). Com a pasta vazia, vale a de Imagens. O atalho precisa ser
+As configurações são `print_mode` (`off`, `flameshot` ou `native`), `print_folder`, `print_key` e
+`print_monitor` (também como `DITADO_<CHAVE>`). Com a pasta vazia, vale a de Imagens. O atalho precisa ser
 diferente dos atalhos de ditado. O backend usa as bibliotecas Python Pillow (imagens) e jeepney
-(D-Bus do portal), instaladas por `uv sync`.
+(D-Bus do portal e do Mutter), instaladas por `uv sync`.
 
 ### Criador de issues e MCP próprio
 
