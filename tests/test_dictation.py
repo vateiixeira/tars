@@ -654,13 +654,42 @@ def test_transcriber_reload_failure_keeps_old_and_can_retry(tmp_path):
         transcriber_factory=factory)
 
 
-def test_recorder_marks_its_pipewire_node_as_ours():
-    cmd = dictation.RECORD_CMD
+def _recorder_command(monkeypatch, **kwargs):
+    commands = []
+    class Proc:
+        stdout = SimpleNamespace(read1=lambda n: b"")
+    monkeypatch.setattr(dictation.subprocess, "Popen", lambda cmd, **kw: commands.append(cmd) or Proc())
+    recorder = dictation.Recorder(**kwargs)
+    recorder._thread.join(timeout=1)
+    return commands[0]
+
+
+def test_recorder_marks_its_pipewire_node_as_ours(monkeypatch):
+    cmd = _recorder_command(monkeypatch)
     assert cmd[:8] == ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "--raw"]
-    assert cmd[-1] == "-" and "--target" not in cmd  # microfone padrão, como em produção
+    assert cmd[-1] == "-" and "--target" not in cmd  # sem microfone escolhido: o padrão do sistema
     props = cmd[cmd.index("-P") + 1]
     assert 'application.name = "whisper-ditado"' in props
     assert 'node.name = "whisper_ditado_dictation"' in props
+    assert "stream.capture.sink = false" in props
+
+
+def test_recorder_records_from_the_chosen_microphone(monkeypatch):
+    cmd = _recorder_command(monkeypatch, target="alsa_input.headset")
+    assert cmd[cmd.index("--target") + 1] == "alsa_input.headset"
+
+
+@pytest.mark.parametrize("mic", [None, "alsa_input.headset"])
+def test_dictation_uses_microphone_from_settings(tmp_path, monkeypatch, mic):
+    """O "Microfone" das configurações vale também para o ditado, não só para a reunião."""
+    targets = []
+    monkeypatch.setattr(dictation, "Recorder", lambda **kw: targets.append(kw) or FakeRecorder())
+    store = Store(tmp_path / "ditado.db")
+    settings = Settings(store)
+    service = DictationService(settings, FakeTranscriber(opts=transcriber_options(settings)), EventBus())
+    settings.update({"mic_device": mic})
+    service._recorder_factory()
+    assert targets == [{"target": mic}]
 
 
 def test_transcriber_options_carry_production_prompt(tmp_path):
@@ -999,13 +1028,8 @@ def test_output_shortcut_changes_live_and_pauses_with_dictation(tmp_path):
 
 
 def test_output_recorder_command_captures_sink(monkeypatch):
-    commands = []
-    class Proc:
-        stdout = SimpleNamespace(read1=lambda n: b"")
-    monkeypatch.setattr(dictation.subprocess, "Popen", lambda cmd, **kw: commands.append(cmd) or Proc())
-    recorder = dictation.Recorder(capture_sink=True)
-    recorder._thread.join(timeout=1)
-    props = commands[0][commands[0].index("-P") + 1]
+    cmd = _recorder_command(monkeypatch, capture_sink=True)
+    props = cmd[cmd.index("-P") + 1]
     assert "stream.capture.sink = true" in props
     assert "whisper_ditado_dictation_pc" in props
 

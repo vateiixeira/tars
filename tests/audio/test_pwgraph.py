@@ -101,7 +101,7 @@ def test_node_from_whisper_ditado_app_is_ignored():
 
 
 def test_dictation_recorder_is_not_a_call_app():
-    # `pw-record` do ditado (processo filho, outro pid) com as propriedades de `dictation.RECORD_CMD`
+    # `pw-record` do ditado (processo filho, outro pid) com as propriedades de `capture.build_command`
     dump = load("pwdump_call_firefox.json")
     dump += [
         stream_node(200, "Stream/Input/Audio", "whisper-ditado", 9999, "whisper_ditado_dictation"),

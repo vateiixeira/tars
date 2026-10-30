@@ -76,22 +76,20 @@ def notify(message: str) -> None:
         subprocess.Popen(["notify-send", "-a", "Ditado", "Ditado", message])
 
 
-# As propriedades identificam o nó como nosso: sem elas o `pw-record` do ditado apareceria como "app
-# da chamada" no grafo durante uma reunião (`pwgraph.call_apps` ignora `whisper_ditado*`).
-RECORD_CMD = [
-    "pw-record", "--rate", str(SAMPLE_RATE), "--channels", "1", "--format", "s16", "--raw",
-    "-P", '{ application.name = "whisper-ditado" node.name = "whisper_ditado_dictation" }',
-    "-",
-]
-
-
 class Recorder:
-    """Grava o microfone ou a saída padrão do PC via pw-record até stop()."""
+    """Grava o microfone (`target`, ou o padrão do sistema) ou a saída padrão do PC via pw-record até stop().
 
-    def __init__(self, *, capture_sink: bool = False) -> None:
+    As propriedades postas por `build_command` identificam o nó como nosso: sem elas o `pw-record`
+    do ditado apareceria como "app da chamada" no grafo durante uma reunião
+    (`pwgraph.call_apps` ignora `whisper_ditado*`).
+    """
+
+    def __init__(self, *, capture_sink: bool = False, target: str | None = None) -> None:
+        self.target = target
         self._buf = bytearray()
         self._proc = subprocess.Popen(
-            build_command("dictation_pc", None, True) if capture_sink else RECORD_CMD,
+            build_command("dictation_pc", None, True) if capture_sink
+            else build_command("dictation", target, False),
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
@@ -142,7 +140,7 @@ class DictationService:
         bus: EventBus,
         *,
         on_span: Callable[[float, float], None] | None = None,
-        recorder_factory: Callable[[], Recorder] = Recorder,
+        recorder_factory: Callable[[], Recorder] | None = None,
         output_recorder_factory: Callable[[], Recorder] | None = None,
         paste_fn: Callable[[str, str, str], None] = paste,
         transcriber_factory: Callable[[TranscriberOptions, Vocabulary], Transcriber] = make_transcriber,
@@ -160,7 +158,9 @@ class DictationService:
         self.on_span = on_span
         # Atalho do print da reunião: vale mesmo com o ditado pausado (quem decide é a reunião).
         self.on_print = on_print
-        self._recorder_factory = recorder_factory
+        # O mesmo "Microfone" das configurações que a reunião usa; vazio = padrão do sistema.
+        self._recorder_factory = recorder_factory or (
+            lambda: Recorder(target=self.settings.get("mic_device")))
         self._output_recorder_factory = output_recorder_factory or (lambda: Recorder(capture_sink=True))
         self.source = "mic"
         self._paste = paste_fn
@@ -491,7 +491,10 @@ class DictationService:
         self.max_timer = self.loop.call_later(self.cfg.max_sec, self._finish)
         self._set_active(True)
         play_start_sound(source)
-        log.info("Gravando %s...", source)
+        if source == "mic":
+            log.info("Gravando mic (%s)...", getattr(self.recorder, "target", None) or "padrão do sistema")
+        else:
+            log.info("Gravando %s...", source)
 
     def _take_audio(self) -> tuple[np.ndarray, float, float]:
         rec, self.recorder = self.recorder, None
