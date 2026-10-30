@@ -1,6 +1,6 @@
 [package]
 name = "whisper-ditado-app"
-version = "0.3.0"
+version = "0.3.1"
 description = "TARS: ditado por voz e reuniões"
 license = "MIT"
 repository = "https://github.com/vateiixeira/tars"
