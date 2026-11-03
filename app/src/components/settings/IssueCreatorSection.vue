@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Seção Criador de issues: liga o levantamento de tarefas ao fim de cada reunião, define a pasta raiz dos
-// projetos, o endereço do MCP de issues (com teste de conexão) e o prompt do levantamento.
+// projetos, o endereço do MCP de issues (com teste de conexão), o prompt do levantamento e o
+// arquivamento automático da reunião quando todas as tarefas viram issue.
 import { computed, ref } from "vue";
 import { messageOf, type SettingsForm } from "./useSettingsForm";
 import SettingField from "./SettingField.vue";
@@ -74,6 +75,13 @@ async function testConnection(): Promise<void> {
       field="issues_enabled"
       label="Criador de issues"
       hint="Ao terminar cada reunião, o Claude levanta as tarefas a partir da pasta raiz dos projetos."
+    />
+
+    <ToggleField
+      :form="form"
+      field="auto_archive_tasks"
+      label="Arquivar reunião ao criar todas as tarefas"
+      hint="Quando todas as tarefas não descartadas viram issue, a reunião vai para Arquivadas."
     />
 
     <SettingField

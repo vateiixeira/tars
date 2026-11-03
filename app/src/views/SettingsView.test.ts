@@ -60,6 +60,7 @@ const baseSettings: Settings = {
   issues_mcp_url: "",
   issues_mcp_name: "issues",
   tasks_prompt: "",
+  auto_archive_tasks: true,
   hf_token_set: false,
   print_mode: "off",
   print_folder: null,
@@ -622,6 +623,19 @@ describe("SettingsView", () => {
     await w.get("#toggle-issues_enabled").setValue(true);
     await flushPromises();
     expect(client.putSettings).toHaveBeenLastCalledWith({ issues_enabled: true });
+  });
+
+  it("Criador de issues tem o toggle de arquivar automaticamente que salva auto_archive_tasks", async () => {
+    const { client } = setup();
+    const w = await open();
+    await w.get('[data-section="issues"]').trigger("click");
+    await flushPromises();
+    const toggle = w.get("#toggle-auto_archive_tasks");
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+    expect(w.text()).toContain("Arquivar reunião ao criar todas as tarefas");
+    await toggle.setValue(false);
+    await flushPromises();
+    expect(client.putSettings).toHaveBeenLastCalledWith({ auto_archive_tasks: false });
   });
 
   it("pasta raiz salva no change e mostra o erro do backend", async () => {

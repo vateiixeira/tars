@@ -182,6 +182,8 @@ export interface Settings {
   issues_mcp_url: string | null;
   issues_mcp_name: string;
   tasks_prompt: string;
+  /** Arquiva a reunião quando todas as tarefas não descartadas viram issue. */
+  auto_archive_tasks: boolean;
   hf_token_set: boolean;
   print_mode: PrintMode;
   print_folder: string | null;

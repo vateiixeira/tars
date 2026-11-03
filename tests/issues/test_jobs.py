@@ -750,6 +750,98 @@ def test_create_syncs_claude_settings(rig, store, settings, mid):
     assert seen == [("/x/claude", "opus", "xhigh")]
 
 
+# -- arquivamento automático -----------------------------------------------------
+
+
+def updated(rig, mid):
+    return [e for e in rig.events("meeting_updated") if e["meeting_id"] == mid]
+
+
+def test_archives_meeting_when_all_kept_tasks_are_created(rig, store, mid):
+    ids = make_tasks(store, mid, 2)
+    discarded = store.add_task(mid, {"title": "fora"}, origin="claude")
+    store.update_task(discarded.id, {"discarded": True})
+    rig.issues_client.outcomes = [CreateOutcome("created", 1, "u", None), CreateOutcome("created", 2, "u", None)]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_meeting(mid).archived_at is not None
+    assert updated(rig, mid) == [{"type": "meeting_updated", "meeting_id": mid, "status": "ready"}]
+
+
+def test_does_not_archive_while_some_task_is_not_created(rig, store, mid):
+    ids = make_tasks(store, mid, 2)
+    rig.issues_client.outcomes = [CreateOutcome("created", 1, "u", None), CreateOutcome("failed", None, None, "x")]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_meeting(mid).archived_at is None and updated(rig, mid) == []
+
+
+def test_does_not_archive_with_pending_suggestion(rig, store, mid):
+    ids = make_tasks(store, mid, 1)
+    store.add_task(mid, {"title": "ainda não enviada"}, origin="claude")
+    rig.issues_client.outcomes = [CreateOutcome("created", 1, "u", None)]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_meeting(mid).archived_at is None
+
+
+def test_auto_archive_can_be_turned_off(rig, store, settings, mid):
+    settings.update({"auto_archive_tasks": False})
+    ids = make_tasks(store, mid, 1)
+    rig.issues_client.outcomes = [CreateOutcome("created", 1, "u", None)]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_meeting(mid).archived_at is None and updated(rig, mid) == []
+
+
+def test_auto_archive_skips_meeting_already_archived_or_busy(rig, store, mid):
+    store.set_archived(mid, True)
+    before = store.get_meeting(mid).archived_at
+    busy = store.create_meeting(T0).id  # ainda gravando
+    ids = make_tasks(store, mid, 1) + make_tasks(store, busy, 1)
+    rig.issues_client.outcomes = [CreateOutcome("created", 1, "u", None), CreateOutcome("created", 2, "u", None)]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_meeting(mid).archived_at == before
+    assert store.get_meeting(busy).archived_at is None
+    assert rig.events("meeting_updated") == []
+
+
+def test_auto_archive_waits_for_running_scan(rig, store, mid):
+    ids = make_tasks(store, mid, 1)
+    store.set_job(mid, "tasks", "running")
+    rig.issues_client.outcomes = [CreateOutcome("created", 1, "u", None)]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_meeting(mid).archived_at is None
+
+
+def test_auto_archive_after_uncertain_resolved_as_created(rig, store, mid):
+    ids = make_tasks(store, mid, 1)
+    rig.issues_client.outcomes = [CreateOutcome("uncertain", None, None, "?")]
+    rig.jobs.create(ids)
+    rig.wait_idle()
+    assert store.get_meeting(mid).archived_at is None
+    store.resolve_uncertain(ids[0], 42)
+    rig.jobs.archive_if_done(mid)
+    assert store.get_meeting(mid).archived_at is not None and len(updated(rig, mid)) == 1
+
+
+def test_auto_archive_errors_and_shutdown_are_silent(rig, store, mid, monkeypatch):
+    ids = make_tasks(store, mid, 1)
+    store.finish_create(ids[0], "created", number=1)
+
+    def boom(_mid):
+        raise RuntimeError("banco")
+
+    monkeypatch.setattr(store, "list_tasks", boom)
+    rig.jobs.archive_if_done(mid)  # não levanta
+    monkeypatch.undo()
+    rig.jobs._stopping.set()
+    rig.jobs.archive_if_done(mid)
+    assert store.get_meeting(mid).archived_at is None and updated(rig, mid) == []
+
+
 def test_create_does_not_wait_for_the_claude_worker(rig, store, mid):
     release = threading.Event()
     rig.claude.summarize = lambda t, p: release.wait(10) and "R"

@@ -74,6 +74,7 @@ DEFAULTS: dict[str, Any] = {
     "issues_mcp_url": ISSUES_DEFAULT_URL,
     "issues_mcp_name": "issues",
     "tasks_prompt": DEFAULT_TASKS_PROMPT,
+    "auto_archive_tasks": True,  # arquiva a reunião quando todas as tarefas viraram issue
     "print_mode": "off",
     "print_folder": None,
     "print_key": "ctrl+alt+KEY_P",

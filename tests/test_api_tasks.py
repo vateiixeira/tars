@@ -50,6 +50,7 @@ class FakeJobs:
         self.scan_contexts = []
         self.cancelled_scans = []
         self.created = []
+        self.archive_checks = []
         self.rescan_error = None
 
     def rescan(self, meeting_id, *, context=""):
@@ -63,6 +64,9 @@ class FakeJobs:
 
     def cancel_scan(self, meeting_id):
         self.cancelled_scans.append(meeting_id)
+
+    def archive_if_done(self, meeting_id):
+        self.archive_checks.append(meeting_id)
 
 
 class FakeOptions:
@@ -431,14 +435,26 @@ def test_resolve_uncertain(client, ctx, mid):
     r = client.post(f"/api/tasks/{a}/resolve", json={"action": "retry"})
     assert r.status_code == 200 and r.json()["create_state"] == "none"
     assert len(changed(ctx, mid)) == 1
+    assert ctx.jobs.archive_checks == []  # "criar de novo" não arquiva
     b = uncertain()
     r = client.post(f"/api/tasks/{b}/resolve", json={"action": "number", "number": 217})
     assert (r.json()["create_state"], r.json()["issue_number"]) == ("created", 217)
+    assert ctx.jobs.archive_checks == [mid]
     r = client.post(f"/api/tasks/{b}/resolve", json={"action": "retry"})
     assert r.status_code == 409 and r.json() == {"detail": "Esta tarefa não está aguardando conferência"}
     assert len(changed(ctx, mid)) == 2
     r = client.post("/api/tasks/nada/resolve", json={"action": "retry"})
     assert r.status_code == 404 and r.json() == {"detail": "Tarefa não encontrada"}
+
+
+def test_discarding_checks_auto_archive(client, ctx, mid):
+    t = add(ctx, mid)
+    assert client.patch(f"/api/tasks/{t.id}", json={"title": "outro"}).status_code == 200
+    assert ctx.jobs.archive_checks == []
+    assert client.patch(f"/api/tasks/{t.id}", json={"discarded": True}).status_code == 200
+    assert ctx.jobs.archive_checks == [mid]
+    assert client.patch(f"/api/tasks/{t.id}", json={"discarded": False}).status_code == 200
+    assert ctx.jobs.archive_checks == [mid]
 
 
 def test_resolve_validates_body(client, ctx, mid):

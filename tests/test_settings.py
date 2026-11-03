@@ -281,6 +281,7 @@ def test_issues_defaults(data_home):
     s = Settings(Store(data_home / "t.db"))
     d = s.as_dict()
     assert d["auto_summary"] is True and d["issues_enabled"] is False
+    assert d["auto_archive_tasks"] is True
     assert d["issues_root"] == str(Path.home())
     assert d["issues_mcp_url"] is None
     assert d["tasks_prompt"] == DEFAULT_TASKS_PROMPT
@@ -389,6 +390,14 @@ def test_issues_booleans_validated(data_home):
     assert s.update({"issues_enabled": True, "auto_summary": False})["issues_enabled"] is True
     with pytest.raises(ValueError):
         s.update({"auto_summary": "sim"})
+    with pytest.raises(ValueError):
+        s.update({"auto_archive_tasks": "sim"})
+    assert s.update({"auto_archive_tasks": False})["auto_archive_tasks"] is False
+
+
+def test_auto_archive_tasks_from_env(data_home, monkeypatch):
+    monkeypatch.setenv("DITADO_AUTO_ARCHIVE_TASKS", "0")
+    assert Settings(Store(data_home / "t.db")).get("auto_archive_tasks") is False
 
 
 # -- modelo e effort do Claude (resumo/títulos x tarefas) ------------------------------

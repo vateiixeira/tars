@@ -14,6 +14,8 @@ termina em silêncio (o banco devolve `False`/`[]`). Nenhum erro escapa das thre
 sugestão fica em `creating`: toda saída da criação grava `created`, `failed` ou `uncertain`.
 Depois de uma criação `created`, os prints da sugestão são anexados à issue (melhor esforço):
 o resultado vai só para `attach_state` e nunca muda `create_state`.
+Com `auto_archive_tasks` ligado, a reunião é arquivada quando todas as tarefas não descartadas
+viram issue (`archive_if_done`), e então publica `meeting_updated`.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from whisper_ditado.prints.images import MAX_EDGE, ClaudeImages, jpeg_bytes, loa
 from whisper_ditado.claude_cli import ClaudeCli, ClaudeError, sync_summary_cli, sync_tasks_cli, transcript_text
 from whisper_ditado.settings import Settings
 from whisper_ditado.procs import Cancellation, ProcessCancelled, cancellation_scope
-from whisper_ditado.store import Store
+from whisper_ditado.store import MeetingBusy, Store
 from whisper_ditado.worker import SerialWorker
 
 log = logging.getLogger("ditado")
@@ -101,6 +103,35 @@ class PostMeetingJobs:
     def create(self, task_ids: list[str]) -> None:
         """Enfileira a criação dos ids (já reservados como `creating` pelo chamador)."""
         self._create_worker.submit(self._create_all, list(task_ids), gated=False)
+
+    def archive_if_done(self, meeting_id: str) -> None:
+        """Arquiva a reunião se todas as tarefas não descartadas já viraram issue (melhor esforço).
+
+        Não faz nada com `auto_archive_tasks` desligado, sem tarefas, com reunião já arquivada,
+        com levantamento em andamento (novas sugestões podem chegar) ou reunião gravando/processando.
+        """
+        try:
+            if self._stopping.is_set() or not self._settings.get("auto_archive_tasks"):
+                return
+            meeting = self._store.get_meeting(meeting_id)
+            if meeting is None or meeting.archived_at is not None:
+                return
+            # Sob o mesmo lock de `_claim_scan`: um levantamento não começa entre a checagem e o arquivamento.
+            with self._claim_lock:
+                job = self._store.get_job(meeting_id, "tasks")
+                if job is not None and job.state == "running":
+                    return
+                kept = [t for t in self._store.list_tasks(meeting_id) if not t.discarded]
+                if not kept or any(t.create_state != "created" for t in kept):
+                    return
+                self._store.set_archived(meeting_id, True)
+        except MeetingBusy:
+            return
+        except Exception:
+            log.exception("Falha ao arquivar automaticamente a reunião %s", meeting_id)
+            return
+        log.info("Reunião %s arquivada: todas as tarefas foram criadas", meeting_id)
+        self._bus.publish({"type": "meeting_updated", "meeting_id": meeting_id, "status": meeting.status})
 
     def shutdown(self) -> None:
         """Mata os `claude` em execução (`procs.kill_all`: resumo, levantamento, opções e criação) e
@@ -230,6 +261,7 @@ class PostMeetingJobs:
     # -- criação no MCP de issues ---------------------------------------------------------------
 
     def _create_all(self, task_ids: list[str]) -> None:
+        touched: dict[str, None] = {}
         for task_id in task_ids:
             try:
                 meeting_id = self._create_one(task_id)
@@ -237,7 +269,10 @@ class PostMeetingJobs:
                 log.exception("Falha ao criar a sugestão %s", task_id)
                 meeting_id = self._finish_create(task_id, "uncertain", error=CREATE_UNEXPECTED)
             if meeting_id is not None:
+                touched[meeting_id] = None
                 self._bus.publish({"type": "tasks_changed", "meeting_id": meeting_id})
+        for meeting_id in touched:
+            self.archive_if_done(meeting_id)
 
     def _create_one(self, task_id: str) -> str | None:
         """Cria uma issue; devolve o `meeting_id` da sugestão (ou None se ela sumiu)."""

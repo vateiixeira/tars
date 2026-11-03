@@ -219,6 +219,8 @@ def tasks_router(ctx, get_meeting: Callable[[str], object]) -> APIRouter:
             log.exception("Falha ao preencher pelo último usado depois de editar a sugestão %s", task_id)
         task = store.get_task(task_id) or task
         notify(task.meeting_id)
+        if task.discarded and changes.get("discarded"):  # descartar a última pendente também conclui a reunião
+            ctx.jobs.archive_if_done(task.meeting_id)
         return task_json(task)
 
     # -- criação no MCP de issues -----------------------------------------------------------------
@@ -269,6 +271,8 @@ def tasks_router(ctx, get_meeting: Callable[[str], object]) -> APIRouter:
         except TaskLocked:
             raise HTTPException(409, NOT_UNCERTAIN) from None
         notify(task.meeting_id)
+        if task.create_state == "created":
+            ctx.jobs.archive_if_done(task.meeting_id)
         return task_json(task)
 
     # -- MCP de issues ----------------------------------------------------------------------------
