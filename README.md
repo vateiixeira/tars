@@ -407,9 +407,13 @@ cd app && pnpm tauri dev                                  # desenvolvimento
 
 ### Ditado do áudio do computador
 
-Segure **Ctrl esquerdo + Shift esquerdo** para capturar a saída de áudio padrão do PC.
-Ao soltar, o Whisper transcreve e cola o texto no campo em foco, como no ditado do microfone
-(**Ctrl + Super**). Pressionar outra tecla durante a captura descarta o trecho.
+Pressione **Ctrl esquerdo + Shift esquerdo** uma vez para começar a capturar a saída de áudio
+padrão do PC (a pílula aparece na tela) e pressione de novo para encerrar. O Whisper então
+transcreve e cola o texto no campo em foco, como no ditado do microfone (**Ctrl + Super**).
+Ao contrário do microfone, não é preciso segurar. A captura só encerra numa pressionada
+limpa da combinação: um atalho como Ctrl+Shift+T de outro programa no meio da captura não a desliga.
+Se outra tecla entrar junto na pressionada que liga, o trecho é descartado. A duração
+máxima do ditado também vale aqui.
 O atalho pode ser alterado em **Configurações → Ditado → Atalho do áudio do computador**
 (`output_key` / `DITADO_OUTPUT_KEY`). Desligar o ditado pausa ambos os atalhos.
 A captura usa o mesmo modelo Whisper, sem criar reunião nem marcar a fala como ditado do microfone.
