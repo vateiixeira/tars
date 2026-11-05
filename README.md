@@ -405,6 +405,11 @@ cd app && pnpm tauri dev                                  # desenvolvimento
   pílula transparente. Um valor explícito dessa variável é respeitado (`0` permite testar o
   caminho original). É uma mitigação para a [incompatibilidade gráfica documentada pelo Tauri](https://tauri.app/es/develop/debug/linux-graphics/),
   com possível custo de desempenho gráfico; não altera o uso da GPU pelo Whisper.
+- Com o IBus como método de entrada (`GTK_IM_MODULE=ibus`), o WebKitGTK abre uma janela de
+  candidatos vazia, com setas, ao digitar acentos. Por isso o app troca o IBus pelo método simples
+  do GTK (`gtk-im-context-simple`), que já trata acentos e teclas mortas. Quem usa um método de
+  entrada de fato (chinês, japonês etc.) pode manter o IBus só no TARS com
+  `TARS_GTK_IM_MODULE=ibus`; essa variável aceita qualquer valor de `GTK_IM_MODULE`.
 
 ## Notas
 

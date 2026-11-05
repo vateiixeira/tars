@@ -95,6 +95,21 @@ fn needs_dmabuf_fallback(overlay: bool, nvidia: bool, configured: Option<&OsStr>
     !overlay && nvidia && configured.is_none()
 }
 
+const IM_MODULE_ENV: &str = "GTK_IM_MODULE";
+/// Escolha explícita do método de entrada só para o TARS (por exemplo `ibus`, para quem usa um).
+const IM_MODULE_CHOICE_ENV: &str = "TARS_GTK_IM_MODULE";
+const SIMPLE_IM_MODULE: &str = "gtk-im-context-simple";
+
+/// Com o IBus, o WebKitGTK abre uma janela de candidatos vazia (com setas) ao digitar acentos.
+/// O método simples do GTK já trata teclas mortas e compose, então ele substitui o IBus, salvo
+/// escolha em `TARS_GTK_IM_MODULE`. Devolve o valor a gravar em `GTK_IM_MODULE`, se houver.
+fn im_module_override(inherited: Option<&OsStr>, chosen: Option<&OsStr>) -> Option<OsString> {
+    if let Some(chosen) = chosen {
+        return Some(chosen.to_owned());
+    }
+    (inherited == Some(OsStr::new("ibus"))).then(|| OsString::from(SIMPLE_IM_MODULE))
+}
+
 fn has_flag<S: AsRef<OsStr>>(args: impl IntoIterator<Item = S>, flag: &str) -> bool {
     args.into_iter().skip(1).any(|a| a.as_ref() == flag)
 }
@@ -117,6 +132,14 @@ pub fn run() {
         // SAFETY: ponto de entrada, antes de iniciar GTK, WebKit, plugins ou qualquer thread.
         unsafe { std::env::set_var(DMABUF_RENDERER_ENV, "1") };
         eprintln!("renderização: compatibilidade WebKitGTK/NVIDIA ativada na janela principal");
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(module) = im_module_override(
+        std::env::var_os(IM_MODULE_ENV).as_deref(),
+        std::env::var_os(IM_MODULE_CHOICE_ENV).as_deref(),
+    ) {
+        // SAFETY: idem; o overlay, processo filho, herda o mesmo valor.
+        unsafe { std::env::set_var(IM_MODULE_ENV, module) };
     }
     if overlay {
         run_overlay();
@@ -503,6 +526,22 @@ mod tests {
         assert!(!needs_dmabuf_fallback(false, false, None));
         assert!(!needs_dmabuf_fallback(false, true, Some(OsStr::new("0"))));
         assert!(!needs_dmabuf_fallback(false, true, Some(OsStr::new("1"))));
+    }
+
+    #[test]
+    fn ibus_is_replaced_by_the_simple_gtk_input_unless_tars_chooses_otherwise() {
+        let simple = Some(OsString::from(SIMPLE_IM_MODULE));
+        assert_eq!(im_module_override(Some(OsStr::new("ibus")), None), simple);
+        assert_eq!(im_module_override(None, None), None);
+        assert_eq!(im_module_override(Some(OsStr::new("fcitx")), None), None);
+        assert_eq!(
+            im_module_override(Some(OsStr::new("ibus")), Some(OsStr::new("ibus"))),
+            Some(OsString::from("ibus"))
+        );
+        assert_eq!(
+            im_module_override(None, Some(OsStr::new("xim"))),
+            Some(OsString::from("xim"))
+        );
     }
 
     #[test]
