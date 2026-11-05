@@ -11,8 +11,8 @@ A, SH, LEFT = e.KEY_A, e.KEY_LEFTSHIFT, e.KEY_LEFT
 class Keyboard:
     """Teclado falso: aplica o evento ao estado e mantém o que o kernel diria estar seguro."""
 
-    def __init__(self, spec="ctrl+super"):
-        self.state = HotkeyState(parse_hotkey(spec))
+    def __init__(self, spec="ctrl+super", toggle=False):
+        self.state = HotkeyState(parse_hotkey(spec), toggle=toggle)
         self.held: set[int] = set()
 
     def press(self, code):
@@ -110,6 +110,91 @@ def test_finish_only_while_recording():
     kb.press(LW)
     kb.state.recording = False  # ex.: limite de tempo já encerrou a gravação
     assert kb.release(LW) is Action.NONE
+
+
+def test_toggle_press_starts_release_keeps_and_next_press_finishes():
+    kb = Keyboard("KEY_LEFTCTRL+KEY_LEFTSHIFT", toggle=True)
+    assert kb.press(LC) is Action.NONE
+    assert kb.press(SH) is Action.START
+    assert kb.release(SH) is Action.NONE
+    assert kb.release(LC) is Action.NONE
+    assert kb.state.recording
+    # digitar no meio não encerra
+    assert kb.press(A) is Action.NONE
+    assert kb.release(A) is Action.NONE
+    assert kb.press(LC) is Action.NONE
+    assert kb.press(SH) is Action.NONE  # encerra ao soltar, para não confundir com Ctrl+Shift+X
+    assert kb.release(SH) is Action.FINISH
+    assert kb.release(LC) is Action.NONE
+    assert not kb.state.recording
+    assert kb.press(LC) is Action.NONE
+    assert kb.press(SH) is Action.START
+
+
+def test_toggle_extra_key_on_starting_press_cancels():
+    kb = Keyboard("KEY_LEFTCTRL+KEY_LEFTSHIFT", toggle=True)
+    kb.press(LC)
+    assert kb.press(SH) is Action.START
+    assert kb.press(A) is Action.CANCEL
+    assert not kb.state.recording
+
+
+def test_toggle_other_shortcut_while_recording_does_not_finish():
+    kb = Keyboard("KEY_LEFTCTRL+KEY_LEFTSHIFT", toggle=True)
+    kb.press(LC)
+    kb.press(SH)
+    kb.release(SH)
+    kb.release(LC)
+    kb.press(LC)
+    kb.press(SH)
+    assert kb.press(A) is Action.NONE  # Ctrl+Shift+A: atalho de outro programa
+    assert kb.release(A) is Action.NONE
+    assert kb.release(SH) is Action.NONE
+    assert kb.release(LC) is Action.NONE
+    assert kb.state.recording
+
+
+def test_toggle_finish_only_while_recording():
+    kb = Keyboard("KEY_LEFTCTRL+KEY_LEFTSHIFT", toggle=True)
+    kb.press(LC)
+    kb.press(SH)
+    kb.release(SH)
+    kb.release(LC)
+    kb.state.recording = False  # ex.: limite de tempo já encerrou a gravação
+    kb.press(LC)
+    assert kb.press(SH) is Action.START
+
+
+def test_toggle_quick_tap_counts_even_if_kernel_already_released():
+    kb = Keyboard("KEY_LEFTCTRL+KEY_LEFTSHIFT", toggle=True)
+    kb.press(LC)
+    kb.held.clear()  # o lote chega atrasado: o kernel já diz que nada está seguro
+    assert kb.state.on_key(SH, 1, lambda: set()) is Action.START
+    assert kb.state.on_key(SH, 0, lambda: set()) is Action.NONE
+    assert kb.state.on_key(LC, 0, lambda: set()) is Action.NONE
+    kb.state.on_key(LC, 1, lambda: set())
+    assert kb.state.on_key(SH, 1, lambda: set()) is Action.NONE
+    assert kb.state.on_key(SH, 0, lambda: set()) is Action.FINISH
+
+
+def test_toggle_quick_tap_still_blocked_by_other_held_key():
+    kb = Keyboard("KEY_LEFTCTRL+KEY_LEFTSHIFT", toggle=True)
+    kb.held.add(A)
+    kb.press(LC)
+    assert kb.press(SH) is Action.NONE
+
+
+def test_toggle_lost_release_does_not_leave_press_armed():
+    kb = Keyboard("KEY_LEFTCTRL+KEY_LEFTSHIFT", toggle=True)
+    kb.press(LC)
+    assert kb.press(SH) is Action.START
+    kb.held.clear()  # os eventos de soltar se perderam (SYN_DROPPED, teclado removido)
+    kb.state.resync(lambda: set(kb.held))
+    assert kb.press(A) is Action.NONE  # digitar não descarta a captura
+    kb.release(A)
+    kb.press(LC)
+    kb.press(SH)
+    assert kb.release(SH) is Action.FINISH
 
 
 def test_pressed_property_tracks_keys():

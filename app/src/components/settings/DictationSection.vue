@@ -72,7 +72,7 @@ async function savePaste(e: Event): Promise<void> {
       <SettingField
         label="Atalho do áudio do computador"
         for="dict-output-key"
-        hint="Padrão: Ctrl esquerdo + Shift esquerdo. Segure para capturar a saída de áudio padrão do PC; solte para transcrever e colar. Outra tecla cancela a captura."
+        hint="Padrão: Ctrl esquerdo + Shift esquerdo. Pressione uma vez para começar a capturar a saída de áudio padrão do PC e de novo para transcrever e colar. Outra tecla junto com a pressionada que liga cancela a captura."
         :error="form.errors.output_key"
       >
         <input

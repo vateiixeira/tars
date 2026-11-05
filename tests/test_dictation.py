@@ -966,9 +966,15 @@ def test_output_dictation_uses_sink_and_does_not_mark_microphone_span(tmp_path):
         assert h.service.source == "pc"
         assert len(h.output_recorders) == 1
         assert not h.recorders
-        await asyncio.sleep(0.5)
         h.release(SH)
         h.release(LC)
+        await asyncio.sleep(0.5)
+        assert h.service.recorder is not None  # liga/desliga: soltar não encerra
+        h.press(LC)
+        h.press(SH)
+        h.release(SH)
+        h.release(LC)
+        assert h.service.recorder is None
         await asyncio.sleep(0.5)
         assert h.texts == ["frase "]
         assert h.spans == []
@@ -1027,6 +1033,62 @@ def test_output_shortcut_changes_live_and_pauses_with_dictation(tmp_path):
     run(tmp_path, scenario)
 
 
+def test_output_toggle_survives_typing_and_other_ctrl_shift_shortcuts(tmp_path):
+    async def scenario(h):
+        h.press(LC)
+        h.press(SH)
+        h.release(SH)
+        h.release(LC)
+        await asyncio.sleep(0.5)
+        h.press(A)
+        h.release(A)
+        h.press(LC)
+        h.press(SH)
+        h.press(A)  # Ctrl+Shift+A de outro programa
+        h.release(A)
+        h.release(SH)
+        h.release(LC)
+        assert h.service.recorder is not None
+        h.press(LC)
+        h.press(LW)  # atalho do microfone durante a captura do PC é ignorado
+        h.release(LW)
+        h.release(LC)
+        assert not h.recorders
+        assert h.service.source == "pc"
+        h.press(LC)
+        h.press(SH)
+        h.release(SH)
+        h.release(LC)
+        assert h.service.recorder is None
+        await asyncio.sleep(0.5)
+        assert h.texts == ["frase "]
+        assert not h.service.busy.busy
+    run(tmp_path, scenario)
+
+
+def test_output_toggle_max_duration_then_next_press_starts_again(tmp_path):
+    async def scenario(h):
+        h.settings.update({"min_sec": 0.1, "max_sec": 0.5})
+        h.service.apply_settings()
+        h.press(LC)
+        h.press(SH)
+        h.release(SH)
+        h.release(LC)
+        await asyncio.sleep(0.8)  # o limite de tempo encerra a captura ligada
+        assert h.service.recorder is None
+        assert not h.service.output_hotkey.recording
+        await asyncio.sleep(0.5)
+        assert h.texts == ["frase "]
+        assert not h.service.busy.busy
+        h.press(LC)
+        h.press(SH)
+        assert h.service.recorder is not None
+        assert len(h.output_recorders) == 2
+        h.release(SH)
+        h.release(LC)
+    run(tmp_path, scenario)
+
+
 def test_output_recorder_command_captures_sink(monkeypatch):
     cmd = _recorder_command(monkeypatch, capture_sink=True)
     props = cmd[cmd.index("-P") + 1]
@@ -1045,6 +1107,12 @@ def test_switching_from_single_modifier_shortcut_still_finishes_output(tmp_path)
         assert h.service.source == "pc"
         assert h.service.output_hotkey.recording
         await asyncio.sleep(0.5)
+        h.release(SH)
+        h.release(LC)
+        assert h.service.recorder is not None
+        h.press(LC)  # atalho do microfone (só Ctrl) não abre outra gravação com o PC ligado
+        assert len(h.recorders) == 1
+        h.press(SH)
         h.release(SH)
         h.release(LC)
         assert h.service.recorder is None

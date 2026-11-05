@@ -194,7 +194,7 @@ class DictationService:
 
         self.cfg = self._read_config(previous=None)
         self.hotkey = HotkeyState(self.cfg.groups)
-        self.output_hotkey = HotkeyState(self.cfg.output_groups)
+        self.output_hotkey = HotkeyState(self.cfg.output_groups, toggle=True)
         self.print_hotkey = HotkeyState(self.cfg.print_groups)
         self.paused = not self.settings.get("dictation_enabled")
 
@@ -253,7 +253,7 @@ class DictationService:
             pressed = self.hotkey.pressed
             self.hotkey = HotkeyState(new.groups)
             self.hotkey.pressed = set(pressed)
-            self.output_hotkey = HotkeyState(new.output_groups)
+            self.output_hotkey = HotkeyState(new.output_groups, toggle=True)
             self.output_hotkey.pressed = set(pressed)
             self.skipped.clear()  # teclados descartados podem ter a nova combinação
         if new.print_groups != old.print_groups:
