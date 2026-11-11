@@ -43,6 +43,7 @@ const detail = (extra: Partial<Detail> = {}): Detail => ({
   alerts: [],
   prints: [],
   summary_job: null,
+  origin: "recorded",
   ...extra,
 });
 
@@ -351,6 +352,32 @@ describe("MeetingDetail", () => {
     expect(w.find(".speaker-menu").exists()).toBe(true);
     await w.get(".speaker-menu .backdrop").trigger("click");
     expect(w.find(".speaker-menu").exists()).toBe(false);
+  });
+
+  it("transcrição importada: sem player, sem ouvir trechos e sem Reprocessar", async () => {
+    const audioBlob = vi.fn(async () => new Blob(["audio"]));
+    const { w } = await mountDetail(detail({ origin: "import_transcript" }), { audioBlob });
+    expect(w.findComponent(MeetingPlayer).exists()).toBe(false);
+    expect(w.find('[aria-label="Ouvir áudio da reunião"]').exists()).toBe(false);
+    expect(w.find('[title="Ouvir este trecho"]').exists()).toBe(false);
+    expect(w.text()).toContain("Bom dia");
+
+    const failed = await mountDetail(detail({ origin: "import_transcript", status: "failed", error: "x" }));
+    expect(failed.w.findAll("button").some((b) => b.text().includes("Reprocessar"))).toBe(false);
+    expect(audioBlob).not.toHaveBeenCalled();
+  });
+
+  it("vídeo ou áudio importado: clicar em Você abre o menu com Não sou eu", async () => {
+    const setSpeakerMe = vi.fn(async () => ({ id: "s1", label: "Pessoa 3", voice_id: null, is_me: false, color_index: 0 }));
+    const { w, getMeeting } = await mountDetail(detail({ origin: "import_media" }), { setSpeakerMe });
+    expect(w.findComponent(MeetingPlayer).exists()).toBe(true);
+    await w.findAll(".chip")[0].trigger("click"); // Você
+    expect(w.find(".speaker-menu").exists()).toBe(true);
+    await w.findAll(".speaker-menu .option").find((b) => b.text().includes("Não sou eu"))!.trigger("click");
+    await flushPromises();
+    expect(setSpeakerMe).toHaveBeenCalledWith("s1", false);
+    expect(getMeeting).toHaveBeenCalledTimes(2);
+    expect(w.emitted("changed")?.[0]).toEqual(["m1"]);
   });
 
   it("merging a speaker reloads the detail and notifies the list", async () => {

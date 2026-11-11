@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),
+}));
+
 import App from "./App.vue";
 import MeetingsView from "./views/MeetingsView.vue";
 import { installStore } from "./test/meetingFakes";
@@ -43,6 +48,14 @@ describe("Ametista shell", () => {
     await flushPromises();
     expect(wrapper!.get("aside").isVisible()).toBe(true);
     expect(document.querySelector(".rec")).toBe(control);
+  });
+  it("puts the Importar button in the top bar, right after the capture control", async () => {
+    openApp();
+    await flushPromises();
+    const center = document.querySelector(".appbar .center")!;
+    const importButton = center.querySelector(".import-button");
+    expect(importButton?.textContent).toContain("Importar");
+    expect(center.querySelector(".record-wrap")!.nextElementSibling).toBe(importButton);
   });
   it("keeps an in-flight start disabled after changing navigation", async () => {
     let finish!: (value: { meeting_id: string }) => void;

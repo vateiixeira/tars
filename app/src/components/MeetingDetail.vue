@@ -9,6 +9,9 @@
 // `TasksTab` (sugestões do criador de issues). O resumo também pode vir automático ao fim do
 // processamento (evento `meeting_job`); "Resumir"/"Refazer"/"Sugerir nomes" chamam o Claude por
 // clique. Toda mudança recarrega o detalhe e avisa a lista.
+//
+// Reunião importada de uma transcrição (`origin`) não tem áudio: sem player, sem ouvir trechos e
+// sem "Reprocessar". Importada de vídeo/áudio, "Você" também abre o menu (para o "Não sou eu").
 import {
   computed,
   inject,
@@ -177,6 +180,8 @@ watch(connected, (on) => {
 
 const header = ref<InstanceType<typeof MeetingHeader> | null>(null);
 const title = computed(() => meeting.value?.title || "Reunião sem título");
+// Transcrição importada: não há áudio para tocar nem para reprocessar.
+const hasAudio = computed(() => meeting.value?.origin !== "import_transcript");
 const alerts = computed(() => (meeting.value ? alertLines(meeting.value) : []));
 
 /** Salva o título vindo do cabeçalho; o erro vira banner e o cabeçalho continua editando. */
@@ -310,7 +315,8 @@ const speakerMenu = ref<{ speaker: Speaker; x: number; y: number } | null>(
 const suggesting = ref(false);
 
 function onSpeakerSelect(speaker: Speaker, ev: MouseEvent): void {
-  if (speaker.is_me) return; // "Você" não tem menu
+  // "Você" só tem menu em reunião importada de vídeo/áudio (para desfazer o "Sou eu")
+  if (speaker.is_me && meeting.value?.origin !== "import_media") return;
   const rect = (
     ev.currentTarget as HTMLElement | null
   )?.getBoundingClientRect();
@@ -414,6 +420,7 @@ function stopAudio(): void {
 
 /** Baixa o áudio (reunião inteira ou só o trecho) e toca no player. */
 function playAudio(start?: number, end?: number): Promise<void> {
+  if (!hasAudio.value) return Promise.resolve();
   return run("audio", async () => {
     const id = props.meetingId;
     const seq = ++audioSeq;
@@ -515,7 +522,7 @@ onBeforeUnmount(() => {
           </div>
           <template #action>
             <AppButton
-              v-if="!confirmingReprocess"
+              v-if="!confirmingReprocess && hasAudio"
               size="sm"
               :busy="isBusy('reprocess')"
               :disabled="!connected"
@@ -619,6 +626,7 @@ onBeforeUnmount(() => {
               :speakers="meeting.speakers"
               :prints="meeting.prints"
               :playing-id="playingId"
+              :no-audio="!hasAudio"
               @play="playSegment"
               @open-print="openPrint"
             />
@@ -681,6 +689,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <MeetingPlayer
+          v-if="hasAudio"
           ref="player"
           :src="audioUrl"
           :start="audioClip?.start ?? 0"
@@ -703,6 +712,7 @@ onBeforeUnmount(() => {
         :segments="meeting.segments"
         :speaker="speakerMenu.speaker"
         :speakers="meeting.speakers"
+        :origin="meeting.origin"
         :x="speakerMenu.x"
         :y="speakerMenu.y"
         @preview="stopAudio"
