@@ -198,8 +198,8 @@ arquivo**, e o backend lê direto do disco, sem upload pela API.
   voz (`_previous_links`/`inherit_links`).
 - **Desfazer o "Sou eu"** (decisão do Claude): hoje "Você" não tem menu
   (`MeetingDetail.vue:313`). Em `import_media`, "Você" ganha um menu com **"Não sou eu"**, que
-  tira a marca e devolve a pessoa como "Pessoa N" (o próximo número livre na reunião). Também
-  passam a valer para ela renomear e "Ouvir esta pessoa", que dependem só do áudio. Um
+  tira a marca e devolve a pessoa como "Pessoa N" (o próximo número livre na reunião). O menu de
+  "Você" também traz "Ouvir esta pessoa"; renomear não faz sentido para "Você". Um
   reprocessamento preserva tanto a marca quanto a ausência dela.
 
 ## 8. Restrições
