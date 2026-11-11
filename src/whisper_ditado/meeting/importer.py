@@ -159,29 +159,41 @@ def import_transcript(
     store: Store, path: Path, *, title: str, started_at: datetime, me: str | None
 ) -> str:
     t = _read_transcript(path)
+    # "processing" até o fim: uma falha no meio não deixa uma reunião pronta e vazia
     meeting = store.create_meeting(
-        started_at, status="ready", origin="import_transcript", title=title)
-    store.update_meeting(meeting.id, ended_at=started_at + timedelta(seconds=t.duration_s))
+        started_at, status="processing", origin="import_transcript", title=title)
+    try:
+        _fill_transcript(store, meeting.id, t, started_at, me)
+    except BaseException:
+        store.delete_meeting(meeting.id)
+        raise
+    return meeting.id
+
+
+def _fill_transcript(
+    store: Store, meeting_id: str, t: ReadAiTranscript, started_at: datetime, me: str | None
+) -> None:
     my_match = _match_name(_real_people(t), me or "")
 
     speakers: dict[str, Speaker] = {}
     next_color = 1
     for name in t.people:
         if name == my_match:
-            sp = Speaker(uuid.uuid4().hex, meeting.id, ME_LABEL, None, True, 0)
+            sp = Speaker(uuid.uuid4().hex, meeting_id, ME_LABEL, None, True, 0)
         else:
             label = UNIDENTIFIED_LABEL if name == READAI_UNIDENTIFIED else name
-            sp = Speaker(uuid.uuid4().hex, meeting.id, label, None, False, next_color)
+            sp = Speaker(uuid.uuid4().hex, meeting_id, label, None, False, next_color)
             next_color += 1
         speakers[name] = sp
     segments = [
-        Segment(None, meeting.id, speakers[turn.name].id,
+        Segment(None, meeting_id, speakers[turn.name].id,
                 "mic" if speakers[turn.name].is_me else "pc",
                 turn.start_s, turn.end_s, turn.text)
         for turn in t.turns
     ]
-    store.replace_transcript(meeting.id, list(speakers.values()), segments)
-    return meeting.id
+    store.replace_transcript(meeting_id, list(speakers.values()), segments)
+    store.update_meeting(
+        meeting_id, status="ready", ended_at=started_at + timedelta(seconds=t.duration_s))
 
 
 def convert_media(src: Path, directory: Path) -> Path:

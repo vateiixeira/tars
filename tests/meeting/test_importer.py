@@ -145,3 +145,83 @@ def test_convert_media_writes_opus(tmp_path):
     assert out == out_dir / "pc.opus" and out.stat().st_size > 0
     assert not list(out_dir.glob("*.part"))
     assert (src.stat().st_size, src.stat().st_mtime) == before
+
+
+def test_inspect_media_falls_back_to_mtime_minus_duration(tmp_path):
+    p = tmp_path / "a.mp3"
+    p.write_bytes(b"x")
+    ts = datetime(2026, 11, 11, 17, 0).timestamp()
+    os.utime(p, (ts, ts))
+    pv = inspect(p, my_name=ME, probe=lambda _p: MediaInfo(1800.0, None))
+    assert (pv.date, pv.time) == (date(2026, 11, 11), time(16, 30))
+
+
+def test_inspect_transcript_without_recognized_date_uses_mtime(tmp_path):
+    p = _write(tmp_path, SAMPLE.replace("qua., 11 de nov. de 2026", "ontem"),
+               mtime=datetime(2026, 11, 12, 0, 10))
+    duration = parse_readai(SAMPLE).duration_s
+    start = datetime(2026, 11, 12, 0, 10) - timedelta(seconds=duration)
+    pv = inspect(p, my_name=ME)
+    assert pv.date == start.date()
+    assert pv.time == start.time().replace(second=0, microsecond=0)
+
+
+def _fake_ffprobe(monkeypatch, out: dict):
+    import json
+
+    from whisper_ditado.meeting import importer
+
+    monkeypatch.setattr(importer.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, json.dumps(out).encode(), b""))
+
+
+def test_probe_converts_utc_creation_time_to_local(monkeypatch, tmp_path):
+    import time as _time
+
+    from whisper_ditado.meeting.importer import probe_media
+
+    monkeypatch.setenv("TZ", "America/Sao_Paulo")
+    _time.tzset()
+    try:
+        _fake_ffprobe(monkeypatch, {
+            "streams": [{"index": 0}],
+            "format": {"duration": "10.5", "tags": {"creation_time": "2026-11-11T19:30:00.000000Z"}}})
+        info = probe_media(tmp_path / "x.mp4")
+    finally:
+        monkeypatch.undo()
+        _time.tzset()
+    assert info == MediaInfo(10.5, datetime(2026, 11, 11, 16, 30))
+
+
+def test_probe_without_streams_means_no_audio(monkeypatch, tmp_path):
+    from whisper_ditado.meeting.importer import probe_media
+
+    _fake_ffprobe(monkeypatch, {"streams": [], "format": {"duration": "3"}})
+    with pytest.raises(ImportFileError, match="não tem áudio"):
+        probe_media(tmp_path / "x.mp4")
+
+
+@pytest.mark.skipif(shutil.which("ffprobe") is None, reason="ffprobe não instalado")
+def test_probe_real_files(tmp_path):
+    from whisper_ditado.meeting.importer import probe_media
+
+    video = tmp_path / "mudo.mp4"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                    "color=c=black:s=64x64:d=1", "-pix_fmt", "yuv420p", str(video)], check=True)
+    with pytest.raises(ImportFileError, match="O arquivo não tem áudio"):
+        probe_media(video)
+    fake = tmp_path / "texto.mp4"
+    fake.write_text("isto não é mídia")
+    with pytest.raises(ImportFileError):
+        probe_media(fake)
+
+
+def test_import_transcript_failure_leaves_no_meeting(store, tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("disco cheio")
+
+    monkeypatch.setattr(store, "replace_transcript", boom)
+    with pytest.raises(RuntimeError):
+        import_transcript(store, _write(tmp_path), title="T",
+                          started_at=datetime(2026, 11, 11, 16), me=ME)
+    assert store.list_meetings(archived=None) == []
