@@ -72,7 +72,7 @@ def test_leave_one_meeting_out_matches_counts_outcomes():
         ("m1", "a", np.array([1.0, 0.0])),
         ("m2", "a", np.array([0.95, 0.05])),
         ("m2", "c", np.array([0.0, 1.0])),  # "c" só existe em m2 e não parece ninguém: sem voz
-        ("m3", "d", np.array([0.9, 0.1])),  # "d" só existe em m3 e parece "a": casa errado
+        ("m3", "d", np.array([0.9, 0.5])),  # "d" só existe em m3 e parece "a": casa errado
     ]
     # (certos, errados, sem voz), comparando cada reunião com as vozes das outras
     assert leave_one_meeting_out_matches(samples, threshold=0.8) == (2, 1, 1)

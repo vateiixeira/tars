@@ -482,6 +482,16 @@ def test_summary_and_name_suggestions(client, ctx):
                          "evidence": "me chamo Maria"}]
 
 
+def test_name_suggestions_exclude_unidentified_group(client, ctx):
+    from whisper_ditado.store import UNIDENTIFIED_LABEL
+
+    mid = make_meeting(ctx)
+    ctx.store.update_speaker("sp-a", label=UNIDENTIFIED_LABEL)
+    response = client.post(f"/api/meetings/{mid}/name-suggestions")
+    assert response.status_code == 200
+    assert ctx.claude.calls[-1][2] == ["Falante 2"]
+
+
 def test_claude_error_is_502_with_message(client, ctx):
     mid = make_meeting(ctx)
     ctx.claude.error = ClaudeError("Claude Code não está logado — rode `claude` no terminal")

@@ -552,7 +552,7 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         speakers = store.get_speakers(m.id)
         unknown: dict[str, Any] = {}
         for s in speakers:  # só falantes sem voz e que não são "eu"; rótulo repetido: o primeiro
-            if s.label and not s.is_me and not s.voice_id:
+            if s.label and not s.is_me and not s.voice_id and not s.is_unidentified:
                 unknown.setdefault(s.label, s)
         if not unknown:
             return []

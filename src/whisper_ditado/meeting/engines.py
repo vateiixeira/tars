@@ -20,6 +20,7 @@ from whisper_ditado.meeting.diarize import (
     DiarizationResult,
 )
 from whisper_ditado.settings import DIARIZERS
+from whisper_ditado.meeting.quality import validate_speakers
 
 log = logging.getLogger("ditado")
 
@@ -72,7 +73,7 @@ class DiarizerRouter:
         if reason is not None:
             log.warning("pyannote não usado (%s); falantes separados pelo motor local", reason)
             result = dataclasses.replace(result, fallback=FALLBACK_ALERTS[reason])
-        return result
+        return validate_speakers(audio, result)
 
     def unload(self) -> None:
         self._local.unload()

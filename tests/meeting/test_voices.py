@@ -24,8 +24,8 @@ def test_match_assigns_each_voice_once():
         "B": np.array([1.0, 0.2], dtype=np.float32),
     }
     result = match_speakers(speakers, voices, threshold=0.0, model=M)
-    # A é mais próximo de v1, então B fica com v2, mesmo sendo mais próximo de v1
-    assert result == {"A": "v1", "B": "v2"}
+    # B não pode receber outra identidade só porque a sua melhor candidata já foi usada.
+    assert result == {"A": "v1"}
 
 
 def test_match_respects_threshold():
@@ -133,11 +133,26 @@ def test_inherit_links_ignores_edge_overlap():
     assert inherit_links({"A": [(0.0, 10.0)]}, {"v1": [(9.9, 20.0)]}) == {}
 
 
-def test_inherit_links_requires_fraction_of_shorter_total():
-    # 2 s de 20 s em comum ficam abaixo de 30% do menor total (6 s)
+def test_inherit_links_requires_fraction_of_new_total():
+    # 2 s de 20 s em comum ficam abaixo de 30% do grupo novo (6 s)
     assert inherit_links({"A": [(0.0, 20.0)]}, {"v1": [(18.0, 38.0)]}) == {}
     # 6 s chegam ao mínimo
     assert inherit_links({"A": [(0.0, 20.0)]}, {"v1": [(14.0, 34.0)]}) == {"A": "v1"}
+
+
+def test_small_old_false_match_cannot_name_a_long_new_speaker():
+    assert inherit_links({"A": [(0, 600)]}, {"wrong": [(100, 110)]}) == {}
+    assert inherit_links({"A": [(0, 600)]}, {"correct": [(0, 500)]}) == {"A": "correct"}
+
+
+def test_match_rejects_ambiguous_known_voices():
+    voices = [_voice("a", [1, 0]), _voice("b", [0.99, 0.1])]
+    assert match_speakers({"speaker": np.array([1., 0.])}, voices, 0.6, M) == {}
+
+
+def test_match_ignores_non_finite_candidates():
+    voices = [_voice("invalid", [np.nan, 0]), _voice("valid", [1, 0])]
+    assert match_speakers({"speaker": np.array([1., 0.])}, voices, 0.6, M) == {"speaker": "valid"}
 
 
 def test_inherit_links_sums_overlap_across_spans():

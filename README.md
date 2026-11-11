@@ -340,6 +340,13 @@ Dois motores separam os falantes de uma reunião:
 - **pyannote (opcional).** Usa o `pyannote/speaker-diarization-community-1`, um modelo com acesso
   restrito. Exige o extra `pyannote` e um token do Hugging Face.
 
+Nos dois motores, uma verificação adicional de fala evita transformar grupos dominados por
+ruído em participantes. Trechos sem evidência suficiente aparecem como **Não identificado**:
+o texto e os horários são preservados, mas esse agrupador não conta como uma pessoa nem recebe
+sugestões de nomes. O reconhecimento automático usa uma amostra de fala validada e deixa sem
+nome as correspondências ambíguas. Vozes de fundo inteligíveis ainda podem ser detectadas como
+fala; o filtro não determina sozinho quem estava participando da reunião.
+
 Para escolher o motor, use o seletor em Configurações → Reuniões (vale a partir da próxima reunião
 ou reprocessamento) ou `PUT /api/settings` com `{"diarizer": "local"}` ou `{"diarizer": "pyannote"}`.
 Cada motor tem seu próprio limiar de reconhecimento de voz nessa mesma tela.

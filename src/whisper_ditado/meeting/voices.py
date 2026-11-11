@@ -10,7 +10,7 @@ import numpy as np
 from whisper_ditado.store import Voice, VoiceEmbedding
 
 # Herança de vínculo por tempo: a sobreposição precisa ter pelo menos MIN_INHERIT_S segundos e
-# MIN_INHERIT_FRACTION do menor dos dois totais, para um toque de borda não passar uma voz adiante.
+# MIN_INHERIT_FRACTION do grupo novo, para um fragmento antigo não dar nome ao grupo inteiro.
 MIN_INHERIT_S = 1.0
 MIN_INHERIT_FRACTION = 0.3
 
@@ -35,19 +35,25 @@ def match_speakers(
     voices: list[Voice],
     threshold: float,
     model: str,
+    *,
+    min_margin: float = 0.05,
 ) -> dict[str, str]:
     """Casa falantes com vozes conhecidas (speaker -> voice_id).
 
-    Só compara com o embedding da voz do mesmo `model` dos falantes. Guloso pela maior
-    similaridade; cada voz e cada falante são usados no máximo uma vez, e só pares com
-    similaridade >= threshold entram.
+    Só compara modelos iguais. Exige limiar e distância da segunda melhor voz;
+    nunca tenta uma identidade alternativa quando a melhor já foi usada.
     """
-    pairs = [
-        (cosine(emb, voice.embeddings[model].vector), speaker, voice.id)
-        for speaker, emb in speaker_embs.items()
-        for voice in voices
-        if model in voice.embeddings
-    ]
+    pairs = []
+    for speaker, emb in speaker_embs.items():
+        candidates = [(cosine(emb, voice.embeddings[model].vector), voice.id)
+                      for voice in voices if model in voice.embeddings]
+        scores = sorted([(s, v) for s, v in candidates if np.isfinite(s)], reverse=True)
+        if not scores:
+            continue
+        score, voice_id = scores[0]
+        if score < threshold or (len(scores) > 1 and score - scores[1][0] < min_margin):
+            continue
+        pairs.append((score, speaker, voice_id))
     pairs.sort(key=lambda p: p[0], reverse=True)
     result: dict[str, str] = {}
     used_voices: set[str] = set()
@@ -80,11 +86,11 @@ def inherit_links(
     `new_spans` é indexado pela chave do falante novo e `old_spans` pelo `voice_id` do falante
     antigo; devolve chave nova -> `voice_id`. Guloso pela maior sobreposição, um para um: cada
     chave e cada voz entram no máximo uma vez. Um par só conta se a sobreposição for de pelo
-    menos `max(MIN_INHERIT_S, MIN_INHERIT_FRACTION * menor total)`, com os totais em segundos da
-    chave nova e da voz antiga.
+    menos `max(MIN_INHERIT_S, MIN_INHERIT_FRACTION * total novo)`. Um grupo curto
+    confundido com uma voz não pode nomear um falante longo após o reprocessamento.
     """
     pairs = [
-        (_overlap(spans, old), key, voice_id, min(_total(spans), _total(old)))
+        (_overlap(spans, old), key, voice_id, _total(spans))
         for key, spans in new_spans.items()
         for voice_id, old in old_spans.items()
     ]

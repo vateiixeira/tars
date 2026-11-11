@@ -167,6 +167,20 @@ def test_list_meetings_searches_title_and_transcript(store):
     assert by_id[c.id].duration_s == 0 and by_id[c.id].speakers_count == 0
 
 
+def test_unidentified_segments_are_searchable_but_do_not_count_as_people(store):
+    from whisper_ditado.store import UNIDENTIFIED_LABEL
+
+    m = store.create_meeting(T0)
+    unknown = _spk(m.id, "uncertain", UNIDENTIFIED_LABEL)
+    store.replace_transcript(m.id, [_spk(m.id, "known"), unknown],
+                             [_seg(m.id, "uncertain", "trecho incerto", 0, 2)])
+    assert unknown.is_unidentified
+    assert store.list_meetings()[0].speakers_count == 1
+    assert store.list_meetings("trecho incerto")[0].speakers_count == 1
+    store.update_speaker("uncertain", label="Maria")
+    assert store.list_meetings()[0].speakers_count == 2
+
+
 def test_replace_transcript_is_atomic(store):
     m = store.create_meeting(T0)
     store.replace_transcript(m.id, [_spk(m.id, "s1")], [_seg(m.id, "s1", "original")])

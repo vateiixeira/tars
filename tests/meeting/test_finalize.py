@@ -340,7 +340,7 @@ def test_fallback_uses_local_threshold_and_model(store, settings):
     assert all(sp.embedding_model == "sherpa-modelo" for sp in speakers)
 
 
-def test_finalize_words_without_turn_go_to_nearest_speaker(store, settings):
+def test_finalize_words_without_nearby_turn_remain_unidentified(store, settings):
     mid, _ = new_meeting(store)
     words = {"mic": [], "pc": [w(1.0, "oi"), w(9.0, "solto")]}
     turns = [Turn(0.8, 1.6, "A"), Turn(4.0, 5.0, "B")]
@@ -348,7 +348,7 @@ def test_finalize_words_without_turn_go_to_nearest_speaker(store, settings):
                  words, None)
     names = labels(store, mid)
     got = [(names[s.speaker_id], s.text) for s in store.get_segments(mid)]
-    assert got == [("Pessoa 1", "oi"), ("Pessoa 2", "solto")]
+    assert got == [("Pessoa 1", "oi"), ("Não identificado", "solto")]
     assert "desconhecido" not in names.values()
 
 
@@ -367,6 +367,36 @@ def test_finalize_with_silent_pc_track(store, settings):
     assert [s.text for s in store.get_segments(mid)] == ["sozinho aqui"]
     assert store.get_alerts(mid) == []
     assert (d / "pc.opus").exists() and not (d / "pc.raw").exists()
+
+
+def test_router_filters_noise_without_losing_words_or_inheriting_its_voice(store, settings, monkeypatch):
+    from whisper_ditado.meeting import quality
+    from whisper_ditado.meeting.engines import DiarizerRouter
+    from whisper_ditado.store import Segment, Speaker
+
+    mid, _ = new_meeting(store, mic_s=30, pc_s=30, status="ready")
+    store.upsert_voice(Voice(id="wrong", name="Outra pessoa", embeddings={
+        "fake-model": VoiceEmbedding(np.array([1., 0.]))}))
+    store.replace_transcript(mid, [Speaker("old", mid, "Outra pessoa", "wrong")],
+                             [Segment(None, mid, "old", "pc", 15, 17, "incerto")])
+    probabilities = np.zeros(int(np.ceil(30 / quality.FRAME_S)), np.float32)
+    probabilities[:round(10 / quality.FRAME_S)] = 0.9
+    monkeypatch.setattr(quality, "speech_probabilities", lambda audio: probabilities)
+    result = DiarizationResult([Turn(0, 10, "a"), Turn(10, 30, "noise")],
+                               {"noise": np.array([1., 0.])},
+                               embed=lambda audio, spans: np.array([0., 1.]))
+    router = DiarizerRouter(settings, FakeDiarizer(result), None)
+    words = {"mic": [w(20, "minha fala")],
+             "pc": [w(2, "fala real"), w(15, "incerto", dur=2)]}
+    fin.finalize(mid, store, settings, FakeTranscriber(), router, words, None)
+    speakers = {s.id: s for s in store.get_speakers(mid)}
+    assert {s.label for s in speakers.values()} == {"Você", "Pessoa 1", "Não identificado"}
+    assert all(s.voice_id is None for s in speakers.values())
+    uncertain = next(s for s in speakers.values() if s.is_unidentified)
+    assert uncertain.embedding is None
+    assert [(speakers[s.speaker_id].label, s.text) for s in store.get_segments(mid)] == [
+        ("Pessoa 1", "fala real"), ("Não identificado", "incerto"), ("Você", "minha fala")]
+    assert store.list_meetings()[0].speakers_count == 2
 
 
 def test_finalize_without_hf_token_uses_single_speaker(store, settings):

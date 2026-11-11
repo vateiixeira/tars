@@ -26,6 +26,7 @@ from whisper_ditado.claude_cli import transcript_text
 from whisper_ditado.meeting.diarize import DiarizationResult
 from whisper_ditado.meeting.engines import FALLBACK_ALERTS
 from whisper_ditado.meeting.timeline import (
+    UNKNOWN_SPEAKER,
     DraftSegment,
     Turn,
     assign_words,
@@ -37,7 +38,7 @@ from whisper_ditado.meeting.timeline import (
 from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.meeting.voices import inherit_links, match_speakers
 from whisper_ditado.settings import DIARIZERS, Settings, threshold_key
-from whisper_ditado.store import Segment, Speaker, Store
+from whisper_ditado.store import UNIDENTIFIED_LABEL, Segment, Speaker, Store
 from whisper_ditado.transcriber import Word
 
 log = logging.getLogger("ditado")
@@ -62,6 +63,7 @@ STAGE_FINISHING = "finalizando"
 # Chaves internas de falante: não colidem com os rótulos do pyannote ("SPEAKER_00").
 _ME = "\0me"
 _PARTICIPANTS = "\0participantes"
+_UNIDENTIFIED = "\0nao-identificado"
 
 Progress = Callable[[str], None]
 StatusCallback = Callable[[str, str], None]
@@ -157,19 +159,11 @@ def _ensure_voices(store: Store, result: DiarizationResult, voice_sync: VoiceSyn
         log.exception("Não foi possível recalcular as vozes salvas para o modelo %s", result.model)
 
 
-def _nearest_speaker(word: Word, turns: list[Turn]) -> str | None:
-    best, best_dist = None, float("inf")
-    for turn in turns:
-        dist = max(turn.start_s - word.end_s, word.start_s - turn.end_s, 0.0)
-        if dist < best_dist:
-            best, best_dist = turn.speaker, dist
-    return best
-
-
 def _label_pc_words(words: list[Word], turns: list[Turn]) -> list[tuple[Word, str]]:
-    """Palavra -> falante; sem turno próximo vai para o turno mais perto, ou "Participantes"."""
+    """Preserva palavras sem evidência de identidade, respeitando o limite de distância."""
     return [
-        (word, speaker or _nearest_speaker(word, turns) or _PARTICIPANTS)
+        (word, speaker if speaker and speaker != UNKNOWN_SPEAKER
+         else (_UNIDENTIFIED if turns else _PARTICIPANTS))
         for word, speaker in assign_words(words, turns)
     ]
 
@@ -207,17 +201,21 @@ def _build_speakers(
     model = result.model
     embeddings = result.embeddings if model else {}
     names = {voice.id: voice.name for voice in voices}
-    inherited = {k: v for k, v in (inherited or {}).items() if k in pc_keys and v in names}
+    inherited = {k: v for k, v in (inherited or {}).items()
+                 if k in pc_keys and v in names and k not in (_PARTICIPANTS, _UNIDENTIFIED)}
     matches: dict[str, str] = dict(inherited)
     if model and threshold is not None:
         known = {key: embeddings[key] for key in pc_keys if key in embeddings and key not in inherited}
-        free = [voice for voice in voices if voice.id not in inherited.values()]
-        matches.update(match_speakers(known, free, threshold, model))
+        automatic = match_speakers(known, voices, threshold, model)
+        matches.update({key: voice_id for key, voice_id in automatic.items()
+                        if voice_id not in inherited.values()})
     people = 0
     for color, key in enumerate(pc_keys, start=1):
         voice_id = matches.get(key)
         if key == _PARTICIPANTS:
             label = PARTICIPANTS_LABEL
+        elif key == _UNIDENTIFIED:
+            label = UNIDENTIFIED_LABEL
         elif voice_id is not None:
             label = names[voice_id]
         else:
@@ -347,7 +345,7 @@ def finalize(
         voices = store.list_voices()
         new_spans: dict[str, list[tuple[float, float]]] = {}
         for seg in drafts:
-            if seg.source == "pc" and seg.speaker != _PARTICIPANTS:
+            if seg.source == "pc" and seg.speaker not in (_PARTICIPANTS, _UNIDENTIFIED):
                 new_spans.setdefault(seg.speaker, []).append((seg.start_s, seg.end_s))
         inherited = inherit_links(new_spans, _previous_links(store, meeting_id, voices))
         speakers, ids = _build_speakers(meeting_id, drafts, diarized, voices, threshold, inherited)

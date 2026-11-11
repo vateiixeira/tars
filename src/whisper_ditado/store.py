@@ -27,6 +27,8 @@ import numpy as np
 from whisper_ditado.issues.prompts import KIND_LABELS, PRIORITIES
 from whisper_ditado.issues.legacy import migration_sql
 
+UNIDENTIFIED_LABEL = "Não identificado"
+
 _SCHEMA_V1 = """
 CREATE TABLE meetings (
     id TEXT PRIMARY KEY,
@@ -232,6 +234,11 @@ class Speaker:
     color_index: int = 0
     embedding: np.ndarray | None = None
     embedding_model: str | None = None
+
+    @property
+    def is_unidentified(self) -> bool:
+        """Agrupador de trechos incertos, não uma pessoa adicional."""
+        return self.label == UNIDENTIFIED_LABEL and self.voice_id is None and not self.is_me
 
 
 @dataclass
@@ -476,12 +483,14 @@ class Store:
         """Reuniões mais recentes primeiro; `archived=None` traz arquivadas e não arquivadas."""
         sql = """
             SELECT m.id, m.title, m.started_at, m.status, m.ended_at,
-                   (SELECT COUNT(*) FROM speakers sp WHERE sp.meeting_id = m.id) AS speakers_count,
+                   (SELECT COUNT(*) FROM speakers sp WHERE sp.meeting_id = m.id
+                    AND NOT (COALESCE(sp.label, '') = ? AND sp.voice_id IS NULL AND sp.is_me = 0))
+                       AS speakers_count,
                    (SELECT COALESCE(MAX(sg.end_s), 0) FROM segments sg WHERE sg.meeting_id = m.id)
                        AS last_end
             FROM meetings m
         """
-        params: list = []
+        params: list = [UNIDENTIFIED_LABEL]
         where: list[str] = []
         if archived is not None:
             where.append("m.archived_at IS NOT NULL" if archived else "m.archived_at IS NULL")
@@ -490,7 +499,7 @@ class Store:
                    OR EXISTS (SELECT 1 FROM segments sg
                               WHERE sg.meeting_id = m.id AND casefold(sg.text) LIKE ? ESCAPE '\\'))""")
             pattern = _like_pattern(query)
-            params = [pattern, pattern]
+            params.extend([pattern, pattern])
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY m.started_at DESC"

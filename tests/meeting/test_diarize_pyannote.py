@@ -253,15 +253,21 @@ def test_diarizer_separates_two_synthetic_voices():
         chunks += [audio, gap]
         expected.append((t, t + len(audio) / sr, i % 2))
         t += len(audio) / sr + 0.8
-    result = diarizer.run(np.concatenate(chunks))
+    from whisper_ditado.meeting.quality import validate_speakers
+    from whisper_ditado.meeting.timeline import UNKNOWN_SPEAKER
 
-    assert len({turn.speaker for turn in result.turns}) >= 2
+    audio = np.concatenate(chunks)
+    result = validate_speakers(audio, diarizer.run(audio))
+
+    assert len({turn.speaker for turn in result.turns} - {UNKNOWN_SPEAKER}) >= 2
+    assert len(result.embeddings) >= 2
     assert set(result.embeddings) <= {turn.speaker for turn in result.turns}
     # no meio de cada fala, o falante deve ser o mesmo para as falas de mesma voz
     by_voice: dict[int, set[str]] = {0: set(), 1: set()}
     for start, end, voice in expected:
         mid = (start + end) / 2
-        hit = [turn.speaker for turn in result.turns if turn.start_s - 1 <= mid <= turn.end_s + 1]
+        hit = [turn.speaker for turn in result.turns
+               if turn.speaker != UNKNOWN_SPEAKER and turn.start_s - 1 <= mid <= turn.end_s + 1]
         assert hit, f"sem turno perto de {mid:.1f}s"
         by_voice[voice].add(hit[0])
     assert by_voice[0] != by_voice[1]
