@@ -15,7 +15,9 @@ const { connected } = useStatus();
 
 // Espelho de `MEDIA_EXTENSIONS` (src/whisper_ditado/meeting/importer.py), sem o ponto.
 const MEDIA_EXTENSIONS = ["mp4", "mkv", "mov", "webm", "mp3", "m4a", "wav", "ogg", "opus", "flac", "aac"];
+// O primeiro filtro (o que o GTK abre marcado) aceita todos os tipos, sem precisar trocar de filtro.
 const FILTERS = [
+  { name: "Transcrição, vídeo ou áudio", extensions: ["txt", ...MEDIA_EXTENSIONS] },
   { name: "Transcrição do Read AI", extensions: ["txt"] },
   { name: "Vídeo ou áudio", extensions: MEDIA_EXTENSIONS },
 ];

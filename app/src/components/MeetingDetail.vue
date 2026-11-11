@@ -683,6 +683,7 @@ onBeforeUnmount(() => {
               :meeting-id="meeting.id"
               :started-at="meeting.started_at"
               :prints="meeting.prints"
+              :no-audio="!hasAudio"
               @play="playAudio"
               @count="tasksCount = $event"
             />

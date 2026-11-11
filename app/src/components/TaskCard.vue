@@ -35,6 +35,8 @@ const props = defineProps<{
   error?: string | null;
   /** Todos os prints da reunião (a tarefa guarda só os ids dos que vão junto). */
   prints: MeetingPrint[];
+  /** Reunião sem áudio (transcrição importada): esconde o "Ouvir este trecho" da evidência. */
+  noAudio?: boolean;
 }>();
 const emit = defineEmits<{
   // `update`, `draft` e `resolve` levam o id do próprio cartão: quem trata não depende de qual item está aberto.
@@ -389,6 +391,7 @@ function informNumber(): void {
     <ul v-if="task.evidence.length" class="evidence">
       <li v-for="(e, i) in task.evidence" :key="i">
         <button
+          v-if="!noAudio"
           type="button"
           class="play"
           title="Ouvir este trecho"

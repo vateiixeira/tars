@@ -58,6 +58,10 @@ describe("ImportButton", () => {
       multiple: false,
       directory: false,
       filters: [
+        {
+          name: "Transcrição, vídeo ou áudio",
+          extensions: ["txt", "mp4", "mkv", "mov", "webm", "mp3", "m4a", "wav", "ogg", "opus", "flac", "aac"],
+        },
         { name: "Transcrição do Read AI", extensions: ["txt"] },
         {
           name: "Vídeo ou áudio",

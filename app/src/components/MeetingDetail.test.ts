@@ -60,6 +60,24 @@ beforeEach(() => {
 });
 afterEach(() => setStatusStore(null));
 
+/** Aba Tarefas com uma tarefa que tem evidência (trecho de 31 s a 40 s). */
+function tasksWithEvidence() {
+  const item = {
+    id: "t1", meeting_id: "m1", origin: "claude", position: 0, kind: "tarefa", title: "Algo", description: "",
+    project: null, product_id: null, assignee_id: null, team_id: null, stage_id: null, priority: "medium",
+    suggested: null, evidence: [{ start_s: 31, end_s: 40, speaker: "Pessoa 2", text: "Oi" }],
+    edited: false, discarded: false, create_state: "none", create_error: null,
+    issue_number: null, issue_url: null, repeats_number: null,
+    print_ids: [], attach_state: "none", attach_error: null,
+  };
+  return {
+    listTasks: vi.fn(async () => ({ enabled: true, scan: null, items: [item] })),
+    issueOptions: vi.fn(async () => ({
+      username: "vi", people: [], teams: [], products: [], stages: [], fetched_at: "2026-10-20T10:00:00",
+    })),
+  };
+}
+
 async function mountDetail(d: Detail, overrides: Record<string, unknown> = {}) {
   const getMeeting = vi.fn(async (_id: string) => d);
   const ctx = installStore({ getMeeting, ...overrides });
@@ -356,11 +374,16 @@ describe("MeetingDetail", () => {
 
   it("transcrição importada: sem player, sem ouvir trechos e sem Reprocessar", async () => {
     const audioBlob = vi.fn(async () => new Blob(["audio"]));
-    const { w } = await mountDetail(detail({ origin: "import_transcript" }), { audioBlob });
+    const { w } = await mountDetail(detail({ origin: "import_transcript" }), { audioBlob, ...tasksWithEvidence() });
     expect(w.findComponent(MeetingPlayer).exists()).toBe(false);
     expect(w.find('[aria-label="Ouvir áudio da reunião"]').exists()).toBe(false);
     expect(w.find('[title="Ouvir este trecho"]').exists()).toBe(false);
     expect(w.text()).toContain("Bom dia");
+    // a evidência das tarefas continua, sem o botão de ouvir
+    await w.get("#tab-tasks").trigger("click");
+    await flushPromises();
+    expect(w.get(".evidence").text()).toContain("Pessoa 2");
+    expect(w.find(".evidence .play").exists()).toBe(false);
 
     const failed = await mountDetail(detail({ origin: "import_transcript", status: "failed", error: "x" }));
     expect(failed.w.findAll("button").some((b) => b.text().includes("Reprocessar"))).toBe(false);
@@ -956,19 +979,7 @@ describe("MeetingDetail", () => {
   it("play from the TasksTab plays the excerpt", async () => {
     const audioBlob = vi.fn(async () => new Blob(["x"], { type: "audio/ogg" }));
     Object.assign(URL, { createObjectURL: vi.fn(() => "blob:fake"), revokeObjectURL: vi.fn() });
-    const item = {
-      id: "t1", meeting_id: "m1", origin: "claude", position: 0, kind: "tarefa", title: "Algo", description: "",
-      project: null, product_id: null, assignee_id: null, team_id: null, stage_id: null, priority: "medium",
-      suggested: null, evidence: [{ start_s: 31, end_s: 40, speaker: "Pessoa 2", text: "Oi" }],
-      edited: false, discarded: false, create_state: "none", create_error: null,
-      issue_number: null, issue_url: null, repeats_number: null,
-      print_ids: [], attach_state: "none", attach_error: null,
-    };
-    const listTasks = vi.fn(async () => ({ enabled: true, scan: null, items: [item] }));
-    const issueOptions = vi.fn(async () => ({
-      username: "vi", people: [], teams: [], products: [], stages: [], fetched_at: "2026-10-20T10:00:00",
-    }));
-    const { w } = await mountDetail(detail(), { audioBlob, listTasks, issueOptions });
+    const { w } = await mountDetail(detail(), { audioBlob, ...tasksWithEvidence() });
     await w.get('#tab-tasks').trigger("click");
     await flushPromises();
     await w.get(".evidence .play").trigger("click");
