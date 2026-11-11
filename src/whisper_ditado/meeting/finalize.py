@@ -72,10 +72,10 @@ StatusCallback = Callable[[str, str], None]
 # -- áudio -------------------------------------------------------------------------
 
 
-def _run_ffmpeg(args: list[str], what: str) -> bytes:
+def _run_ffmpeg(args: list[str], what: str, timeout: float = FFMPEG_TIMEOUT_S) -> bytes:
     proc = subprocess.run(
         [FFMPEG, "-nostdin", "-hide_banner", "-v", "error", *args],
-        capture_output=True, timeout=FFMPEG_TIMEOUT_S, check=False,
+        capture_output=True, timeout=timeout, check=False,
     )
     if proc.returncode != 0:
         detail = proc.stderr.decode("utf-8", "replace").strip().splitlines()
