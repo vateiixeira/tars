@@ -12,6 +12,7 @@ import AppButton from "./ui/AppButton.vue";
 import AppDialog from "./ui/AppDialog.vue";
 import AppIcon from "./ui/AppIcon.vue";
 import AppLoader from "./ui/AppLoader.vue";
+import { maskTime } from "../lib/timeMask";
 
 const props = defineProps<{ path: string }>();
 const emit = defineEmits<{ close: []; imported: [meetingId: string] }>();
@@ -77,6 +78,13 @@ function parseTime(text: string): string | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
   if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return null;
   return `${m[1].padStart(2, "0")}:${m[2]}`;
+}
+
+function onTimeInput(ev: Event): void {
+  const el = ev.target as HTMLInputElement;
+  const deleting = (ev as InputEvent).inputType?.startsWith("delete") ?? false;
+  time.value = maskTime(el.value, deleting);
+  el.value = time.value; // o valor mascarado pode ser igual ao anterior: força a atualização
 }
 
 const isoDate = computed(() => parseDate(date.value));
@@ -163,10 +171,12 @@ async function submit(): Promise<void> {
           />
           <input
             id="import-time"
-            v-model="time"
+            :value="time"
             class="input time"
             inputmode="numeric"
+            maxlength="5"
             placeholder="hh:mm"
+            @input="onTimeInput"
             aria-label="Hora"
             :aria-invalid="timeInvalid || !time.trim()"
           />
@@ -269,7 +279,7 @@ async function submit(): Promise<void> {
   padding: 0;
   border: 0;
 }
-.field > label,
+.field > label:not(.choice),
 .field > legend {
   padding: 0;
   margin-bottom: var(--space-2);
