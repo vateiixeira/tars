@@ -68,6 +68,7 @@ export interface MeetingListItem {
   duration_s: number;
   speakers_count: number;
   status: MeetingStatus;
+  origin: MeetingOrigin;
 }
 
 export interface Speaker {
@@ -108,6 +109,32 @@ export interface MeetingPrint {
   sent_to_claude: boolean;
 }
 
+/** De onde veio a reunião: gravada pelo TARS ou importada de vídeo/áudio ou de uma transcrição. */
+export type MeetingOrigin = "recorded" | "import_media" | "import_transcript";
+
+/** `POST /imports/inspect`: sugestões da tela de confirmação da importação. */
+export interface ImportPreview {
+  kind: "transcript" | "media";
+  title: string;
+  /** "YYYY-MM-DD"; `null` quando não deu para sugerir. */
+  date: string | null;
+  /** "HH:MM"; `null` = horário desconhecido (o usuário precisa informar). */
+  time: string | null;
+  duration_s: number;
+  /** Nomes na ordem da primeira fala (só na transcrição; sem o "não identificado"). */
+  people: string[] | null;
+  /** Pessoa igual ao "seu nome" lembrado das importações anteriores. */
+  my_name_match: string | null;
+}
+
+/** Corpo de `POST /imports`; `started_at` é "YYYY-MM-DDTHH:MM" local, sem fuso. */
+export interface ImportRequest {
+  path: string;
+  title: string;
+  started_at: string;
+  me: string | null;
+}
+
 /** `GET /meetings/{id}`. */
 export interface MeetingDetail {
   id: string;
@@ -125,6 +152,7 @@ export interface MeetingDetail {
   alerts: Alert[];
   prints: MeetingPrint[];
   summary_job: JobState | null;
+  origin: MeetingOrigin;
 }
 
 export interface Voice {

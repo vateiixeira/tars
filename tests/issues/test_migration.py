@@ -40,7 +40,7 @@ def test_migrates_legacy_settings_and_created_issue_without_losing_data(tmp_path
         assert store.get_meeting("m").title == "Antiga"
         assert store.get_meeting("m").archived_at is None
         assert [m.id for m in store.list_meetings()] == ["m"]
-        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 9
     finally:
         store.close()
     reopened = Store(path)

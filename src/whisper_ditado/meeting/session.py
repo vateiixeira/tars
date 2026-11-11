@@ -2,9 +2,9 @@
 
 Modelo de threads (nada disto bloqueia o loop do asyncio):
 
-- `start`, `stop`, `monitor_levels`, `register_dictation_span`, `reprocess` e `recover`
-  são chamados na thread do loop e só fazem trabalho rápido (banco, eventos); o resto
-  vai para threads próprias.
+- `start`, `stop`, `monitor_levels`, `register_dictation_span`, `reprocess`,
+  `import_media` e `recover` são chamados na thread do loop e só fazem trabalho rápido
+  (banco, eventos); o resto vai para threads próprias.
 - `meeting-setup`: inicia já as duas `TrackRecorder` com o mesmo `t0` (PC primeiro; os
   alvos são os dispositivos fixos ou o padrão do sistema), depois escolhe os dispositivos
   (`pw-dump`), redireciona a trilha do PC para o app da chamada, pede o AEC e liga o
@@ -21,11 +21,11 @@ Modelo de threads (nada disto bloqueia o loop do asyncio):
   tem um nó próprio (`whisper_ditado_aec_<reunião>_<n>`).
 - `meeting-stop`: para ticker, gravadores e AEC, grava os alertas e agenda a finalização.
 - `meeting-gpu`: uma thread única (daemon) para tudo que usa o modelo — carga do
-  Whisper das reuniões, blocos incrementais, finalização, reprocessamento e
-  recuperação —, sempre em série. O ditado tem prioridade (spec §8.2): `gpu_gate()`
-  (espera limitada enquanto alguém dita) roda antes de cada tarefa, antes de cada
-  trecho decodificado pelo Whisper das reuniões (`Transcriber.pause`) e antes da
-  diarização.
+  Whisper das reuniões, blocos incrementais, finalização, reprocessamento, importação
+  de vídeo/áudio (conversão incluída) e recuperação —, sempre em série. O ditado tem
+  prioridade (spec §8.2): `gpu_gate()` (espera limitada enquanto alguém dita) roda antes
+  de cada tarefa, antes de cada trecho decodificado pelo Whisper das reuniões
+  (`Transcriber.pause`) e antes da diarização.
 - `meeting-levels`: medição de níveis fora de reunião (tela de configurações).
 - `meeting-print`: uma captura de tela pelo portal (modo `native`), disparada pelo atalho
   global; `capture_print` só agenda e volta na hora (é chamado do loop do evdev). Um
@@ -53,6 +53,7 @@ from whisper_ditado.audio.capture import BYTES_PER_SAMPLE, SAMPLE_RATE, TrackRec
 from whisper_ditado.audio.levels import KINDS, HealthMonitor
 from whisper_ditado.feedback import notify_error, play_print_sound
 from whisper_ditado.meeting import finalize as fin
+from whisper_ditado.meeting import importer
 from whisper_ditado.meeting.incremental import IncrementalTranscriber, Vad, default_vad
 from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.memory import release_unused_memory
@@ -472,6 +473,22 @@ class MeetingManager:
         self._meeting_updated(meeting_id, "processing")
         self._gpu.submit(self._reprocess_job, meeting_id)
 
+    def import_media(self, meeting_id: str, source: Path) -> None:
+        """Converte o vídeo/áudio importado para a trilha do PC e o processa em segundo plano.
+
+        A reunião já chega `processing` (criada pela importação); só recusa se ela já estiver
+        na fila.
+        """
+        if self._store.get_meeting(meeting_id) is None:
+            raise KeyError(meeting_id)
+        with self._lock:
+            if meeting_id in self._processing:
+                raise MeetingStateError("A reunião já está sendo processada")
+            self._processing.append(meeting_id)
+        self._store.update_meeting(meeting_id, status="processing", error=None)
+        self._meeting_updated(meeting_id, "processing")
+        self._gpu.submit(self._import_job, meeting_id, source)
+
     def recover(self) -> None:
         """Agenda a finalização das reuniões que ficaram presas (backend caiu)."""
         self._gpu.submit(self._recover_job)
@@ -859,18 +876,36 @@ class MeetingManager:
             self._processing_done(mid)
         self._notify_ready(mid)
 
-    def _reprocess_job(self, meeting_id: str) -> None:
+    def _reprocess_audio(self, meeting_id: str) -> None:
+        """Transcreve e separa as vozes do áudio salvo; a reunião termina `ready` ou `failed`."""
         try:
             transcriber = self._get_transcriber()
         except Exception as exc:
             log.exception("Modelo das reuniões indisponível")
             fin.mark_failed(self._store, meeting_id, exc)
-        else:
-            fin.reprocess(meeting_id, self._store, self._settings, transcriber, self._diarizer,
-                          self._title_fn, on_progress=lambda st: self._progress(meeting_id, st),
-                          voice_sync=self._voice_sync)
+            return
+        fin.reprocess(meeting_id, self._store, self._settings, transcriber, self._diarizer,
+                      self._title_fn, on_progress=lambda st: self._progress(meeting_id, st),
+                      voice_sync=self._voice_sync)
+
+    def _reprocess_job(self, meeting_id: str) -> None:
+        try:
+            self._reprocess_audio(meeting_id)
         finally:
             self._processing_done(meeting_id)
+
+    def _import_job(self, meeting_id: str, source: Path) -> None:
+        try:
+            try:
+                importer.convert_media(source, paths.meeting_dir(meeting_id))
+            except Exception as exc:
+                log.exception("Falha ao converter %s", source)
+                fin.mark_failed(self._store, meeting_id, exc)
+                return
+            self._reprocess_audio(meeting_id)
+        finally:
+            self._processing_done(meeting_id)
+        self._notify_ready(meeting_id)
 
     def _recover_job(self) -> None:
         def busy(meeting_id: str) -> bool:

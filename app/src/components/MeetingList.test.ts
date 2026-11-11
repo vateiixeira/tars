@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 const item = (id: string, title: string | null, started_at: string, extra: Partial<MeetingListItem> = {}): MeetingListItem => ({
-  id, title, started_at, duration_s: 42 * 60, speakers_count: 4, status: "ready", ...extra,
+  id, title, started_at, duration_s: 42 * 60, speakers_count: 4, status: "ready", origin: "recorded", ...extra,
 });
 
 describe("MeetingList", () => {

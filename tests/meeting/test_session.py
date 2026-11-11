@@ -18,6 +18,7 @@ from tests.meeting.test_finalize import (
     FakeDiarizer,
     FakeTranscriber,
     w,
+    write_raw,
 )
 from whisper_ditado import paths
 from whisper_ditado.audio import pwgraph
@@ -845,6 +846,68 @@ def test_reprocess_keeps_task_suggestions(store, settings):
     assert [(t.id, t.create_state) for t in store.list_tasks(mid)] == [
         (kept.id, "created"), (free.id, "none")]
     assert store.get_job(mid, "tasks").state == "done"
+
+
+def _imported(store) -> str:
+    return store.create_meeting(datetime(2026, 11, 10, 9, 30), status="processing",
+                                origin="import_media", title="Importada").id
+
+
+def test_import_media_converts_processes_and_notifies_ready(store, settings, tmp_path, monkeypatch):
+    from whisper_ditado.meeting import importer
+
+    gate = threading.Event()
+    converted = []
+
+    def fake_convert(src, directory):
+        assert gate.wait(5)
+        converted.append((src, directory))
+        return write_raw(directory / "pc.raw", 1.0, PC_AMP)
+
+    monkeypatch.setattr(importer, "convert_media", fake_convert)
+    seen = []
+    rig = Rig(store, settings, on_ready=seen.append)
+    mid = _imported(store)
+    source = tmp_path / "gravacao.mp4"
+
+    rig.manager.import_media(mid, source)
+    assert rig.manager.state == "processing"
+    with pytest.raises(MeetingStateError):
+        rig.manager.import_media(mid, source)
+    gate.set()
+    assert rig.manager.wait_idle(10)
+
+    assert converted == [(source, paths.meeting_dir(mid))]
+    meeting = store.get_meeting(mid)
+    assert meeting.status == "ready" and meeting.title == "Importada"
+    assert [s.text for s in store.get_segments(mid)] == ["olá"]
+    assert seen == [mid]
+    assert [e["status"] for e in rig.bus.of("meeting_updated")] == ["processing", "ready"]
+    assert rig.manager.state == "idle" and rig.manager._processing == []
+    with pytest.raises(KeyError):
+        rig.manager.import_media("nao-existe", source)
+
+
+def test_import_media_conversion_failure_marks_failed(store, settings, tmp_path, monkeypatch):
+    from whisper_ditado.meeting import importer
+
+    def broken(src, directory):
+        raise RuntimeError("ffmpeg falhou ao converter gravacao.mp4: Invalid data")
+
+    monkeypatch.setattr(importer, "convert_media", broken)
+    seen = []
+    rig = Rig(store, settings, on_ready=seen.append)
+    mid = _imported(store)
+
+    rig.manager.import_media(mid, tmp_path / "gravacao.mp4")
+    assert rig.manager.wait_idle(10)
+
+    meeting = store.get_meeting(mid)
+    assert meeting.status == "failed" and "Invalid data" in meeting.error
+    assert seen == []
+    assert rig.manager._processing == [] and rig.manager.state == "idle"
+    assert [e["status"] for e in rig.bus.of("meeting_updated")] == ["processing", "failed"]
+    assert rig.factory_calls == 0  # nem carregou o modelo
 
 
 # -- prints de tela ----------------------------------------------------------------

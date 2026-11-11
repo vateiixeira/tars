@@ -49,6 +49,7 @@ def test_defaults_match_production():
     assert DEFAULTS["max_sec"] == 300.0 and DEFAULTS["min_sec"] == 0.4
     assert DEFAULTS["mic_device"] is None and DEFAULTS["hf_token"] is None
     assert DEFAULTS["meeting_model_idle_sec"] == 120
+    assert DEFAULTS["my_name"] == ""
 
 
 @pytest.mark.parametrize("value", [-1, 86401, float("inf"), float("nan"), "120", True])
@@ -570,3 +571,7 @@ def test_print_key_env_is_validated(settings, monkeypatch):
     assert settings.get("print_key") == "ctrl+alt+KEY_P"
     # o atalho inválido do ambiente não chega ao parse_hotkey (que encerraria o processo)
     assert settings.update({"key": "ctrl+super"})["key"] == "ctrl+super"
+
+
+def test_my_name_defaults_to_empty(settings):
+    assert settings.get("my_name") == ""

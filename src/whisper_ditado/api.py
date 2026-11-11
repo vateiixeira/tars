@@ -42,6 +42,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from whisper_ditado import paths
 from whisper_ditado.api_claude import claude_router
+from whisper_ditado.api_imports import imports_router
 from whisper_ditado.api_tasks import job_json, tasks_router
 from whisper_ditado.audio import pwgraph
 from whisper_ditado.claude_cli import ClaudeError, sync_summary_cli, transcript_text
@@ -383,7 +384,8 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
     def list_meetings(q: str | None = None, archived: bool = False) -> list[dict]:
         return [
             {"id": m.id, "title": m.title, "started_at": _iso(m.started_at),
-             "duration_s": m.duration_s, "speakers_count": m.speakers_count, "status": m.status}
+             "duration_s": m.duration_s, "speakers_count": m.speakers_count, "status": m.status,
+             "origin": m.origin}
             for m in store.list_meetings(q or None, archived=archived)
         ]
 
@@ -397,7 +399,7 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         m = get_meeting(meeting_id)
         return {
             "id": m.id, "title": m.title, "started_at": _iso(m.started_at),
-            "ended_at": _iso(m.ended_at), "status": m.status, "error": m.error,
+            "ended_at": _iso(m.ended_at), "status": m.status, "error": m.error, "origin": m.origin,
             "followed_app": m.followed_app, "archived_at": _iso(m.archived_at),
             "speakers": [
                 {"id": s.id, "label": s.label, "voice_id": s.voice_id, "is_me": s.is_me,
@@ -457,6 +459,10 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
 
     @router.post("/meetings/{meeting_id}/reprocess")
     async def reprocess_meeting(meeting_id: str) -> dict:
+        found = store.get_meeting(meeting_id)
+        if found is not None and found.origin == "import_transcript":
+            raise HTTPException(
+                409, "Esta reunião foi importada de uma transcrição e não tem áudio para reprocessar")
         try:
             meetings.reprocess(meeting_id)
         except KeyError:
@@ -687,6 +693,7 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
         ]}
 
     router.include_router(claude_router(ctx))
+    router.include_router(imports_router(ctx, get_meeting))
     router.include_router(tasks_router(ctx, get_meeting))  # antes do app.include_router (herda a auth)
     app.include_router(router)
 

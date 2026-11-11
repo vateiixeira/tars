@@ -1,25 +1,31 @@
 <script setup lang="ts">
-// Menu de uma etiqueta de falante (não aparece para "Você"): renomear só nesta reunião,
-// ouvir trechos, identificar como uma voz cadastrada/nova ou juntar com outro falante.
+// Menu de uma etiqueta de falante: renomear só nesta reunião, ouvir trechos, identificar como uma
+// voz cadastrada/nova ou juntar com outro falante. Muda com a origem da reunião: importada de
+// vídeo/áudio ganha "Sou eu" (e "Você" ganha um menu só com ouvir e "Não sou eu"); transcrição
+// importada não tem áudio, então fica sem ouvir trechos e sem identificar voz.
 // Chama a API sozinho; ao dar certo emite `changed` (o pai recarrega o detalhe) e `close`.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useFocusScope } from "../composables/useFocusScope";
-import type { Segment, Speaker, Voice } from "../api/types";
+import type { MeetingOrigin, Segment, Speaker, Voice } from "../api/types";
 import { useStatus } from "../composables/useStatus";
 import { speakerName } from "../lib/meeting";
 import AppIcon from "./ui/AppIcon.vue";
 import SpeakerSamples from "./SpeakerSamples.vue";
 
-const props = defineProps<{
-  meetingId: string;
-  segments: Segment[];
-  speaker: Speaker;
-  /** Todos os falantes da reunião (os "outros" são os candidatos a juntar). */
-  speakers: Speaker[];
-  /** Posição (px da janela) do canto superior esquerdo do menu. */
-  x: number;
-  y: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    meetingId: string;
+    segments: Segment[];
+    speaker: Speaker;
+    /** Todos os falantes da reunião (os "outros" são os candidatos a juntar). */
+    speakers: Speaker[];
+    /** Posição (px da janela) do canto superior esquerdo do menu. */
+    x: number;
+    y: number;
+    origin?: MeetingOrigin;
+  }>(),
+  { origin: "recorded" },
+);
 const emit = defineEmits<{ changed: []; close: []; preview: [] }>();
 
 const { client } = useStatus();
@@ -33,6 +39,14 @@ const busy = ref(false);
 const error = ref<string | null>(null);
 
 const others = computed(() => props.speakers.filter((s) => s.id !== props.speaker.id));
+// Sem áudio (transcrição importada): nada para ouvir nem amostra de voz para cadastrar.
+const hasAudio = computed(() => props.origin !== "import_transcript");
+// Grupos ("Não identificado", "Participantes") não são uma pessoa: não dá para marcar como "você".
+const isGroup = computed(
+  () => !props.speaker.is_me && !props.speaker.voice_id
+    && (props.speaker.label === "Não identificado" || props.speaker.label === "Participantes"),
+);
+const canMarkMe = computed(() => props.origin === "import_media" && !isGroup.value);
 const panel = ref<HTMLElement | null>(null);
 const panelHeight = ref(220);
 const viewport = ref({width:window.innerWidth, height:window.innerHeight});
@@ -94,6 +108,7 @@ function submitText(): Promise<void> | void {
 
 const identifyAs = (v: Voice) => act(() => client.enrollSpeaker(props.speaker.id, { voice_id: v.id }));
 const mergeInto = (s: Speaker) => act(() => client.mergeSpeaker(props.speaker.id, s.id));
+const setMe = (on: boolean) => act(() => client.setSpeakerMe(props.speaker.id, on));
 
 const root = ref<HTMLElement | null>(null);
 useFocusScope(root);
@@ -106,15 +121,21 @@ onBeforeUnmount(() => { window.removeEventListener("resize", updateViewport); re
     <div class="backdrop" @click="emit('close')"></div>
     <div ref="panel" class="panel" :style="style">
       <SpeakerSamples
+        v-if="hasAudio"
         :meeting-id="meetingId"
         :speaker="speaker"
         :segments="segments"
         @play="emit('preview')"
       />
-      <template v-if="mode === 'main'">
+      <template v-if="mode === 'main' && speaker.is_me">
+        <!-- "Você" só tem menu em reunião importada de vídeo/áudio: renomear não faz sentido -->
+        <button v-if="canMarkMe" type="button" class="option" :disabled="busy" @click="setMe(false)"><AppIcon name="close" :size="18" />Não sou eu</button>
+      </template>
+      <template v-else-if="mode === 'main'">
         <button type="button" class="option" @click="go('rename')"><AppIcon name="edit" :size="18" />Renomear nesta reunião</button>
-        <button type="button" class="option" @click="go('identify')"><AppIcon name="user-plus" :size="18" />Identificar como…</button>
+        <button v-if="hasAudio" type="button" class="option" @click="go('identify')"><AppIcon name="user-plus" :size="18" />Identificar como…</button>
         <button type="button" class="option" :disabled="!others.length" @click="go('merge')"><AppIcon name="link" :size="18" />Juntar com…</button>
+        <button v-if="canMarkMe" type="button" class="option" :disabled="busy" @click="setMe(true)"><AppIcon name="check" :size="18" />Sou eu</button>
       </template>
 
       <form v-else-if="mode === 'rename' || mode === 'new-voice'" class="form" @submit.prevent="submitText">

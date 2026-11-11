@@ -43,6 +43,7 @@ class FakeMeetings:
         self.active_alerts = []
         self.monitor_calls = []
         self.reprocessed = []
+        self.imported = []
         self.print_result = False
         self.print_calls = 0
 
@@ -72,6 +73,11 @@ class FakeMeetings:
         if self.store.get_meeting(meeting_id) is None:
             raise KeyError(meeting_id)
         self.reprocessed.append(meeting_id)
+
+    def import_media(self, meeting_id, source):
+        if self.store.get_meeting(meeting_id) is None:
+            raise KeyError(meeting_id)
+        self.imported.append((meeting_id, source))
 
 
 class FakeDictation:
@@ -256,7 +262,7 @@ def test_meeting_detail_shape(client, ctx):
     mid = make_meeting(ctx)
     ctx.store.set_summary(mid, "resumo aqui")
     body = client.get(f"/api/meetings/{mid}").json()
-    assert set(body) == {"id", "title", "started_at", "ended_at", "status", "error",
+    assert set(body) == {"id", "title", "started_at", "ended_at", "status", "error", "origin",
                          "followed_app", "speakers", "segments", "summary", "alerts",
                          "summary_job", "prints", "archived_at"}
     assert body["title"] == "Planejamento"
@@ -291,7 +297,8 @@ def test_search(client, ctx):
     everything = client.get("/api/meetings").json()
     assert [m["id"] for m in everything] == [mid, other.id]
     assert set(everything[0]) == {"id", "title", "started_at", "duration_s",
-                                  "speakers_count", "status"}
+                                  "speakers_count", "status", "origin"}
+    assert everything[0]["origin"] == "recorded"
     assert everything[0]["speakers_count"] == 3
     assert everything[0]["duration_s"] == 1800
     assert [m["id"] for m in client.get("/api/meetings", params={"q": "MARIA"}).json()] == [mid]

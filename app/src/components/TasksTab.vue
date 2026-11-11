@@ -31,7 +31,13 @@ import StatusPill from "./ui/StatusPill.vue";
 import ScanContextPrompt from "./ScanContextPrompt.vue";
 import TaskCard from "./TaskCard.vue";
 
-const props = defineProps<{ meetingId: string; startedAt: string; prints: MeetingPrint[] }>();
+const props = defineProps<{
+  meetingId: string;
+  startedAt: string;
+  prints: MeetingPrint[];
+  /** Reunião sem áudio (transcrição importada): a evidência fica sem o "Ouvir este trecho". */
+  noAudio?: boolean;
+}>();
 const emit = defineEmits<{
   play: [start: number, end: number];
   /** Tarefas não descartadas, depois de carregar (o contador da aba). */
@@ -634,6 +640,7 @@ async function createInIssue(t: TaskSuggestion): Promise<void> {
             :missing="openMissing"
             :error="cardErrors[open.id] ?? null"
             :prints="prints"
+            :no-audio="noAudio"
             :inert="openCreating ? '' : undefined"
             @update="onUpdate"
             @draft="(id, title) => (liveTitles = { ...liveTitles, [id]: title })"
