@@ -384,7 +384,8 @@ def create_app(ctx: AppContext, token: str) -> FastAPI:
     def list_meetings(q: str | None = None, archived: bool = False) -> list[dict]:
         return [
             {"id": m.id, "title": m.title, "started_at": _iso(m.started_at),
-             "duration_s": m.duration_s, "speakers_count": m.speakers_count, "status": m.status}
+             "duration_s": m.duration_s, "speakers_count": m.speakers_count, "status": m.status,
+             "origin": m.origin}
             for m in store.list_meetings(q or None, archived=archived)
         ]
 

@@ -103,7 +103,7 @@ def probe_media(path: Path) -> MediaInfo:
 
 def _read_transcript(path: Path) -> ReadAiTranscript:
     try:
-        text = path.read_text(encoding="utf-8", errors="strict")
+        text = path.read_text(encoding="utf-8-sig", errors="strict")
     except UnicodeDecodeError as e:
         raise ImportFileError(FORMAT_ERROR) from e
     except OSError as e:

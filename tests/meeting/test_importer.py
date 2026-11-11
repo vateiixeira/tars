@@ -43,6 +43,14 @@ def test_extensions():
     assert TRANSCRIPT_EXTENSIONS == {".txt"}
 
 
+def test_inspect_transcript_ignores_utf8_bom(tmp_path):
+    p = tmp_path / "bom.txt"
+    p.write_bytes(b"\xef\xbb\xbf" + SAMPLE.encode("utf-8"))
+    pv = inspect(p, my_name="")
+    assert pv.title == "Awake e Angular - mudança de mecanismo de créditos"
+    assert "\ufeff" not in pv.title
+
+
 def test_inspect_transcript_suggests_from_file(tmp_path):
     p = _write(tmp_path)
     duration = parse_readai(SAMPLE).duration_s

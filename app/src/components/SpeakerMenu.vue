@@ -41,7 +41,12 @@ const error = ref<string | null>(null);
 const others = computed(() => props.speakers.filter((s) => s.id !== props.speaker.id));
 // Sem áudio (transcrição importada): nada para ouvir nem amostra de voz para cadastrar.
 const hasAudio = computed(() => props.origin !== "import_transcript");
-const canMarkMe = computed(() => props.origin === "import_media");
+// Grupos ("Não identificado", "Participantes") não são uma pessoa: não dá para marcar como "você".
+const isGroup = computed(
+  () => !props.speaker.is_me && !props.speaker.voice_id
+    && (props.speaker.label === "Não identificado" || props.speaker.label === "Participantes"),
+);
+const canMarkMe = computed(() => props.origin === "import_media" && !isGroup.value);
 const panel = ref<HTMLElement | null>(null);
 const panelHeight = ref(220);
 const viewport = ref({width:window.innerWidth, height:window.innerHeight});

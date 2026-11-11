@@ -151,6 +151,18 @@ def test_set_me_only_on_import_media(client, ctx):
     assert set(r.json()) == {"id", "label", "voice_id", "is_me", "color_index"}
 
 
+def test_set_me_refuses_groups(client, ctx):
+    m = ctx.store.create_meeting(datetime(2026, 11, 11, 9, 0), status="ready",
+                                 origin="import_media")
+    ctx.store.replace_transcript(m.id, [
+        Speaker("g1", m.id, "Não identificado", None, False, 0, None),
+        Speaker("g2", m.id, "Participantes", None, False, 1, None)], [])
+    for sid in ("g1", "g2"):
+        r = client.post(f"/api/speakers/{sid}/me", json={"on": True})
+        assert r.status_code == 400
+        assert r.json()["detail"] == "Só dá para marcar uma pessoa, não um grupo"
+
+
 def test_set_me_off_on_non_me_is_noop(client, ctx):
     imported_media_meeting(ctx, "import_media")
     r = client.post("/api/speakers/s2/me", json={"on": False})

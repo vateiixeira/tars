@@ -44,7 +44,7 @@ describe("client", () => {
   it("client sends bearer token and parses json", async () => {
     const fetchFn = vi.fn(async () =>
       jsonResponse([{ id: "m1", title: "Daily", started_at: "2026-10-19T10:00:00",
-                      duration_s: 60, speakers_count: 2, status: "ready" }]),
+                      duration_s: 60, speakers_count: 2, status: "ready", origin: "recorded" }]),
     );
     const client = createClient(async () => ({ port: 47399, token: "tok" }), fetchFn);
 

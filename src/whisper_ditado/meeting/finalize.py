@@ -38,7 +38,14 @@ from whisper_ditado.meeting.timeline import (
 from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.meeting.voices import inherit_links, match_speakers
 from whisper_ditado.settings import DIARIZERS, Settings, threshold_key
-from whisper_ditado.store import UNIDENTIFIED_LABEL, Segment, Speaker, Store
+from whisper_ditado.store import (
+    ME_LABEL,
+    PARTICIPANTS_LABEL,
+    UNIDENTIFIED_LABEL,
+    Segment,
+    Speaker,
+    Store,
+)
 from whisper_ditado.transcriber import Word
 
 log = logging.getLogger("ditado")
@@ -49,8 +56,6 @@ FFMPEG = "ffmpeg"
 FFMPEG_TIMEOUT_S = 900.0
 OPUS_BITRATE = "16k"
 
-ME_LABEL = "Você"
-PARTICIPANTS_LABEL = "Participantes"
 NO_DIARIZATION = "no_diarization"
 DIARIZATION_ALERTS = (NO_DIARIZATION, *FALLBACK_ALERTS.values())
 FAIL_PREFIX = "Falha ao processar a reunião"

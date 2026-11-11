@@ -68,6 +68,7 @@ export interface MeetingListItem {
   duration_s: number;
   speakers_count: number;
   status: MeetingStatus;
+  origin: MeetingOrigin;
 }
 
 export interface Speaker {

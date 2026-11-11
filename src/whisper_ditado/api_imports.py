@@ -12,6 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from whisper_ditado.meeting import importer
+from whisper_ditado.store import PARTICIPANTS_LABEL
 from whisper_ditado.meeting.readai import ImportFormatError
 from whisper_ditado.meeting.session import MeetingStateError
 
@@ -20,6 +21,7 @@ log = logging.getLogger("ditado")
 EMPTY_TITLE = "O título não pode ficar vazio"
 BAD_DATE = "Data e hora inválidas"
 ME_ONLY_MEDIA = "Só dá para marcar quem é você em reuniões importadas de vídeo ou áudio"
+ME_ONLY_PERSON = "Só dá para marcar uma pessoa, não um grupo"
 
 
 class PathBody(BaseModel):
@@ -122,6 +124,8 @@ def imports_router(ctx, get_meeting: Callable[[str], object]) -> APIRouter:
             raise HTTPException(404, "Falante não encontrado")
         if get_meeting(speaker.meeting_id).origin != "import_media":
             raise HTTPException(409, ME_ONLY_MEDIA)
+        if body.on and (speaker.is_unidentified or speaker.label == PARTICIPANTS_LABEL):
+            raise HTTPException(400, ME_ONLY_PERSON)
         if not body.on and not speaker.is_me:
             result = speaker  # nada a desmarcar: não renomeia quem não é "você"
         else:

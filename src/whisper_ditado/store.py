@@ -29,6 +29,8 @@ from whisper_ditado.issues.prompts import KIND_LABELS, PRIORITIES
 from whisper_ditado.issues.legacy import migration_sql
 
 UNIDENTIFIED_LABEL = "Não identificado"
+ME_LABEL = "Você"
+PARTICIPANTS_LABEL = "Participantes"
 PERSON_LABEL = "Pessoa"
 
 _SCHEMA_V1 = """
@@ -228,6 +230,7 @@ class MeetingSummary:
     duration_s: float
     speakers_count: int
     status: str
+    origin: str = "recorded"
 
 
 @dataclass
@@ -493,7 +496,7 @@ class Store:
     ) -> list[MeetingSummary]:
         """Reuniões mais recentes primeiro; `archived=None` traz arquivadas e não arquivadas."""
         sql = """
-            SELECT m.id, m.title, m.started_at, m.status, m.ended_at,
+            SELECT m.id, m.title, m.started_at, m.status, m.ended_at, m.origin,
                    (SELECT COUNT(*) FROM speakers sp WHERE sp.meeting_id = m.id
                     AND NOT (COALESCE(sp.label, '') = ? AND sp.voice_id IS NULL AND sp.is_me = 0))
                        AS speakers_count,
@@ -523,7 +526,7 @@ class Store:
             duration = (ended - started).total_seconds() if ended else float(r["last_end"])
             out.append(MeetingSummary(
                 id=r["id"], title=r["title"], started_at=started, duration_s=duration,
-                speakers_count=r["speakers_count"], status=r["status"],
+                speakers_count=r["speakers_count"], status=r["status"], origin=r["origin"],
             ))
         return out
 
@@ -680,8 +683,8 @@ class Store:
                     (free, meeting_id, speaker_id),
                 )
                 c.execute(
-                    "UPDATE speakers SET is_me=1, label='Você', voice_id=NULL WHERE id=?",
-                    (speaker_id,),
+                    "UPDATE speakers SET is_me=1, label=?, voice_id=NULL WHERE id=?",
+                    (ME_LABEL, speaker_id),
                 )
             else:
                 c.execute("UPDATE speakers SET is_me=0, label=? WHERE id=?", (free, speaker_id))

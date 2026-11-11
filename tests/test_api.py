@@ -297,7 +297,8 @@ def test_search(client, ctx):
     everything = client.get("/api/meetings").json()
     assert [m["id"] for m in everything] == [mid, other.id]
     assert set(everything[0]) == {"id", "title", "started_at", "duration_s",
-                                  "speakers_count", "status"}
+                                  "speakers_count", "status", "origin"}
+    assert everything[0]["origin"] == "recorded"
     assert everything[0]["speakers_count"] == 3
     assert everything[0]["duration_s"] == 1800
     assert [m["id"] for m in client.get("/api/meetings", params={"q": "MARIA"}).json()] == [mid]

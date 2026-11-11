@@ -135,6 +135,17 @@ describe("SpeakerMenu", () => {
     expect(w.emitted("close")).toHaveLength(1);
   });
 
+  it("Sou eu não é oferecido para grupos", () => {
+    for (const label of ["Não identificado", "Participantes"]) {
+      const group: Speaker = { id: "g", label, voice_id: null, is_me: false, color_index: 3 };
+      const { w, labels } = mountMenu({}, { origin: "import_media", speaker: group });
+      expect(labels().some((t) => t.includes("Sou eu"))).toBe(false);
+      expect(labels().some((t) => t.includes("Renomear"))).toBe(true);
+      w.unmount();
+      setStatusStore(null);
+    }
+  });
+
   it("Sou eu mostra o erro do backend e o menu continua aberto", async () => {
     const setSpeakerMe = vi.fn(async () => {
       throw new ApiError(409, "Só dá para marcar quem é você em reuniões importadas de vídeo ou áudio");
