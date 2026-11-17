@@ -68,7 +68,12 @@ def imports_router(ctx, get_meeting: Callable[[str], object]) -> APIRouter:
         if me:
             settings.update({"my_name": me})
         if ctx.jobs is not None:
-            ctx.jobs.on_ready(meeting_id)
+            # A reunião já existe: uma falha aqui (resumo/tarefas automáticos) não pode virar
+            # erro na resposta, senão a pessoa importa de novo e a reunião fica duplicada.
+            try:
+                ctx.jobs.on_ready(meeting_id)
+            except Exception:
+                log.exception("Falha ao agendar o pós-processamento da reunião importada %s", meeting_id)
         ctx.bus.publish({"type": "meeting_updated", "meeting_id": meeting_id, "status": "ready"})
         return meeting_id
 

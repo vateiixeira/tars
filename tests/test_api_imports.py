@@ -72,6 +72,23 @@ def test_import_transcript_creates_ready_meeting_and_remembers_me(client, ctx, t
     assert {"type": "meeting_updated", "meeting_id": mid, "status": "ready"} in events
 
 
+def test_import_transcript_succeeds_when_post_processing_fails(client, ctx, tmp_path):
+    class BrokenJobs:
+        def on_ready(self, meeting_id):
+            raise RuntimeError("fila indisponível")
+
+    ctx.jobs = BrokenJobs()
+    events = []
+    ctx.bus.publish = events.append
+    f = transcript_file(tmp_path)
+    r = client.post("/api/imports", json={
+        "path": str(f), "title": "X", "started_at": "2026-11-11T16:30", "me": None})
+    assert r.status_code == 200  # sem 500: tentar de novo duplicaria a reunião
+    mid = r.json()["meeting_id"]
+    assert ctx.store.get_meeting(mid).status == "ready"
+    assert {"type": "meeting_updated", "meeting_id": mid, "status": "ready"} in events
+
+
 def test_import_transcript_without_jobs_or_me(client, ctx, tmp_path):
     f = transcript_file(tmp_path)
     r = client.post("/api/imports", json={
