@@ -201,7 +201,10 @@ def test_probe_converts_utc_creation_time_to_local(monkeypatch, tmp_path):
     assert info == MediaInfo(10.5, datetime(2026, 11, 11, 16, 30))
 
 
-@pytest.mark.parametrize("raw", ["1970-01-01T00:00:00.000000Z", "1904-01-01T00:00:00Z"])
+@pytest.mark.parametrize("raw", [
+    "1970-01-01T00:00:00.000000Z", "1904-01-01T00:00:00Z",
+    "0001-01-01T00:00:00Z",  # estoura no `astimezone()` (OverflowError)
+])
 def test_probe_ignores_zeroed_creation_time(monkeypatch, tmp_path, raw):
     from whisper_ditado.meeting.importer import probe_media
 
