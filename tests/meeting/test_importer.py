@@ -201,6 +201,15 @@ def test_probe_converts_utc_creation_time_to_local(monkeypatch, tmp_path):
     assert info == MediaInfo(10.5, datetime(2026, 11, 11, 16, 30))
 
 
+@pytest.mark.parametrize("raw", ["1970-01-01T00:00:00.000000Z", "1904-01-01T00:00:00Z"])
+def test_probe_ignores_zeroed_creation_time(monkeypatch, tmp_path, raw):
+    from whisper_ditado.meeting.importer import probe_media
+
+    _fake_ffprobe(monkeypatch, {
+        "streams": [{"index": 0}], "format": {"duration": "10.5", "tags": {"creation_time": raw}}})
+    assert probe_media(tmp_path / "x.mp4") == MediaInfo(10.5, None)
+
+
 def test_probe_without_streams_means_no_audio(monkeypatch, tmp_path):
     from whisper_ditado.meeting.importer import probe_media
 

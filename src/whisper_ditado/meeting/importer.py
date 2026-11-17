@@ -43,6 +43,9 @@ IMPORT_FFMPEG_TIMEOUT_S = 4 * 3600
 FFPROBE = "ffprobe"
 FFPROBE_TIMEOUT_S = 60.0
 NO_AUDIO = "O arquivo não tem áudio"
+# Celulares e alguns programas gravam `creation_time` "zerado" (1970, ou 1904 no QuickTime).
+# Antes disto a data não é confiável: vale a do arquivo (`mtime` menos a duração).
+MIN_CREATION_YEAR = 2000
 
 
 class ImportFileError(ValueError):
@@ -96,8 +99,10 @@ def probe_media(path: Path) -> MediaInfo:
             parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
             # as outras datas vêm da hora local; o tag é UTC
             created_at = parsed.astimezone().replace(tzinfo=None) if parsed.tzinfo else parsed
-        except ValueError:
+        except (ValueError, OverflowError):
             pass
+    if created_at is not None and created_at.year < MIN_CREATION_YEAR:
+        created_at = None
     return MediaInfo(duration, created_at)
 
 
