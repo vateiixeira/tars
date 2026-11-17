@@ -561,6 +561,146 @@ def test_apply_settings_changes_key_without_restart(tmp_path):
     run(tmp_path, scenario)
 
 
+def test_mic_toggle_mode_starts_on_press_and_finishes_on_next_press(tmp_path):
+    async def scenario(h):
+        h.settings.update({"key_mode": "toggle", "min_sec": 0.1})
+        h.service.apply_settings()
+        h.press(LC)
+        h.press(LW)
+        h.release(LW)
+        h.release(LC)
+        assert h.service.recorder is not None  # soltar não encerra
+        assert h.service.source == "mic"
+        await asyncio.sleep(0.3)
+        h.press(A)  # digitar durante a gravação não encerra nem descarta
+        h.release(A)
+        assert h.service.recorder is not None
+        h.press(LC)
+        h.press(LW)
+        assert h.service.recorder is not None  # encerra só ao soltar a segunda pressionada
+        h.release(LW)
+        h.release(LC)
+        assert h.service.recorder is None
+        await asyncio.sleep(0.5)
+        assert h.texts == ["frase "]
+        assert h.spans and not h.service.busy.busy
+
+    run(tmp_path, scenario)
+
+
+def test_mic_toggle_mode_cancels_when_starting_press_becomes_other_shortcut(tmp_path):
+    async def scenario(h):
+        h.settings.update({"key_mode": "toggle"})
+        h.service.apply_settings()
+        h.press(LC)
+        h.press(LW)
+        assert h.service.recorder is not None
+        h.press(LEFT)  # Ctrl+Super+Seta: atalho do GNOME, não é ditado
+        assert h.service.recorder is None
+        h.release(LEFT)
+        h.release(LW)
+        h.release(LC)
+        await asyncio.sleep(0.3)
+        assert h.texts == []
+
+    run(tmp_path, scenario)
+
+
+def _tap(h, *codes):
+    for code in codes:
+        h.press(code)
+    for code in reversed(codes):
+        h.release(code)
+
+
+def test_mic_toggle_mode_max_duration_then_next_press_starts_again(tmp_path):
+    async def scenario(h):
+        h.settings.update({"key_mode": "toggle", "min_sec": 0.1, "max_sec": 0.5})
+        h.service.apply_settings()
+        _tap(h, LC, LW)
+        await asyncio.sleep(0.8)  # o limite de tempo encerra a gravação ligada
+        assert h.service.recorder is None and not h.service.hotkey.recording
+        await asyncio.sleep(0.5)
+        assert h.texts == ["frase "]
+        h.press(LC)
+        h.press(LW)  # a próxima pressionada começa outra gravação em vez de encerrar
+        assert h.service.recorder is not None
+        assert len(h.recorders) == 2
+        h.release(LW)
+        h.release(LC)
+
+    run(tmp_path, scenario)
+
+
+def test_mic_toggle_mode_recovers_after_microphone_failure(tmp_path, isolated):
+    async def scenario(h):
+        h.settings.update({"key_mode": "toggle", "min_sec": 0.1})
+        h.service.apply_settings()
+        attempts = []
+
+        def broken():
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise FileNotFoundError("pw-record")
+            return h._recorder()
+
+        h.service._recorder_factory = broken
+        _tap(h, LC, LW)
+        assert h.service.recorder is None and not h.service.hotkey.recording
+        assert "Falha ao abrir o microfone" in isolated[0]
+        _tap(h, LC, LW)  # a próxima pressionada liga, não tenta encerrar
+        assert h.service.recorder is not None
+        await asyncio.sleep(0.3)
+        _tap(h, LC, LW)
+        assert h.service.recorder is None
+        await asyncio.sleep(0.5)
+        assert h.texts == ["frase "]
+
+    run(tmp_path, scenario)
+
+
+def test_pc_shortcut_during_mic_toggle_recording_is_ignored(tmp_path):
+    async def scenario(h):
+        h.settings.update({"key_mode": "toggle", "min_sec": 0.1})
+        h.service.apply_settings()
+        _tap(h, LC, LW)
+        _tap(h, LC, SH)  # atalho do áudio do PC no meio da gravação do microfone
+        assert h.service.recorder is not None and h.service.source == "mic"
+        assert not h.output_recorders
+        await asyncio.sleep(0.3)
+        _tap(h, LC, LW)
+        assert h.service.recorder is None
+        await asyncio.sleep(0.5)
+        assert h.texts == ["frase "]
+        _tap(h, LC, SH)  # depois, o atalho do PC funciona normalmente
+        assert h.service.source == "pc" and len(h.output_recorders) == 1
+        _tap(h, LC, SH)
+
+    run(tmp_path, scenario)
+
+
+def test_switching_mic_key_mode_back_to_hold_restores_push_to_talk(tmp_path):
+    async def scenario(h):
+        h.settings.update({"key_mode": "toggle"})
+        h.service.apply_settings()
+        h.press(LC)
+        h.press(LW)
+        h.release(LW)
+        h.release(LC)
+        assert h.service.recorder is not None
+        h.settings.update({"key_mode": "hold"})
+        h.service.apply_settings()
+        assert h.service.recorder is None  # trocar o modo descarta a gravação em andamento
+        h.press(LC)
+        h.press(LW)
+        assert h.service.recorder is not None
+        h.release(LW)
+        assert h.service.recorder is None  # de volta ao "segurar para falar"
+        h.release(LC)
+
+    run(tmp_path, scenario)
+
+
 def test_invalid_key_in_environment_keeps_previous_combo(tmp_path, monkeypatch):
     async def scenario(h):
         assert h.service.cfg.key == "ctrl+super"  # a inválida do ambiente não derrubou o serviço

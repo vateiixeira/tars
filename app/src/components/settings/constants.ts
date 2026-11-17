@@ -9,6 +9,12 @@ export const DEFAULT_SUMMARY_PROMPT =
 /** Modelo de diarização que o usuário precisa aceitar no Hugging Face para o token funcionar. */
 export const HF_MODEL_URL = "https://huggingface.co/pyannote/speaker-diarization-community-1";
 
+/** Opções de `key_mode` aceitas pelo backend (KEY_MODES). */
+export const KEY_MODE_OPTIONS = [
+  { value: "hold", label: "Segurar para falar (padrão)", hint: "Grava enquanto a combinação estiver segurada e transcreve ao soltar." },
+  { value: "toggle", label: "Pressionar para ligar e desligar", hint: "Pressione uma vez para começar a gravar e de novo para transcrever e colar. Outra tecla junto com a pressionada que liga cancela a gravação." },
+] as const;
+
 /** Opções de `paste` aceitas pelo backend (PASTE_KEYS). */
 export const PASTE_OPTIONS = ["shift+insert", "ctrl+v", "ctrl+shift+v"] as const;
 

@@ -570,3 +570,18 @@ def test_print_key_env_is_validated(settings, monkeypatch):
     assert settings.get("print_key") == "ctrl+alt+KEY_P"
     # o atalho inválido do ambiente não chega ao parse_hotkey (que encerraria o processo)
     assert settings.update({"key": "ctrl+super"})["key"] == "ctrl+super"
+
+
+def test_mic_key_mode_defaults_to_hold_and_validates(settings, monkeypatch):
+    assert settings.get("key_mode") == "hold"
+    assert settings.update({"key_mode": "toggle"})["key_mode"] == "toggle"
+    with pytest.raises(ValueError, match="Modo do atalho do microfone inválido"):
+        settings.update({"key_mode": "press"})
+    assert settings.get("key_mode") == "toggle"
+
+
+def test_mic_key_mode_env_is_validated(settings, monkeypatch):
+    monkeypatch.setenv("DITADO_KEY_MODE", "Toggle")
+    assert settings.get("key_mode") == "toggle"
+    monkeypatch.setenv("DITADO_KEY_MODE", "invalido")
+    assert settings.get("key_mode") == "hold"

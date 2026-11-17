@@ -29,6 +29,7 @@ const baseSettings: Settings = {
   dictation_enabled: true,
   dictation_evaluation_enabled: false,
   key: "ctrl+super",
+  key_mode: "hold",
   output_key: "KEY_LEFTCTRL+KEY_LEFTSHIFT",
   paste: "shift+insert",
   model: "large-v3-turbo",
@@ -247,6 +248,31 @@ describe("SettingsView", () => {
     await flushPromises();
     expect(client.putSettings).toHaveBeenLastCalledWith({ output_key: "alt+KEY_F8" });
     expect((w.get("#dict-key").element as HTMLInputElement).value).toBe("ctrl+super");
+  });
+
+  it("keeps push-to-talk as the default and saves the toggle mode for the microphone", async () => {
+    const { client } = setup();
+    const w = await open();
+    const select = w.get("#dict-key-mode");
+    expect((select.element as HTMLSelectElement).value).toBe("hold");
+    expect(w.text()).toContain("transcreve ao soltar");
+    await select.setValue("toggle");
+    await flushPromises();
+    expect(client.putSettings).toHaveBeenLastCalledWith({ key_mode: "toggle" });
+  });
+
+  it("restores the microphone shortcut mode if saving fails", async () => {
+    setup({
+      putSettings: vi.fn(async () => {
+        throw new ApiError(400, "Modo do atalho do microfone inválido");
+      }),
+    });
+    const w = await open();
+    const select = w.get("#dict-key-mode");
+    await select.setValue("toggle");
+    await flushPromises();
+    expect((select.element as HTMLSelectElement).value).toBe("hold");
+    expect(w.text()).toContain("Modo do atalho do microfone inválido");
   });
 
   it("shows validation error under field", async () => {

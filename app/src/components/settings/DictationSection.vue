@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Seção Ditado: cada campo salva ao sair dele (blur/Enter/mudança) e mostra o erro embaixo.
-import { reactive } from "vue";
-import { PASTE_OPTIONS } from "./constants";
+import { computed, reactive } from "vue";
+import type { KeyMode } from "../../api/types";
+import { KEY_MODE_OPTIONS, PASTE_OPTIONS } from "./constants";
 import SettingField from "./SettingField.vue";
 import ToggleField from "./ToggleField.vue";
 import type { SettingKey, SettingsForm } from "./useSettingsForm";
@@ -32,6 +33,14 @@ function saveText(key: SettingKey, e: Event): Promise<void> {
 function saveNumber(key: SettingKey, e: Event): Promise<void> {
   const raw = (e.target as HTMLInputElement).value.trim();
   return commit(key, raw === "" ? null : Number(raw.replace(",", ".")));
+}
+
+const keyMode = computed<KeyMode>(() => props.form.settings.value?.key_mode ?? "hold");
+const keyModeHint = computed(() => KEY_MODE_OPTIONS.find((opt) => opt.value === keyMode.value)?.hint);
+
+async function saveKeyMode(e: Event): Promise<void> {
+  const select = e.target as HTMLSelectElement;
+  if (!(await props.form.save("key_mode", select.value as KeyMode))) select.value = keyMode.value;
 }
 
 async function savePaste(e: Event): Promise<void> {
@@ -69,6 +78,14 @@ async function savePaste(e: Event): Promise<void> {
         />
       </SettingField>
 
+      <SettingField label="Modo do atalho do microfone" for="dict-key-mode" :hint="keyModeHint" :error="form.errors.key_mode">
+        <select id="dict-key-mode" class="s-select" :value="keyMode" :disabled="form.saving.key_mode" @change="saveKeyMode">
+          <option v-for="opt in KEY_MODE_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+        </select>
+      </SettingField>
+    </div>
+
+    <div class="s-grid">
       <SettingField
         label="Atalho do áudio do computador"
         for="dict-output-key"

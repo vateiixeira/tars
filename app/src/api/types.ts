@@ -146,11 +146,15 @@ export interface ClaudeModels {
   updated_at: string | null;
 }
 
+/** Modo do atalho do microfone: segurar para falar ou pressionar para ligar e desligar. */
+export type KeyMode = "hold" | "toggle";
+
 /** `GET /settings`: todas as chaves de `DEFAULTS`, sem `hf_token` (só `hf_token_set`). */
 export interface Settings {
   dictation_enabled: boolean;
   dictation_evaluation_enabled: boolean;
   key: string;
+  key_mode: KeyMode;
   output_key: string;
   paste: string;
   model: string;

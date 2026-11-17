@@ -119,6 +119,7 @@ class _Config:
 
     key: str
     groups: tuple[frozenset[int], ...]
+    key_toggle: bool  # atalho do microfone liga/desliga em vez de "segurar para falar"
     output_key: str
     output_groups: tuple[frozenset[int], ...]
     print_key: str
@@ -193,7 +194,7 @@ class DictationService:
         self._reloading = False
 
         self.cfg = self._read_config(previous=None)
-        self.hotkey = HotkeyState(self.cfg.groups)
+        self.hotkey = HotkeyState(self.cfg.groups, toggle=self.cfg.key_toggle)
         self.output_hotkey = HotkeyState(self.cfg.output_groups, toggle=True)
         self.print_hotkey = HotkeyState(self.cfg.print_groups)
         self.paused = not self.settings.get("dictation_enabled")
@@ -228,6 +229,7 @@ class DictationService:
         return _Config(
             key=key,
             groups=groups,
+            key_toggle=s.get("key_mode") == "toggle",
             output_key=output_key,
             output_groups=output_groups,
             print_key=print_key,
@@ -248,10 +250,10 @@ class DictationService:
         self.paused = not self.settings.get("dictation_enabled")
         if self.paused:
             self._cancel_recording("ditado pausado")
-        if new.groups != old.groups or new.output_groups != old.output_groups:
+        if (new.groups, new.key_toggle, new.output_groups) != (old.groups, old.key_toggle, old.output_groups):
             self._cancel_recording("tecla de ditado alterada")
             pressed = self.hotkey.pressed
-            self.hotkey = HotkeyState(new.groups)
+            self.hotkey = HotkeyState(new.groups, toggle=new.key_toggle)
             self.hotkey.pressed = set(pressed)
             self.output_hotkey = HotkeyState(new.output_groups, toggle=True)
             self.output_hotkey.pressed = set(pressed)

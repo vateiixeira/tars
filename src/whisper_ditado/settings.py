@@ -40,6 +40,7 @@ DEFAULTS: dict[str, Any] = {
     "dictation_enabled": True,
     "dictation_evaluation_enabled": False,
     "key": "ctrl+super",
+    "key_mode": "hold",  # "hold": segurar para falar; "toggle": pressionar liga, pressionar de novo encerra
     "output_key": "KEY_LEFTCTRL+KEY_LEFTSHIFT",
     "paste": "shift+insert",
     "model": "large-v3-turbo",
@@ -86,6 +87,7 @@ DEFAULTS: dict[str, Any] = {
 _LEGACY_ENV_KEYS = {**LEGACY_KEYS, "voice_match_threshold_pyannote": "voice_match_threshold"}
 
 PRINT_MODES = ("off", "flameshot", "native")
+KEY_MODES = ("hold", "toggle")
 
 MODEL_KEYS = ("claude_model", "tasks_model")
 EFFORT_KEYS = ("claude_effort", "tasks_effort")
@@ -173,6 +175,10 @@ def _validate(key: str, value: Any) -> Any:
                 f"Tecla de ditado inválida: {spec!r} (ex.: ctrl+super, KEY_RIGHTCTRL, alt+KEY_SPACE)"
             ) from None
         return spec
+    if key == "key_mode":
+        if value not in KEY_MODES:
+            raise ValueError(f"Modo do atalho do microfone inválido: {value!r} (use hold ou toggle)")
+        return value
     if key == "paste":
         if value not in PASTE_KEYS:
             raise ValueError(f"Atalho de colar inválido: {value!r} (opções: {', '.join(PASTE_KEYS)})")
@@ -302,8 +308,8 @@ def _from_env(key: str, raw: str) -> Any:
         return [s.strip() for s in raw.split(",") if s.strip()]
     if key in MODEL_KEYS or key in EFFORT_KEYS or key in ("issues_mcp_name", "print_mode", "print_key", "print_monitor"):
         return _validate(key, raw)  # inválido levanta ValueError: `get` loga e usa o padrão
-    if key == "diarizer":
-        return _validate(key, raw.strip())
+    if key in ("diarizer", "key_mode"):
+        return _validate(key, raw.strip().lower())
     if key == "prompt":
         return raw or None
     if key == "tasks_prompt":
