@@ -34,3 +34,19 @@ def test_unknown_date_is_none():
 def test_rejects_other_formats(text):
     with pytest.raises(ImportFormatError, match="só a do Read AI"):
         parse_readai(text)
+
+
+def test_earlier_timestamp_is_text_of_the_current_turn():
+    text = SAMPLE.replace("Valeu, até já.", "Valeu, até já.\n0:05 - item da pauta que ele leu")
+    t = parse_readai(text)
+    assert [x.start_s for x in t.turns] == [3.0, 12.0, 3723.0]
+    assert "0:05 - item da pauta" in t.turns[2].text
+    assert all(x.end_s >= x.start_s for x in t.turns)
+
+
+def test_absurd_hours_are_not_a_turn():
+    text = SAMPLE.replace("1:02:03 - Felipe", "9" * 400 + ":02:03 - Felipe")
+    t = parse_readai(text)
+    assert [x.start_s for x in t.turns] == [3.0, 12.0]
+    with pytest.raises(ImportFormatError):
+        parse_readai("Título\nqua., 11 de nov. de 2026\n" + "9" * 5000 + ":00:01 - Ana\nOi\n")

@@ -8,7 +8,8 @@ from datetime import date
 
 FORMAT_ERROR = "Formato de transcrição não reconhecido; hoje só a do Read AI é aceita"
 
-_TURN_RE = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2}) - (.+)$")
+# Hora com no máximo 3 dígitos: um número absurdo não vira fala (nem estoura o `float`).
+_TURN_RE = re.compile(r"^(?:(\d{1,3}):)?(\d{1,2}):(\d{2}) - (.+)$")
 _DATE_RE = re.compile(
     r"(\d{1,2}) de (jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.? de (\d{4})"
 )
@@ -70,10 +71,14 @@ def parse_readai(text: str) -> ReadAiTranscript:
     raw: list[tuple[str, float, list[str]]] = []
     for line in lines[2:]:
         m = _TURN_RE.match(line)
+        start = None
         if m:
             hours, minutes, seconds, name = m.groups()
-            start = int(hours or 0) * 3600 + int(minutes) * 60 + int(seconds)
-            raw.append((name.strip(), float(start), []))
+            start = float(int(hours or 0) * 3600 + int(minutes) * 60 + int(seconds))
+        # Um horário anterior ao da fala atual não abre outra fala: é texto que por acaso
+        # começa como "10:30 - ...", e virar fala daria trecho com duração negativa.
+        if start is not None and (not raw or start >= raw[-1][1]):
+            raw.append((name.strip(), start, []))
         elif raw:
             raw[-1][2].append(line)
     if not raw:
