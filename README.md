@@ -140,6 +140,11 @@ os testes com modelos reais na GPU são executados separadamente.
 - Soltar qualquer uma das duas encerra a gravação.
 - Se você apertar outra tecla durante a combinação (ex.: Ctrl+Win+Seta), a gravação é descartada.
 - Gravações com menos de 0,4 s são ignoradas.
+- Se preferir não segurar, escolha **Pressionar para ligar e desligar** em
+  **Configurações → Ditado → Modo do atalho do microfone** (`key_mode` / `DITADO_KEY_MODE=toggle`):
+  pressione a combinação uma vez para começar e de novo para transcrever e colar. Digitar no meio
+  não encerra a gravação; outra tecla junto com a pressionada que liga a descarta. A duração
+  máxima continua valendo: depois do corte automático, a próxima pressionada começa outra gravação.
 
 ## Serviço
 
@@ -177,7 +182,8 @@ definidas como `Environment=` no `whisper-ditado-backend.service`, valem como pa
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `DITADO_KEY` | `ctrl+super` | Combinação de "segurar para falar": apelidos `ctrl`, `super`/`win`, `alt`, `shift` (qualquer lado) ou nomes do evdev, unidos por `+` (ex.: `KEY_RIGHTCTRL`, `alt+KEY_SPACE`) |
+| `DITADO_KEY` | `ctrl+super` | Combinação do atalho do microfone: apelidos `ctrl`, `super`/`win`, `alt`, `shift` (qualquer lado) ou nomes do evdev, unidos por `+` (ex.: `KEY_RIGHTCTRL`, `alt+KEY_SPACE`) |
+| `DITADO_KEY_MODE` | `hold` | Modo do atalho do microfone: `hold` (segurar para falar) ou `toggle` (pressionar liga, pressionar de novo encerra) |
 | `DITADO_LANG` | `pt` | Idioma; vazio = detecção automática |
 | `DITADO_MODEL` | `large-v3-turbo` | Modelo do faster-whisper (`large-v3`, `medium`...) |
 | `DITADO_COMPUTE_TYPE` | `float16` | Precisão na GPU (`int8_float16` usa menos VRAM) |
@@ -417,7 +423,7 @@ cd app && pnpm tauri dev                                  # desenvolvimento
 Pressione **Ctrl esquerdo + Shift esquerdo** uma vez para começar a capturar a saída de áudio
 padrão do PC (a pílula aparece na tela) e pressione de novo para encerrar. O Whisper então
 transcreve e cola o texto no campo em foco, como no ditado do microfone (**Ctrl + Super**).
-Ao contrário do microfone, não é preciso segurar. A captura só encerra numa pressionada
+Ao contrário do microfone no modo padrão, não é preciso segurar. A captura só encerra numa pressionada
 limpa da combinação: um atalho como Ctrl+Shift+T de outro programa no meio da captura não a desliga.
 Se outra tecla entrar junto na pressionada que liga, o trecho é descartado. A duração
 máxima do ditado também vale aqui.
