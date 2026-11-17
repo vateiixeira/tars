@@ -28,6 +28,13 @@ describe("maskTime", () => {
   it("editar a hora no meio não junta hora e minutos", () => {
     expect(maskTime("1:30", true)).toBe("1:30");
     expect(maskTime("6:30")).toBe("6:30");
+    expect(maskTime(":30", true)).toBe(":30"); // apagou a hora inteira: os minutos não viram a hora
+    expect(maskTime("0:30")).toBe("0:30");
+  });
+
+  it("ignora espaços no início ao colar", () => {
+    expect(maskTime(" 9:30")).toBe("9:30");
+    expect(maskTime("  1630")).toBe("16:30");
   });
 
   it("ao apagar não recoloca os dois pontos", () => {

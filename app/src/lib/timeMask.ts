@@ -5,10 +5,13 @@
  * Ao apagar, não recoloca os dois pontos, senão o backspace ficaria preso neles.
  */
 export function maskTime(raw: string, deleting = false): string {
-  const typed = /^(\d{1,2})\D+(\d*)/.exec(raw);
+  // Hora vazia antes do separador (a pessoa apagou a hora) fica ":30", que é inválido, em vez
+  // de os minutos virarem a hora.
+  const typed = /^(\d{0,2})\D+(\d*)/.exec(raw.trimStart());
   if (typed) {
     const [, hour, rest] = typed;
     const minutes = rest.slice(0, 2);
+    if (!hour && !minutes) return "";
     return deleting && !minutes ? hour : `${hour}:${minutes}`;
   }
   const digits = raw.replace(/\D/g, "").slice(0, 4);
