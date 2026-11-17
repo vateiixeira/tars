@@ -52,15 +52,33 @@ beforeEach(() => {
 });
 afterEach(() => setStatusStore(null));
 
-function mountCard(t: TaskSuggestion, overrides: Record<string, unknown> = {}) {
+function mountCard(t: TaskSuggestion, overrides: Record<string, unknown> = {}, noAudio = false) {
   const printBlob = vi.fn(async (_m: string, id: string, size: string) => blobOf(`${id}-${size}`));
   installStore({ printBlob, ...overrides });
   const w = mount(TaskCard, {
-    props: { task: t, options: null, missing: [], prints: PRINTS },
+    props: { task: t, options: null, missing: [], prints: PRINTS, noAudio },
     attachTo: document.body,
   });
   return { w, printBlob };
 }
+
+describe("TaskCard evidência", () => {
+  const evidence = [{ start_s: 61, end_s: 80, speaker: "Miguel", text: "Eu pego isso" }];
+
+  it("ouvir o trecho emite play com o intervalo", async () => {
+    const { w } = mountCard(task({ evidence }));
+    await w.get(".evidence .play").trigger("click");
+    expect(w.emitted("play")).toEqual([[61, 80]]);
+    w.unmount();
+  });
+
+  it("sem áudio (transcrição importada) mostra a evidência sem o botão de ouvir", () => {
+    const { w } = mountCard(task({ evidence }), {}, true);
+    expect(w.get(".evidence").text()).toContain("Miguel");
+    expect(w.find(".evidence .play").exists()).toBe(false);
+    w.unmount();
+  });
+});
 
 describe("TaskCard prints", () => {
   it("lista os prints da sugestão e remove um com o x", async () => {

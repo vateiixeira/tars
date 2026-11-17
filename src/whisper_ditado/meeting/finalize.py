@@ -38,7 +38,14 @@ from whisper_ditado.meeting.timeline import (
 from whisper_ditado.meeting.voice_sync import VoiceSync
 from whisper_ditado.meeting.voices import inherit_links, match_speakers
 from whisper_ditado.settings import DIARIZERS, Settings, threshold_key
-from whisper_ditado.store import UNIDENTIFIED_LABEL, Segment, Speaker, Store
+from whisper_ditado.store import (
+    ME_LABEL,
+    PARTICIPANTS_LABEL,
+    UNIDENTIFIED_LABEL,
+    Segment,
+    Speaker,
+    Store,
+)
 from whisper_ditado.transcriber import Word
 
 log = logging.getLogger("ditado")
@@ -49,8 +56,6 @@ FFMPEG = "ffmpeg"
 FFMPEG_TIMEOUT_S = 900.0
 OPUS_BITRATE = "16k"
 
-ME_LABEL = "Você"
-PARTICIPANTS_LABEL = "Participantes"
 NO_DIARIZATION = "no_diarization"
 DIARIZATION_ALERTS = (NO_DIARIZATION, *FALLBACK_ALERTS.values())
 FAIL_PREFIX = "Falha ao processar a reunião"
@@ -72,10 +77,10 @@ StatusCallback = Callable[[str, str], None]
 # -- áudio -------------------------------------------------------------------------
 
 
-def _run_ffmpeg(args: list[str], what: str) -> bytes:
+def _run_ffmpeg(args: list[str], what: str, timeout: float = FFMPEG_TIMEOUT_S) -> bytes:
     proc = subprocess.run(
         [FFMPEG, "-nostdin", "-hide_banner", "-v", "error", *args],
-        capture_output=True, timeout=FFMPEG_TIMEOUT_S, check=False,
+        capture_output=True, timeout=timeout, check=False,
     )
     if proc.returncode != 0:
         detail = proc.stderr.decode("utf-8", "replace").strip().splitlines()
@@ -175,11 +180,16 @@ def _build_speakers(
     voices: list,
     threshold: float | None,
     inherited: dict[str, str] | None = None,
+    me_key: str | None = None,
 ) -> tuple[list[Speaker], dict[str, str]]:
     """Falantes que aparecem nos segmentos e o mapa chave interna -> id do falante.
 
     `inherited` (chave -> voice_id) traz os vínculos que o usuário já tinha na reunião: essas
     chaves ficam com a voz e o nome dela, e o casamento automático só olha o resto.
+
+    `me_key` é a chave do PC que o usuário tinha marcado como "você" (reunião importada, sem
+    microfone): vira "Você", sem voz, mas mantém o embedding. Se o microfone já trouxe um
+    "Você", ela fica como uma pessoa comum.
 
     Embedding sem modelo conhecido (`result.model` vazio) não é gravado nem comparado; sem
     limiar (motor desconhecido) grava os embeddings mas não casa com as vozes salvas.
@@ -192,14 +202,27 @@ def _build_speakers(
         elif seg.speaker not in pc_keys:
             pc_keys.append(seg.speaker)
 
+    if has_me or me_key not in pc_keys:
+        me_key = None
+
+    model = result.model
+    embeddings = result.embeddings if model else {}
+
+    def embedding(key: str) -> tuple[np.ndarray | None, str | None]:
+        emb = embeddings.get(key)
+        return (None, None) if emb is None else (np.asarray(emb, dtype=np.float32), model)
+
     speakers: list[Speaker] = []
     ids: dict[str, str] = {}
     if has_me:
         ids[_ME] = uuid.uuid4().hex
         speakers.append(Speaker(ids[_ME], meeting_id, ME_LABEL, None, True, 0, None))
+    elif me_key is not None:
+        ids[me_key] = uuid.uuid4().hex
+        speakers.append(Speaker(ids[me_key], meeting_id, ME_LABEL, None, True, 0,
+                                *embedding(me_key)))
+        pc_keys.remove(me_key)
 
-    model = result.model
-    embeddings = result.embeddings if model else {}
     names = {voice.id: voice.name for voice in voices}
     inherited = {k: v for k, v in (inherited or {}).items()
                  if k in pc_keys and v in names and k not in (_PARTICIPANTS, _UNIDENTIFIED)}
@@ -222,12 +245,8 @@ def _build_speakers(
             people += 1
             label = f"Pessoa {people}"
         ids[key] = uuid.uuid4().hex
-        emb = embeddings.get(key)
-        speakers.append(Speaker(
-            ids[key], meeting_id, label, voice_id, False, color,
-            None if emb is None else np.asarray(emb, dtype=np.float32),
-            None if emb is None else model,
-        ))
+        speakers.append(Speaker(ids[key], meeting_id, label, voice_id, False, color,
+                                *embedding(key)))
     return speakers, ids
 
 
@@ -250,6 +269,15 @@ def _previous_links(store: Store, meeting_id: str, voices: list) -> dict[str, li
         if voice_id is not None and seg.source == "pc":
             spans.setdefault(voice_id, []).append((seg.start_s, seg.end_s))
     return spans
+
+
+def _previous_me_spans(store: Store, meeting_id: str) -> list[tuple[float, float]]:
+    """Trechos do PC do falante marcado como "você" (o "Você" gravado só fala no microfone)."""
+    me = {sp.id for sp in store.get_speakers(meeting_id) if sp.is_me}
+    if not me:
+        return []
+    return [(seg.start_s, seg.end_s) for seg in store.get_segments(meeting_id)
+            if seg.speaker_id in me and seg.source == "pc"]
 
 
 def _threshold(settings: Settings, engine: str) -> float | None:
@@ -347,8 +375,16 @@ def finalize(
         for seg in drafts:
             if seg.source == "pc" and seg.speaker not in (_PARTICIPANTS, _UNIDENTIFIED):
                 new_spans.setdefault(seg.speaker, []).append((seg.start_s, seg.end_s))
+        # "Você" marcado no PC (reunião importada) passa ao falante novo que coincide com ele
+        # e não herda voz; com microfone, o "Você" é sempre o do microfone.
+        me_key = None
+        me_spans = _previous_me_spans(store, meeting_id)
+        if me_spans and not any(s.speaker == _ME for s in drafts):
+            me_key = next(iter(inherit_links(new_spans, {_ME: me_spans})), None)
+            new_spans.pop(me_key, None)
         inherited = inherit_links(new_spans, _previous_links(store, meeting_id, voices))
-        speakers, ids = _build_speakers(meeting_id, drafts, diarized, voices, threshold, inherited)
+        speakers, ids = _build_speakers(meeting_id, drafts, diarized, voices, threshold, inherited,
+                                        me_key)
         segments = [
             Segment(None, meeting_id, ids[s.speaker], s.source, s.start_s, s.end_s, s.text, s.dictated)
             for s in drafts

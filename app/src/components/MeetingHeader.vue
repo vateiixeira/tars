@@ -168,6 +168,7 @@ defineExpose({ focusMenuButton: () => moreButton.value?.focus() });
           class="people"
           :class="{ expanded: peopleExpanded }"
           :speakers="meeting.speakers"
+          :me-clickable="meeting.origin === 'import_media'"
           @select="(s, e) => emit('selectSpeaker', s, e)"
         />
       </div>

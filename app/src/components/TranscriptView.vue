@@ -18,6 +18,8 @@ const props = defineProps<{
    * não re-renderiza a lista nem refaz a medição das linhas.
    */
   playingId?: number | null;
+  /** Reunião sem áudio (transcrição importada): esconde o "Ouvir este trecho". */
+  noAudio?: boolean;
 }>();
 const emit = defineEmits<{ play: [segment: Segment]; openPrint: [id: string] }>();
 
@@ -162,7 +164,7 @@ onBeforeUnmount(() => observer?.disconnect());
             <span class="am-bubble__who" :style="{ color: r.color }">{{ r.name }}</span>
             <span class="ts">· {{ r.time }}</span>
           </div>
-          <button type="button" class="play am-bubble__play" title="Ouvir este trecho" :aria-label="`Ouvir ${r.name} a partir de ${r.time}`" @click="emit('play', r.seg)"><AppIcon name="play" :size="13" /></button>
+          <button v-if="!noAudio" type="button" class="play am-bubble__play" title="Ouvir este trecho" :aria-label="`Ouvir ${r.name} a partir de ${r.time}`" @click="emit('play', r.seg)"><AppIcon name="play" :size="13" /></button>
           <span class="text">{{ r.seg.text }}<em v-if="r.seg.dictated" class="dictated">(ditado)</em></span>
           <div v-if="r.prints.length" class="prints">
             <button v-for="p in r.prints" :key="p.id" type="button" class="print-badge" :title="`Ver print ${p.label}`" :aria-label="`Ver print ${p.label}`" @click="emit('openPrint', p.id)"><AppIcon name="file" :size="13" />{{ p.label }}</button>

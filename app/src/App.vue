@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref } from "vue";
+import ImportButton from "./components/ImportButton.vue";
 import MeetingList from "./components/MeetingList.vue";
 import RecordButton from "./components/RecordButton.vue";
 import VersionLine from "./components/VersionLine.vue";
@@ -129,6 +130,7 @@ const dictationLabel = computed(() => {
       @settings="openSettings()"
     >
       <RecordButton ref="recordButton" @started="openMeeting" @stopped="openMeeting" />
+      <ImportButton @imported="openMeeting" />
     </TopBar>
     <div class="workspace">
       <aside

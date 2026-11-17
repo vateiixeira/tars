@@ -39,6 +39,7 @@ const paths: Record<string, string> = {
   "user-plus": "M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM20 8v6M23 11h-6",
   keyboard: "M2 6h20v12H2zM6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10",
   wave: "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2",
+  upload: "M12 15V3m-5 5 5-5 5 5M4 15v6h16v-6",
 };
 </script>
 <template>

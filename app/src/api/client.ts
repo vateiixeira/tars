@@ -5,6 +5,8 @@ import type {
   ClaudeModels,
   CreateResult,
   Devices,
+  ImportPreview,
+  ImportRequest,
   IssueOptions,
   JobState,
   MeetingDetail,
@@ -13,6 +15,7 @@ import type {
   PrintMonitor,
   Settings,
   SettingsUpdate,
+  Speaker,
   Status,
   TaskFields,
   TaskSuggestion,
@@ -151,6 +154,10 @@ export function createClient(getInfo: () => Promise<ApiInfo>, fetchFn: typeof fe
     nameSuggestions: (id: string) =>
       json<NameSuggestion[]>("POST", `/meetings/${enc(id)}/name-suggestions`),
 
+    // importação (o backend lê o arquivo direto do disco pelo caminho)
+    inspectImport: (path: string) => json<ImportPreview>("POST", "/imports/inspect", { path }),
+    importFile: (body: ImportRequest) => json<{ meeting_id: string }>("POST", "/imports", body),
+
     // tarefas (criador de issues)
     listTasks: (meetingId: string) => json<TasksPayload>("GET", `/meetings/${enc(meetingId)}/tasks`),
     scanTasks: (meetingId: string, context?: string) =>
@@ -178,6 +185,8 @@ export function createClient(getInfo: () => Promise<ApiInfo>, fetchFn: typeof fe
       json<{ id: string }>("POST", `/speakers/${enc(id)}/merge`, { into_speaker_id: into }),
     enrollSpeaker: (id: string, target: { name: string } | { voice_id: string }) =>
       json<Voice>("POST", `/speakers/${enc(id)}/enroll`, target),
+    /** "Sou eu" (`on`) ou "Não sou eu"; só em reuniões importadas de vídeo ou áudio (409 nas outras). */
+    setSpeakerMe: (id: string, on: boolean) => json<Speaker>("POST", `/speakers/${enc(id)}/me`, { on }),
     listVoices: () => json<Voice[]>("GET", "/voices"),
     renameVoice: (id: string, name: string) => json<Voice>("PATCH", `/voices/${enc(id)}`, { name }),
     deleteVoice: (id: string) => json<{ ok: true }>("DELETE", `/voices/${enc(id)}`),

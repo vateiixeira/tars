@@ -697,3 +697,95 @@ def test_reprocess_without_diarization_does_not_inherit(store, settings):
 
     speakers = store.get_speakers(mid)
     assert [(sp.label, sp.voice_id) for sp in speakers] == [("Participantes", None)]
+
+
+def _imported_meeting(store, *, me: bool):
+    """Reunião `import_media` pronta, só com PC: "Você" (pc em 2-4 s, se `me`) e "Pessoa 1" (6-7 s)."""
+    from whisper_ditado.store import Segment, Speaker
+
+    m = store.create_meeting(STARTED, status="ready", origin="import_media", title="Importada")
+    write_raw(paths.meeting_dir(m.id) / "pc.raw", 20.0, PC_AMP)
+    first = (Speaker("sp-me", m.id, "Você", None, True, 0) if me
+             else Speaker("sp-me", m.id, "Pessoa 2", None, False, 2))
+    store.replace_transcript(m.id, [
+        first,
+        Speaker("sp-p1", m.id, "Pessoa 1", None, False, 1),
+    ], [
+        Segment(None, m.id, "sp-me", "pc", 2.0, 4.0, "sou eu"),
+        Segment(None, m.id, "sp-p1", "pc", 6.0, 7.0, "tchau"),
+    ])
+    return m.id
+
+
+# A fala de B coincide com o "Você" antigo; A e C não.
+_IMPORTED_TURNS = [Turn(0.5, 1.5, "A"), Turn(2.0, 4.0, "B"), Turn(6.0, 7.0, "C")]
+_IMPORTED_WORDS = [w(0.6, "oi", dur=0.8), w(2.2, "sou", dur=1.5), w(6.1, "tchau")]
+
+
+def test_reprocess_keeps_me_on_overlapping_speaker(store, settings):
+    mid = _imported_meeting(store, me=True)
+    e = np.eye(4, dtype=np.float32)
+    # B tem a mesma voz da Ana: "Você" não pode virar a Ana pelo casamento automático
+    store.upsert_voice(Voice(id="v-ana", name="Ana", embeddings={"fake-model": VoiceEmbedding(e[1])}))
+    settings.update({"voice_match_threshold_local": 0.9})
+    result = DiarizationResult(_IMPORTED_TURNS, {"A": e[0], "B": e[1], "C": e[2]})
+
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=_IMPORTED_WORDS),
+                  FakeDiarizer(result), None)
+
+    assert store.get_meeting(mid).status == "ready"
+    speakers = {sp.id: sp for sp in store.get_speakers(mid)}
+    got = [(speakers[s.speaker_id].label, speakers[s.speaker_id].is_me, s.text)
+           for s in store.get_segments(mid)]
+    assert got == [("Pessoa 1", False, "oi"), ("Você", True, "sou"), ("Pessoa 2", False, "tchau")]
+    me = next(sp for sp in speakers.values() if sp.is_me)
+    assert me.voice_id is None and me.color_index == 0
+    np.testing.assert_allclose(me.embedding, e[1])
+    assert me.embedding_model == "fake-model"
+    assert [sp.voice_id for sp in speakers.values()] == [None, None, None]
+
+
+def test_reprocess_without_me_marks_nobody(store, settings):
+    mid = _imported_meeting(store, me=False)
+    result = DiarizationResult(_IMPORTED_TURNS, {})
+
+    fin.reprocess(mid, store, settings, FakeTranscriber(default=_IMPORTED_WORDS),
+                  FakeDiarizer(result), None)
+
+    speakers = store.get_speakers(mid)
+    assert len(speakers) == 3 and not any(sp.is_me for sp in speakers)
+    assert "Você" not in {sp.label for sp in speakers}
+
+
+def test_reprocess_recorded_meeting_keeps_me_on_the_mic(store, settings):
+    mid, _ = new_meeting(store, status="processing")
+    words = {"mic": [w(0.5, "bom", dur=1.5)], "pc": [w(2.2, "sou", dur=1.5)]}
+    result = DiarizationResult([Turn(2.0, 4.0, "B")], {})
+    fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(result), words, None)
+    assert fin._previous_me_spans(store, mid) == []  # "Você" gravado só fala no microfone
+
+    transcriber = FakeTranscriber(sequence=[words["mic"], words["pc"]])  # ordem: mic, pc
+    fin.reprocess(mid, store, settings, transcriber, FakeDiarizer(result), None)
+
+    speakers = {sp.id: sp for sp in store.get_speakers(mid)}
+    got = [(speakers[s.speaker_id].label, speakers[s.speaker_id].is_me, s.source)
+           for s in store.get_segments(mid)]
+    assert got == [("Você", True, "mic"), ("Pessoa 1", False, "pc")]
+
+
+def test_reprocess_prefers_mic_me_over_marked_pc_speaker(store, settings):
+    """Dado estranho: "Você" marcado no PC de uma reunião com microfone. Só o microfone é "Você"."""
+    mid, _ = new_meeting(store, status="processing")
+    words = {"mic": [w(0.5, "bom", dur=1.5)], "pc": [w(2.2, "sou", dur=1.5)]}
+    result = DiarizationResult([Turn(2.0, 4.0, "B")], {})
+    fin.finalize(mid, store, settings, FakeTranscriber(), FakeDiarizer(result), words, None)
+    pc_speaker = next(sp for sp in store.get_speakers(mid) if not sp.is_me)
+    store.set_me(pc_speaker.id, True)
+
+    transcriber = FakeTranscriber(sequence=[words["mic"], words["pc"]])  # ordem: mic, pc
+    fin.reprocess(mid, store, settings, transcriber, FakeDiarizer(result), None)
+
+    speakers = {sp.id: sp for sp in store.get_speakers(mid)}
+    got = [(speakers[s.speaker_id].label, speakers[s.speaker_id].is_me, s.source)
+           for s in store.get_segments(mid)]
+    assert got == [("Você", True, "mic"), ("Pessoa 1", False, "pc")]

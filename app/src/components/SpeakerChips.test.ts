@@ -31,6 +31,15 @@ describe("SpeakerChips", () => {
     expect(event).toBeInstanceOf(MouseEvent);
   });
 
+  it("Você fica clicável com meClickable (reunião importada de vídeo ou áudio)", async () => {
+    const w = mount(SpeakerChips, { props: { speakers, meClickable: true } });
+    const me = w.get('[data-speaker="s1"]');
+    expect(me.element.tagName).toBe("BUTTON");
+    expect(me.classes()).not.toContain("unknown");
+    await me.trigger("click");
+    expect((w.emitted("select")![0] as [Speaker])[0].id).toBe("s1");
+  });
+
   it("does not make Você clickable", async () => {
     const w = mount(SpeakerChips, { props: { speakers } });
     const me = w.get('[data-speaker="s1"]');

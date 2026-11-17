@@ -35,7 +35,7 @@ def test_migrations_create_schema_and_file_is_private(tmp_path):
     path = tmp_path / "t.db"
     s = Store(path)
     assert path.stat().st_mode & 0o777 == 0o600
-    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 9
     names = {r[0] for r in s._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"meetings", "speakers", "segments", "summaries", "voices", "alerts",
             "dictation_spans", "settings", "meeting_jobs", "task_suggestions", "dictation_samples",
@@ -43,7 +43,7 @@ def test_migrations_create_schema_and_file_is_private(tmp_path):
     s.close()
     # reabrir é idempotente
     s2 = Store(path)
-    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert s2._conn.execute("PRAGMA user_version").fetchone()[0] == 9
     s2.close()
 
 
@@ -319,7 +319,7 @@ def test_migration_v7_tags_existing_embeddings_and_settings(tmp_path):
 
     s = Store(path)
     try:
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 9
         v1 = s.get_voice("v1")
         assert set(v1.embeddings) == {"pyannote-community-1"}
         emb = v1.embeddings["pyannote-community-1"]
@@ -369,7 +369,7 @@ def test_migration_v7_from_main_v6_keeps_prints(tmp_path):
 
     s = Store(path)
     try:
-        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert s._conn.execute("PRAGMA user_version").fetchone()[0] == 9
         rows = s._conn.execute("SELECT voice_id, model, n_samples FROM voice_embeddings").fetchall()
         assert [tuple(r) for r in rows] == [("v1", "pyannote-community-1", 3)]
         np.testing.assert_array_equal(s.get_voice("v1").embeddings["pyannote-community-1"].vector, vec)
@@ -435,3 +435,34 @@ def test_archive_hides_meeting_from_main_list(store):
     assert store.get_meeting(a.id).archived_at is None
     assert [x.id for x in store.list_meetings()] == [b.id, a.id]
     assert store.count_archived() == 0
+
+
+def test_meeting_origin_defaults_to_recorded(store):
+    m = store.create_meeting(datetime(2026, 11, 11, 16, 30))
+    assert store.get_meeting(m.id).origin == "recorded"
+
+
+def test_create_imported_meeting(store):
+    m = store.create_meeting(datetime(2026, 11, 11, 16, 30), status="processing",
+                             origin="import_media", title="Awake")
+    got = store.get_meeting(m.id)
+    assert (got.status, got.origin, got.title, got.title_auto) == (
+        "processing", "import_media", "Awake", False)
+
+
+def test_set_me_marks_one_speaker_and_frees_label(store):
+    m = store.create_meeting(T0)
+    mid = m.id
+    store.upsert_voice(Voice(id="v1", name="Ana", created_at=T0, updated_at=T0))
+    store.replace_transcript(
+        mid,
+        [_spk(mid, "sp-a", "Pessoa 1", voice_id="v1"), _spk(mid, "sp-b", "Pessoa 2")],
+        [_seg(mid, "sp-a", "oi"), _seg(mid, "sp-b", "olá", 1.0, 2.0)],
+    )
+    me = store.set_me("sp-a", True)
+    assert (me.is_me, me.label, me.voice_id) == (True, "Você", None)
+    store.set_me("sp-b", True)  # troca: sp-a deixa de ser você
+    a = next(s for s in store.get_speakers(mid) if s.id == "sp-a")
+    assert (a.is_me, a.label) == (False, "Pessoa 3")  # próximo número livre (1 e 2 já usados)
+    off = store.set_me("sp-b", False)
+    assert (off.is_me, off.label) == (False, "Pessoa 4")

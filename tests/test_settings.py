@@ -49,6 +49,7 @@ def test_defaults_match_production():
     assert DEFAULTS["max_sec"] == 300.0 and DEFAULTS["min_sec"] == 0.4
     assert DEFAULTS["mic_device"] is None and DEFAULTS["hf_token"] is None
     assert DEFAULTS["meeting_model_idle_sec"] == 120
+    assert DEFAULTS["my_name"] == ""
 
 
 @pytest.mark.parametrize("value", [-1, 86401, float("inf"), float("nan"), "120", True])
@@ -585,3 +586,7 @@ def test_mic_key_mode_env_is_validated(settings, monkeypatch):
     assert settings.get("key_mode") == "toggle"
     monkeypatch.setenv("DITADO_KEY_MODE", "invalido")
     assert settings.get("key_mode") == "hold"
+
+
+def test_my_name_defaults_to_empty(settings):
+    assert settings.get("my_name") == ""

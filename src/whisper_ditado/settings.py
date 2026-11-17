@@ -37,6 +37,7 @@ DIARIZERS = ("local", "pyannote")
 DEFAULT_LOCAL_VOICE_THRESHOLD = 0.62  # calibrado com as vozes ligadas nas reuniões gravadas
 
 DEFAULTS: dict[str, Any] = {
+    "my_name": "",
     "dictation_enabled": True,
     "dictation_evaluation_enabled": False,
     "key": "ctrl+super",

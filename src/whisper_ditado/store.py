@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -28,6 +29,9 @@ from whisper_ditado.issues.prompts import KIND_LABELS, PRIORITIES
 from whisper_ditado.issues.legacy import migration_sql
 
 UNIDENTIFIED_LABEL = "Não identificado"
+ME_LABEL = "Você"
+PARTICIPANTS_LABEL = "Participantes"
+PERSON_LABEL = "Pessoa"
 
 _SCHEMA_V1 = """
 CREATE TABLE meetings (
@@ -194,10 +198,13 @@ ALTER TABLE meetings ADD COLUMN archived_at TEXT;
 CREATE INDEX idx_meetings_archived ON meetings(archived_at);
 """
 
+# Origem da reunião: gravada no app ou importada (mídia/transcrição).
+_SCHEMA_V9 = "ALTER TABLE meetings ADD COLUMN origin TEXT NOT NULL DEFAULT 'recorded';"
+
 # Índice = versão destino (`PRAGMA user_version` após aplicar).
 _MIGRATIONS = [
     _SCHEMA_V1, _SCHEMA_V2, migration_sql, _SCHEMA_V4, _SCHEMA_V5, _SCHEMA_V6, _SCHEMA_V7,
-    _SCHEMA_V8,
+    _SCHEMA_V8, _SCHEMA_V9,
 ]
 
 
@@ -212,6 +219,7 @@ class Meeting:
     error: str | None = None
     followed_app: str | None = None
     archived_at: datetime | None = None
+    origin: str = "recorded"
 
 
 @dataclass
@@ -222,6 +230,7 @@ class MeetingSummary:
     duration_s: float
     speakers_count: int
     status: str
+    origin: str = "recorded"
 
 
 @dataclass
@@ -390,6 +399,7 @@ _MEETING_FIELDS = {
     "error": None,
     "followed_app": None,
     "archived_at": _iso,
+    "origin": None,
 }
 _SPEAKER_FIELDS = {
     "label": None,
@@ -459,18 +469,22 @@ class Store:
             id=row["id"], title=row["title"], title_auto=bool(row["title_auto"]),
             started_at=_dt(row["started_at"]), ended_at=_dt(row["ended_at"]),
             status=row["status"], error=row["error"], followed_app=row["followed_app"],
-            archived_at=_dt(row["archived_at"]),
+            archived_at=_dt(row["archived_at"]), origin=row["origin"],
         )
 
-    def create_meeting(self, started_at: datetime) -> Meeting:
+    def create_meeting(
+        self, started_at: datetime, *, status: str = "recording",
+        origin: str = "recorded", title: str | None = None,
+    ) -> Meeting:
         mid = uuid.uuid4().hex
         with self._tx() as c:
             c.execute(
-                "INSERT INTO meetings(id, title_auto, started_at, status) VALUES (?,0,?,'recording')",
-                (mid, started_at.isoformat()),
+                "INSERT INTO meetings(id, title, title_auto, started_at, status, origin)"
+                " VALUES (?,?,0,?,?,?)",
+                (mid, title, started_at.isoformat(), status, origin),
             )
-        return Meeting(id=mid, title=None, title_auto=False, started_at=started_at,
-                       ended_at=None, status="recording")
+        return Meeting(id=mid, title=title, title_auto=False, started_at=started_at,
+                       ended_at=None, status=status, origin=origin)
 
     def get_meeting(self, meeting_id: str) -> Meeting | None:
         with self._lock:
@@ -482,7 +496,7 @@ class Store:
     ) -> list[MeetingSummary]:
         """Reuniões mais recentes primeiro; `archived=None` traz arquivadas e não arquivadas."""
         sql = """
-            SELECT m.id, m.title, m.started_at, m.status, m.ended_at,
+            SELECT m.id, m.title, m.started_at, m.status, m.ended_at, m.origin,
                    (SELECT COUNT(*) FROM speakers sp WHERE sp.meeting_id = m.id
                     AND NOT (COALESCE(sp.label, '') = ? AND sp.voice_id IS NULL AND sp.is_me = 0))
                        AS speakers_count,
@@ -512,7 +526,7 @@ class Store:
             duration = (ended - started).total_seconds() if ended else float(r["last_end"])
             out.append(MeetingSummary(
                 id=r["id"], title=r["title"], started_at=started, duration_s=duration,
-                speakers_count=r["speakers_count"], status=r["status"],
+                speakers_count=r["speakers_count"], status=r["status"], origin=r["origin"],
             ))
         return out
 
@@ -647,6 +661,35 @@ class Store:
 
     def update_speaker(self, speaker_id: str, **fields) -> None:
         self._update("speakers", speaker_id, _SPEAKER_FIELDS, fields)
+
+    def set_me(self, speaker_id: str, on: bool) -> Speaker:
+        """Marca (ou desmarca) o falante como "você", único por reunião.
+
+        Quem deixa de ser "você" ganha o próximo "Pessoa N" livre da reunião.
+        """
+        with self._tx() as c:
+            row = c.execute("SELECT * FROM speakers WHERE id=?", (speaker_id,)).fetchone()
+            if row is None:
+                raise KeyError(speaker_id)
+            meeting_id = row["meeting_id"]
+            labels = [r["label"] for r in c.execute(
+                "SELECT label FROM speakers WHERE meeting_id=?", (meeting_id,))]
+            used = [int(m.group(1)) for lb in labels if lb
+                    for m in [re.fullmatch(rf"{PERSON_LABEL} (\d+)", lb)] if m]
+            free = f"{PERSON_LABEL} {max(used, default=0) + 1}"
+            if on:
+                c.execute(
+                    "UPDATE speakers SET is_me=0, label=? WHERE meeting_id=? AND is_me=1 AND id<>?",
+                    (free, meeting_id, speaker_id),
+                )
+                c.execute(
+                    "UPDATE speakers SET is_me=1, label=?, voice_id=NULL WHERE id=?",
+                    (ME_LABEL, speaker_id),
+                )
+            else:
+                c.execute("UPDATE speakers SET is_me=0, label=? WHERE id=?", (free, speaker_id))
+            row = c.execute("SELECT * FROM speakers WHERE id=?", (speaker_id,)).fetchone()
+        return self._speaker(row)
 
     def merge_speakers(self, src_id: str, dst_id: str) -> None:
         """Move os segmentos de `src` para `dst` e apaga `src` (mesma reunião)."""

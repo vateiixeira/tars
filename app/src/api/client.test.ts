@@ -44,7 +44,7 @@ describe("client", () => {
   it("client sends bearer token and parses json", async () => {
     const fetchFn = vi.fn(async () =>
       jsonResponse([{ id: "m1", title: "Daily", started_at: "2026-10-19T10:00:00",
-                      duration_s: 60, speakers_count: 2, status: "ready" }]),
+                      duration_s: 60, speakers_count: 2, status: "ready", origin: "recorded" }]),
     );
     const client = createClient(async () => ({ port: 47399, token: "tok" }), fetchFn);
 
@@ -167,6 +167,30 @@ describe("client", () => {
       expect([r.init.method, r.url, r.init.body]).toEqual(["GET", "/claude/models", undefined]);
       r = await call((c) => c.refreshClaudeModels());
       expect([r.init.method, r.url, r.init.body]).toEqual(["POST", "/claude/models/refresh", undefined]);
+    });
+
+    it("importação: inspectImport, importFile e setSpeakerMe", async () => {
+      const preview = {
+        kind: "transcript", title: "Daily", date: "2026-11-11", time: null, duration_s: 60,
+        people: ["Ana"], my_name_match: null,
+      };
+      let r = await call((c) => c.inspectImport("/tmp/a b.txt"), preview);
+      expect([r.init.method, r.url, JSON.parse(r.init.body as string)]).toEqual([
+        "POST", "/imports/inspect", { path: "/tmp/a b.txt" },
+      ]);
+      expect(r.result).toEqual(preview);
+      const body = { path: "/tmp/a.txt", title: "Daily", started_at: "2026-11-11T16:30", me: null };
+      r = await call((c) => c.importFile(body), { meeting_id: "m9" });
+      expect([r.init.method, r.url, JSON.parse(r.init.body as string)]).toEqual(["POST", "/imports", body]);
+      expect(r.result).toEqual({ meeting_id: "m9" });
+      const speaker = { id: "s/2", label: "Você", voice_id: null, is_me: true, color_index: 1 };
+      r = await call((c) => c.setSpeakerMe("s/2", true), speaker);
+      expect([r.init.method, r.url, JSON.parse(r.init.body as string)]).toEqual([
+        "POST", "/speakers/s%2F2/me", { on: true },
+      ]);
+      expect(r.result).toEqual(speaker);
+      r = await call((c) => c.setSpeakerMe("s2", false), speaker);
+      expect(JSON.parse(r.init.body as string)).toEqual({ on: false });
     });
   });
 });
