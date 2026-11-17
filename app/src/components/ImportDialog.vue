@@ -84,7 +84,9 @@ function onTimeInput(ev: Event): void {
   const el = ev.target as HTMLInputElement;
   const deleting = (ev as InputEvent).inputType?.startsWith("delete") ?? false;
   time.value = maskTime(el.value, deleting);
-  el.value = time.value; // o valor mascarado pode ser igual ao anterior: força a atualização
+  // O valor mascarado pode ser igual ao anterior: força a atualização. Só quando muda, para
+  // não jogar o cursor para o fim ao editar no meio.
+  if (el.value !== time.value) el.value = time.value;
 }
 
 const isoDate = computed(() => parseDate(date.value));

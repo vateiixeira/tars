@@ -16,9 +16,24 @@ describe("maskTime", () => {
     expect(maskTime("ab")).toBe("");
   });
 
+  it("aceita a hora de um dígito com os dois pontos digitados ou colados", () => {
+    expect(maskTime("9:")).toBe("9:");
+    expect(maskTime("9:3")).toBe("9:3");
+    expect(maskTime("9:30")).toBe("9:30");
+    expect(maskTime("9h30")).toBe("9:30");
+    expect(maskTime("16::")).toBe("16:");
+    expect(maskTime("9:305")).toBe("9:30");
+  });
+
+  it("editar a hora no meio não junta hora e minutos", () => {
+    expect(maskTime("1:30", true)).toBe("1:30");
+    expect(maskTime("6:30")).toBe("6:30");
+  });
+
   it("ao apagar não recoloca os dois pontos", () => {
     expect(maskTime("16", true)).toBe("16");
     expect(maskTime("16:", true)).toBe("16");
+    expect(maskTime("9:", true)).toBe("9");
     expect(maskTime("1", true)).toBe("1");
   });
 });

@@ -88,6 +88,10 @@ describe("ImportDialog", () => {
     await w.get("#import-time").setValue("1630"); // só os números: a máscara põe os dois pontos
     expect(w.get<HTMLInputElement>("#import-time").element.value).toBe("16:30");
     expect(btn("Importar")!.attributes("disabled")).toBeUndefined();
+    await w.get("#import-time").setValue("9:30"); // hora de um dígito com os dois pontos digitados
+    expect(w.get<HTMLInputElement>("#import-time").element.value).toBe("9:30");
+    expect(btn("Importar")!.attributes("disabled")).toBeUndefined();
+    await w.get("#import-time").setValue("16:30");
     await w.findAll('input[type="radio"]')[1].setValue(true);
     await btn("Importar")!.trigger("click");
     await flushPromises();
